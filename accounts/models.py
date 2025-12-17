@@ -2,14 +2,14 @@ from django.conf import settings
 from django.db import models
 # from django.contrib.auth.models import 
 from enum import Enum
-
-# from django.db import models
 from django.contrib.auth.models import User
 
 
 class farm_emp_details(models.Model):
     class Meta:
         db_table='team_farm"."farm_employee_details'
+        verbose_name = "Farm Employee "
+        verbose_name_plural = "Farm Employees"
         
     class Role(Enum):
         Employee= "Employee"
@@ -22,18 +22,20 @@ class farm_emp_details(models.Model):
         Tech = "Tech"
         none="None"
             
-    emp_id=models.IntegerField(primary_key=True,null=False)
-    emp_name=models.CharField(max_length=50,null=False)
-    part_of=models.CharField(max_length=20,choices=[(r.value, r.name.title()) for r in Team],null=False)
+    Emp_id=models.IntegerField(primary_key=True,null=False)
+    Emp_name=models.CharField(max_length=50,null=False)
+    Part_of=models.CharField(max_length=20,choices=[(r.value, r.name.title()) for r in Team],null=False)
     role=models.CharField(max_length=20,choices=[(r.value, r.name.title()) for r in Role],null=False)
-    designation=models.CharField(max_length=50,null=True)
-    email=models.CharField(max_length=50)
-    file=models.FileField()
+    Designation=models.CharField(max_length=50,null=True)
+    Email=models.CharField(max_length=50)
+    File=models.FileField()
 
 
 class infra_emp_details(models.Model):
     class Meta:
         db_table='team_infra"."infra_employee_details'
+        verbose_name = "Infra Employee "
+        verbose_name_plural = "Infra Employees"
         
     class Role(Enum):
         Employee= "Employee"
@@ -46,18 +48,20 @@ class infra_emp_details(models.Model):
         Tech = "Tech"
         none="None"
         
-    emp_id=models.IntegerField(primary_key=True,null=False)
-    emp_name=models.CharField(max_length=50,null=False)
-    part_of=models.CharField(max_length=20,choices=[(r.value, r.name.title()) for r in Team],default=Team.none.value)
+    Emp_id=models.IntegerField(primary_key=True,null=False)
+    Emp_name=models.CharField(max_length=50,null=False)
+    Part_of=models.CharField(max_length=20,choices=[(r.value, r.name.title()) for r in Team],default=Team.none.value)
     role=models.CharField(max_length=20,choices=[(r.value, r.name.title()) for r in Role],default=Role.none.value)
-    designation=models.CharField(max_length=50,null=True)
-    email=models.CharField(max_length=50)
-    file=models.FileField()
+    Designation=models.CharField(max_length=50,null=True)
+    Email=models.CharField(max_length=50)
+    File=models.FileField()
     
     
 class team_manage(models.Model):
     class Meta:
         db_table='team_management"."management_team'
+        verbose_name = "Management Team"
+        verbose_name_plural = "Management Teams"
         
     class Role(Enum):
         Admin = "Admin"
@@ -73,16 +77,29 @@ class team_manage(models.Model):
 # from django.db import models
 # from django.contrib.auth.models import User
 
+
 class Profile(models.Model):
     ROLE_CHOICES = (
         ('admin', 'Admin'),
         ('employee', 'Employee'),
         ('MD','MD'),
-        ('TeamLead','TeamLead')
+        ('TeamLead','TeamLead'),
+        ('Inter','Intern')
     )
 
-    username= models.ForeignKey(User, on_delete=models.CASCADE,primary_key=True,db_column="username",to_field="username",related_name="accounts_profile")
-    role = models.CharField(max_length=10, choices=ROLE_CHOICES)
+    Emp_id= models.ForeignKey(User,verbose_name="emp_id", on_delete=models.CASCADE,primary_key=True,db_column="emp_id",to_field="username",related_name="accounts_profile")
+    role= models.CharField(verbose_name="emp_role",max_length=10, choices=ROLE_CHOICES,null=True)
+    Designation=models.CharField(verbose_name="emp_designation",max_length=50,null=True)
+    Brach= models.CharField(verbose_name="emp_branch",max_length=50,null=True)
+    Name=models.CharField(verbose_name="emp_name",max_length=50,null=True)
+    Email_id=models.EmailField(verbose_name="emp_email",max_length=254,null=True)
+    Date=models.DateField(verbose_name="date",auto_now=False, auto_now_add=False,null=True)
+    Photo_link=models.ImageField(verbose_name="image", upload_to=None, height_field=None, width_field=None, max_length=None,null=True)
+    
+    class Meta:
+        verbose_name = "Employee Profile"
+        verbose_name_plural = "Employee Profiles"
+    
 
     def __str__(self):
         return f"{self.user.username} - {self.role}"
