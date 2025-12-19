@@ -9,4 +9,6 @@ urlpatterns = [
     path('logout/', views.user_logout, name='logout'),
     path('admin/updateProfile/', views.update_profile, name='update_profile'),
     path('admin/createEmployeeLogin/', views.create_employee_login, name='create_employee'),
+    path('admin/employee/dashboard/<str:username>/', views.admin_employee_dashboard_view, name='employee_details'),
 ]
+

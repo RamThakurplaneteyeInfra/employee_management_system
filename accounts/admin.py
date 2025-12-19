@@ -5,4 +5,3 @@ admin.register(Profile)
 admin.register(User)
 
 # Register your models here.
-print("hello")

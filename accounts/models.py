@@ -84,17 +84,18 @@ class Profile(models.Model):
         ('employee', 'Employee'),
         ('MD','MD'),
         ('TeamLead','TeamLead'),
-        ('Inter','Intern')
+        ('Intern','Intern')
     )
 
-    Emp_id= models.ForeignKey(User,verbose_name="emp_id", on_delete=models.CASCADE,primary_key=True,db_column="emp_id",to_field="username",related_name="accounts_profile")
-    role= models.CharField(verbose_name="emp_role",max_length=10, choices=ROLE_CHOICES,null=True)
+    Employee_id= models.OneToOneField(User,verbose_name="emp_id", on_delete=models.CASCADE,primary_key=True,db_column="Employee_id",to_field="username",related_name="accounts_profile")
+    Role= models.CharField(verbose_name="emp_role",max_length=10, choices=ROLE_CHOICES,null=True)
     Designation=models.CharField(verbose_name="emp_designation",max_length=50,null=True)
-    Brach= models.CharField(verbose_name="emp_branch",max_length=50,null=True)
-    Name=models.CharField(verbose_name="emp_name",max_length=50,null=True)
-    Email_id=models.EmailField(verbose_name="emp_email",max_length=254,null=True)
-    Date=models.DateField(verbose_name="date",auto_now=False, auto_now_add=False,null=True)
-    Photo_link=models.ImageField(verbose_name="image", upload_to=None, height_field=None, width_field=None, max_length=None,null=True)
+    Branch= models.CharField(verbose_name="emp_branch",max_length=50,null=True)
+    Name=models.CharField(verbose_name="emp_full_name",max_length=50,null=True)
+    Email_id=models.EmailField(verbose_name="emp_email_id",max_length=254,null=True)
+    Date_of_birth=models.DateField(verbose_name="emp_date_of_birth",auto_now=False, auto_now_add=False,null=True)
+    Photo_link=models.ImageField(verbose_name="emp_image", upload_to="profile_images/", height_field=None, width_field=None, max_length=None,null=True,blank=True)
+    Date_of_join=models.DateField(verbose_name="emp_date_of_joining",auto_now=False, auto_now_add=False,null=True)
     
     class Meta:
         verbose_name = "Employee Profile"
@@ -102,7 +103,7 @@ class Profile(models.Model):
     
 
     def __str__(self):
-        return f"{self.user.username} - {self.role}"
+        return f"{self.Employee_id.username} - {self.Role}"
 
 
 
