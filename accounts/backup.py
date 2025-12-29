@@ -64,7 +64,7 @@
 #     # password=models.CharField(max_length=50)
 #     email=models.CharField(max_length=50)
 #     file=models.FileField()
-    
+
     
         # Infra_emp_details   
 # class infra_emp_details(models.Model):
@@ -90,8 +90,7 @@
 #     designation=models.CharField(max_length=50,null=True)
 #     email=models.CharField(max_length=50)
 #     file=models.FileField()
-    
-    
+
         # Team management table
 # class team_manage(models.Model):
 #     class Meta:
@@ -109,5 +108,31 @@
 #     email=models.CharField(max_length=50)
 #     file=models.FileField()
 
-    # objects = EmployeeManager()
-    # USERNAME_FIELD = 'username'
+#     objects = EmployeeManager()
+#     USERNAME_FIELD = 'username'
+
+#     class Role(Enum):
+#         Employee= "Employee"
+#         Intern= "Intern"
+#         Team_Lead="Team_Lead"
+#         none="None"
+
+#     class Team(Enum):
+#         Core = "Core"
+#         Tech = "Tech"
+#         none="None"
+
+
+# class Roles(Enum):
+#         Admin = "Admin"
+#         Hr="Hr"
+#         MD= "MD"
+#         Employee="Employee"
+#         Intern="Intern"
+#         TeamLead="TeamLead"
+#         other="others"
+
+#  class Role(Enum):
+#         Admin = "Admin"
+#         MD= "MD"
+#         none="None"
