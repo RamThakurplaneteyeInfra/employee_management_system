@@ -1,21 +1,9 @@
-# from django.contrib.auth.hashers import get_hasher
-from accounts.filters import *
-from django.http import HttpResponse
-from django.http.request import HttpRequest
-from django.contrib.auth import authenticate, login,logout
-from django.shortcuts import render, redirect
-from .models import Profile,User,Roles,Designation,Branch
-from django.contrib.auth.decorators import login_required
-from django.views.decorators.csrf import csrf_exempt,csrf_protect
-import json
-import os
-from settings import BASE_DIR
-from rest_framework import status
-from django.http.response import JsonResponse
-from .snippet import admin_required
+from accounts.RequiredImports import *
 
 # # # # # #  baseurl="http://localhost:8000" # # # # # # # # # # # # 
 
+# a get method for home page
+# endpoint-{{baseurl}}/
 def home(request: HttpRequest):
     # return JsonResponse({"messege":"You are at Accounts section"})
     # return redirect("/accounts/login")
@@ -112,8 +100,7 @@ def create_employee_login(request: HttpRequest):
 #Get a view of all employees/users present in the record. 
 @login_required
 def get_all_employees(request: HttpRequest):
-    role=get_user_role(user=request.user)
-    if request.user.is_superuser or role=="MD":
+        role=get_user_role(user=request.user)
         profile_data=Profile.objects.filter().select_related("Role","Designation","Branch")
         profile_data=[{"Employee_id":pd.Employee_id.username,
                       "Name":pd.Name,
@@ -123,17 +110,16 @@ def get_all_employees(request: HttpRequest):
                       "Date_of_birth":pd.Date_of_birth,
                       "Date_of_join":pd.Date_of_join,
                       "Email_id":pd.Email_id,
-                    #   "Photo_link":pd.Photo_link.file
+                      "Photo_link":pd.Photo_link
                         } for pd in profile_data if pd.Role.role_name!="MD"]
-        # .values("Employee_id","Email_id","Designation","Date_of_birth","Date_of_join","Branch","Name","Photo_link","Role")
         return  JsonResponse(profile_data,safe=False)
-    else:
-        return JsonResponse({"message":"Unauthorised access"},status=404)
 
 # get the session data of a logged_in user.
 @login_required
-@admin_required
 def get_session_data(request: HttpRequest):
+    verify_method=verifyGet(request)
+    if verify_method:
+        return verify_method
     if not request.user:
         return JsonResponse({"messege":"login credentials required"},status=status.HTTP_200_OK)
     else:
@@ -154,7 +140,6 @@ def user_login(request:HttpRequest):
             data=json.loads(request.body)
             u= data.get('username')
             p = data.get('password')
-        
     # for other types of body content 
         else:
             data=request.POST
@@ -162,7 +147,7 @@ def user_login(request:HttpRequest):
             p=data.get('password')
     else: 
         return verify_method
-            
+    
     try:
         if not u or not p:
             return JsonResponse({"message":"username or password is missing"},status=status.HTTP_204_NO_CONTENT)

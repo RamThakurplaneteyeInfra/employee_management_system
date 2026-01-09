@@ -57,7 +57,9 @@ INSTALLED_APPS = [
     "rest_framework",
     "rest_framework.authtoken",  # optional
     "accounts",
-    "task_management"
+    "task_management",
+    "Messaging",
+    # "channels"
     # 'accounts.apps.AccountsConfig',
 ]
 
@@ -90,6 +92,15 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = 'ems.wsgi.application'
+ASGI_APPLICATION = 'project_name.asgi.application'
+
+CHANNEL_LAYERS = {
+    "default": {
+        "BACKEND": "channels_redis.core.RedisChannelLayer",
+        "CONFIG": {"hosts": [("127.0.0.1", 6379)]},
+    },
+}
+
 
 
 # Database
@@ -104,7 +115,7 @@ DATABASES =  {
         "HOST": os.getenv("POSTGRES_HOST"),
         "PORT": os.getenv("POSTGRES_PORT"),
         "OPTIONS":{
-            'options':'-c search_path=task_management,login_details,team_farm,team-infra,team_interns,team_management,public'
+            'options':'-c search_path=messaging,task_management,login_details,team_farm,team-infra,team_interns,team_management,public'
         }
     }
 }
@@ -140,7 +151,7 @@ TIME_ZONE = 'UTC'
 
 USE_I18N = True
 
-USE_TZ = True
+# USE_TZ = True
 
 # AUTH_USER_MODEL="accounts.Profile"
 # Static files (CSS, JavaScript, Images)

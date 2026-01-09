@@ -1,4 +1,4 @@
-from django.urls import path
+from ems.urlImports import *
 from . import views
 
 sort_urls=[path("getBranch/",views.get_branches,name="sort"),

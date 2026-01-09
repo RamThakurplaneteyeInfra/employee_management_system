@@ -1,17 +1,6 @@
-from django.contrib.auth.decorators import login_required
-from django.http import JsonResponse
-from task_management.filters import *
-from accounts.filters import *
-from django.contrib.auth.models import User
+from .filters import *
 from .models import *
-from rest_framework import status
-from accounts.models import *
-from django.db.models import Q
-from django.http import HttpRequest,HttpResponse,Http404
-import json
-from django.views.decorators.csrf import csrf_exempt
-from django.shortcuts import get_object_or_404
-from django.core.exceptions import PermissionDenied
+from accounts.RequiredImports import *
 # # # # # #  baseurl="http://localhost:8000" # # # # # # # # # # # # 
 
 # Lands on the Home page.applicable method-"GET"
@@ -173,7 +162,8 @@ def delete_task(request: HttpRequest,task_id:int):
     try:
         user = request.user
         task=get_task_object(task_id=task_id)
-        if request.user!=task.created_by:
+        role=get_user_role(request.user)
+        if request.user!=task.created_by and (isinstance(role,str) and (role!="MD" and role!="TeamLead")):
             raise PermissionDenied("Not allowed")
     except PermissionDenied:
         return JsonResponse({"error": "You are not authorised to delete the task"}, status=status.HTTP_403_FORBIDDEN)
@@ -229,14 +219,16 @@ def get_task_messages(request: HttpRequest, task_id:int):
         except PermissionDenied:
             return JsonResponse({"message":"you are not authorised to accessed this task conversation"},status=status.HTTP_403_FORBIDDEN)
         else:
-            messages = task.messages.select_related("sender").order_by("-created_at")
+            messages= task.messages.select_related("sender").order_by("-created_at")
+            messages.update(seen=True)
 
         data = [
             {   
                 "sender": m.sender.username,
                 "message": m.message,
                 "date":m.created_at.strftime("%d/%m/%y"),
-                "time": m.created_at.strftime("%H:%M")
+                "time": m.created_at.strftime("%H:%M"),
+                "seen":m.seen
             }
             for m in messages
         ]
