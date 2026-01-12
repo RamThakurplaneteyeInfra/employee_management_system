@@ -1,6 +1,6 @@
 from django.contrib.auth.models import User
 from .models import GroupMembers,GroupChats
-from django.http.response import JsonResponse
+from accounts.RequiredImports import *
 
 def add_participant_to_groupMembers(group_chat:GroupChats,participant:User):
     try:

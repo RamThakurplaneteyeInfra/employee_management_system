@@ -1,8 +1,20 @@
 from django.db import models
 from django.contrib.auth.models import User
+import random
+import string
+
+def generate_chat_id(length=8):
+    chat_id="C"
+    chars = string.digits
+    return chat_id+"".join(random.choices(chars, k=length))
+
+def generate_group_id(length=5):
+    chat_id="G"
+    chars = string.digits
+    return chat_id+"".join(random.choices(chars, k=length))
 
 class GroupChats(models.Model):
-    group_id=models.AutoField(verbose_name="group_id",auto_created=True,primary_key=True)
+    group_id=models.CharField(verbose_name="group_id",primary_key=True)
     group_name = models.CharField(max_length=100, blank=True,db_column="group_name",unique=True)
     description=models.TextField(max_length=200,null=True,verbose_name="description",db_column="description_of_group")
     participants=models.SmallIntegerField(default=1)
@@ -46,7 +58,7 @@ class GroupMembers(models.Model):
         ordering=["participant","unseenmessages"]
         
 class IndividualChats(models.Model):
-    chat_id=models.AutoField(verbose_name="chat_id",auto_created=True,primary_key=True)
+    chat_id=models.CharField(verbose_name="chat_id",primary_key=True)
     participant1=models.ForeignKey(User,to_field="username",verbose_name="participant1",db_column="user1",null=True,on_delete=models.SET_NULL,related_name="as_participant1")
     participant2=models.ForeignKey(User,to_field="username",verbose_name="participant2",db_column="user2",null=True,on_delete=models.SET_NULL,related_name="as_participant2")
     created_at = models.DateTimeField(auto_now_add=True)
@@ -78,11 +90,15 @@ class IndividualChats(models.Model):
         if user1.id > user2.id:
             user1, user2 = user2, user1
         
-        chat, created = cls.objects.get_or_create(
-            participant1=user1,
-            participant2=user2
-        )
-        return chat, created
+        chat_id=generate_chat_id()
+        already_created=False
+        try:
+            obj=cls.objects.get(participant1=user1,participant2=user2)
+            already_created=True
+        except:
+            obj=cls.objects.create(chat_id=chat_id,participant1=user1,participant2=user2)
+        finally:
+            return obj,already_created
         
 class GroupMessages(models.Model):
     group= models.ForeignKey(GroupChats, on_delete=models.CASCADE, related_name="group_messages")
@@ -125,6 +141,7 @@ class IndividualMessages(models.Model):
     updated_at=models.DateTimeField(auto_now=True,blank=True)
     created_at=models.DateTimeField(auto_now_add=True)
     seen=models.BooleanField(default=False)
+    content=models.TextField()
     
     class Meta:
         db_table='Chats'

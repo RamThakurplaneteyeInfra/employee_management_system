@@ -110,7 +110,7 @@ def get_all_employees(request: HttpRequest):
                       "Date_of_birth":pd.Date_of_birth,
                       "Date_of_join":pd.Date_of_join,
                       "Email_id":pd.Email_id,
-                      "Photo_link":pd.Photo_link
+                      "Photo_link":pd.Photo_link.url
                         } for pd in profile_data if pd.Role.role_name!="MD"]
         return  JsonResponse(profile_data,safe=False)
 
