@@ -5,6 +5,7 @@ sort_urls=[path("getBranch/",views.get_branches,name="sort"),
     path("getRoles/",views.get_roles,name="sort"),
     path("getDesignations/",views.get_designations,name="sort"),
     path("getDepartments/",views.get_departments,name="sort"),]
+    # path("addMeetingHeadSubhead/",views.add_meeting_head_subhead,name="sort"),
 
 session_urls=[path('login/', views.user_login),
             path('logout/', views.user_logout),

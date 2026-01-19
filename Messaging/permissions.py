@@ -3,11 +3,9 @@ from accounts.RequiredImports import *
 from .filters import *
 
 def has_group_create_or_add_member_permission(user:User):
-    user_role=get_user_role(user=user)
-    if isinstance(user_role,dict):
-        user_role="Admin"
+    if user.is_superuser:
         return True
-    elif user_role in ["MD","TeamLead"]:
+    elif get_user_role(user=user)=="TeamLead":
         return True
     return False
 

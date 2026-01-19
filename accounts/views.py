@@ -109,7 +109,7 @@ def create_employee_login(request: HttpRequest):
 @login_required
 def get_all_employees(request: HttpRequest):
         role=get_user_role(user=request.user)
-        profile_data=Profile.objects.filter().select_related("Role","Designation","Branch")
+        profile_data=Profile.objects.filter().select_related("Role","Designation","Branch","Department")
         users_data=[]
         for pd in profile_data:
             if pd.Role.role_name!="MD":
@@ -121,7 +121,19 @@ def get_all_employees(request: HttpRequest):
                       "Date_of_birth":pd.Date_of_birth,
                       "Date_of_join":pd.Date_of_join,
                       "Email_id":pd.Email_id,
-                      "Photo_link":pd.Photo_link.url}
+                      "Photo_link":pd.Photo_link.url,
+                      "department":None}
+                users_data.append(user)
+            elif pd.Role.role_name=="Admin":
+                user={"Employee_id":pd.Employee_id.username,
+                      "Name":None,
+                      "Role":pd.Role.role_name,
+                      "Branch":None,
+                      "Designation":None,
+                      "Date_of_birth":None,
+                      "Date_of_join":None,
+                      "Email_id":pd.Email_id,
+                      "Photo_link":None}
                 users_data.append(user)
             else:
                 user={"Employee_id":pd.Employee_id.username,
@@ -195,7 +207,7 @@ def employee_dashboard(request: HttpRequest):
     if request.user.is_superuser:
         return  JsonResponse({"messege":"This is a Admin information dashboard","username":f"{request.user.username}","Role":"Admin"})
     else:
-        profile=Profile.objects.filter(Employee_id=request.user).values("Employee_id","Email_id","Designation","Date_of_birth","Date_of_join","Branch","Name","Photo_link","Role")
+        profile=Profile.objects.filter(Employee_id=request.user).select_related("Department","Branch","Designation","Role").annotate(department=F("Department__dept_name"),role=F("Role__role_name"),designation=F("Designation__designation"),branch=F("Branch__branch_name")).values("Employee_id","Email_id","designation","Date_of_birth","Date_of_join","branch","Name","Photo_link","role","department")
         
     return  JsonResponse(list(profile),safe=False)
 
@@ -225,7 +237,7 @@ def update_profile(request: HttpRequest,username):
         return  JsonResponse({"messege":"User Profile is missing."},status=status.HTTP_404_NOT_FOUND) 
     else:
         fields=['password','Name','Role','Email_id','Designation','Date_of_join','Date_of_birth','Branch','Photo_link']
-        not_required_fields=["Designation","Branch","password","Photo_link"]
+        not_required_fields=["Designation","Branch","password","Photo_link","Department"]
         login_values={}
         profile_values={}
         try:
@@ -260,7 +272,7 @@ def update_profile(request: HttpRequest,username):
                 profile.Photo_link=photo
                 profile.save(force_update=True)
             try:
-                    if data.get("Branch") and data.get("Designation"):
+                    if data.get("Branch") and data.get("Designation") and data.get("Department"):
                             get_branch=get_branch_object(branch=profile_values["Branch"])
                             if isinstance(get_branch,Branch):
                                 profile_values["Branch"]=get_branch
@@ -272,6 +284,12 @@ def update_profile(request: HttpRequest,username):
                                 profile_values["Designation"]=get_designation
                             else:
                                 return JsonResponse(get_designation,safe=False)
+                            
+                            get_department=get_department_obj(dept=profile_values["Department"])
+                            if isinstance(get_department,Departments):
+                                profile_values["Department"]=get_department
+                            else:
+                                return get_department
                             
                     get_role=get_role_object(role=profile_values["Role"])
                     if isinstance(get_role,Roles):
@@ -335,3 +353,26 @@ def delete_user_profile(request: HttpRequest,u):
             return JsonResponse({"message":"user deleted successfully"})
     else:
             return JsonResponse({"message":"Request method must be 'DELETE'"},status=status.HTTP_400_BAD_REQUEST)
+ 
+@csrf_exempt       
+def add_meeting_head_subhead(request:HttpRequest):
+    data=load_data(request)
+    quater=data.get("quater")
+    month=data.get("month")
+    head=data.get("head")
+    sub_head=data.get("sub_head")
+    sub_d1=data.get("sub_d1")
+    sub_d2=data.get("sub_d2")
+    sub_d3=data.get("sub_d3")
+    try:
+        department=get_department_obj(dept=data.get("dept"))
+        quater_object=Quaters.objects.get(quater=quater)
+    except Exception as e:
+        print(e)
+        return JsonResponse({"Message":"Error occured"})
+    else:
+        Monthly_department_head_and_subhead.create_head_and_subhead_for_each_dept(dept=department,quater=quater_object,
+                                                                              month_of_the_quater=month,Meeting_head=head,meeting_sub_head=sub_head,
+                                                                              Sub_Head_D1=sub_d1,Sub_Head_D2=sub_d2,Sub_Head_D3=sub_d3)
+    
+    return JsonResponse({"Message":"added successfully"})

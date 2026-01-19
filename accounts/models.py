@@ -148,21 +148,10 @@ class Quaters(models.Model):
         verbose_name_plural = "quaters"
         ordering=["quater"]
     
-class Financial_years_Quaters_Mapping(models.Model):
-    Quater=models.ForeignKey(Quaters,on_delete=models.CASCADE,db_column="quater",related_name="current_quater")
-    financial_year_start=models.IntegerField()
-    financial_year_end=models.IntegerField()
-    
-    @classmethod
-    def add_quaterwise_year(cls,quater:Quaters,financial_year_start:int,financial_year_end:int):
-        obj=cls.objects.create(Quater=quater,financial_year_start=financial_year_start,financial_year_end=financial_year_end)
-        return obj 
-    class Meta:
-        db_table= 'team_management"."Financial_year_with_Quaters'
-    
 class Monthly_department_head_and_subhead(models.Model):
     department=models.ForeignKey(Departments,on_delete=models.CASCADE,null=False,related_name="dapartment",db_column="department")
-    quater_with_financial_year=models.ForeignKey(Financial_years_Quaters_Mapping,on_delete=models.CASCADE,null=False,related_name="quater",db_column="quater")
+    # quater_with_financial_year=models.ForeignKey(Financial_years_Quaters_Mapping,on_delete=models.CASCADE,null=False,related_name="quater",db_column="quater")
+    quater=models.ForeignKey(Quaters,on_delete=models.CASCADE,null=False,related_name="meeting_head_quater")
     month_of_the_quater=models.SmallIntegerField(validators=[MinValueValidator(1), MaxValueValidator(3)])
     Meeting_head=models.CharField(max_length=100,null=False)
     meeting_sub_head=models.CharField(max_length=100,null=True)
@@ -172,17 +161,18 @@ class Monthly_department_head_and_subhead(models.Model):
     
     
     @classmethod
-    def create_head_and_subhead_for_each_dept(cls,dept:Departments,quater_with_financial_year:Financial_years_Quaters_Mapping,month_of_quater:int,meeting_head:str,meeting_sub_head:str,Sub_Head_D1:str,Sub_Head_D2:str,Sub_Head_D3:str):
-        obj=cls.objects.create(department=dept,quater_with_financial_year=quater_with_financial_year,month_of_quater=month_of_quater,meeting_head=meeting_head,Sub_Head_D1=Sub_Head_D1,Sub_Head_D2=Sub_Head_D2,Sub_Head_D3=Sub_Head_D3,meeting_sub_head=meeting_sub_head)
+    def create_head_and_subhead_for_each_dept(cls,quater:Quaters,dept:Departments,month_of_the_quater:int,
+                                              Meeting_head:str,meeting_sub_head:str,Sub_Head_D1:str,
+                                              Sub_Head_D2:str,Sub_Head_D3:str):
+        
+        obj=cls.objects.create(quater=quater,department=dept,month_of_the_quater=month_of_the_quater,
+                               Meeting_head=Meeting_head,Sub_Head_D1=Sub_Head_D1,Sub_Head_D2=Sub_Head_D2,
+                               Sub_Head_D3=Sub_Head_D3,meeting_sub_head=meeting_sub_head)
         return obj
     
     class Meta:
         db_table= 'team_management"."Monthly_department_wise_head_and_subhead'
-        ordering=["quater_with_financial_year"]
         ...
-        
-# for i in ["Sales","Marketing","Production","Vigil","R&D","NPC","Business Strategy","Accounts&Finance","Purchase","HR","Legal&Document","NPD"]:
-#     Departments.add_department(dept_name=i)
     
 # obj=Quaters.create_quater(quater="Q3",starting_month=9,ending_month=12)
 # Financial_years_Quaters_Mapping.add_quaterwise_year(quater=obj,financial_year_start=2026,financial_year_end=2027)
@@ -208,16 +198,6 @@ class Monthly_department_head_and_subhead(models.Model):
 # Designation.objects.create(designation="Designer Engineer")
 # Designation.objects.create(designation="Site Engineer")
 # Designation.objects.create(designation="Field Officer")
-
-
-# Departments.objects.create(dept_name="Sales")
-# Departments.objects.create(dept_name="Marketing")
-# Departments.objects.create(dept_name="Production")
-# Departments.objects.create(dept_name="Vigil")
-# Departments.objects.create(dept_name="")
-# Departments.objects.create(dept_name="")
-
-
 
 
 
