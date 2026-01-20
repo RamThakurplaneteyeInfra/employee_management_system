@@ -8,7 +8,7 @@ from django.contrib.auth.decorators import login_required
 from django.views.decorators.csrf import csrf_exempt,csrf_protect
 import json
 import os
-from settings import BASE_DIR
+from ems.settings import BASE_DIR
 from rest_framework import status
 from django.http.response import JsonResponse
 from accounts.snippet import admin_required
