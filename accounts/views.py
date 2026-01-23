@@ -29,7 +29,6 @@ def completed_years_and_days(start_date: date) -> str:
 
     return f"{years} years {days} days"
 
-
 # a get method for home page
 # endpoint-{{baseurl}}/
 def home(request: HttpRequest):
@@ -127,7 +126,7 @@ def get_all_employees(request: HttpRequest):
         users_data=[]
         for pd in profile_data:
             role=pd.Role.role_name
-            if  role not in ["MD","Admin"]:
+            if  role != "MD":
                 user={"Employee_id":pd.Employee_id.username,
                     "Name":pd.Name,
                     "Role":pd.Role.role_name,
@@ -252,8 +251,8 @@ def update_profile(request: HttpRequest,username):
         print(e)
         return  JsonResponse({"messege":"User Profile is missing."},status=status.HTTP_404_NOT_FOUND) 
     else:
-        fields=['Name','Role','Email_id','Designation','Date_of_join','Date_of_birth','Branch','Photo_link',"Department","Teamlead","Function"]
-        not_required_fields=["Designation","Branch","password","Photo_link","Department","Teamlead","Function"]
+        fields=['Name','Role','Email_id','Designation','Date_of_join','Date_of_birth','Branch',"Department","Teamlead","Function"]
+        not_required_fields=["Designation","Branch","Department","Teamlead","Function"]
         profile_values={}
         try:
             data=request.POST
@@ -289,7 +288,7 @@ def update_profile(request: HttpRequest,username):
                         get_function=get_object_or_404(Functions,function=field_value)
                         profile_values[i]=get_function
                 elif i=="Role" and field_value:
-                    get_role=get_object_or_404(Roles,role_name=profile_values["Role"])
+                    get_role=get_object_or_404(Roles,role_name=field_value)
                     profile_values[i]=get_role
                 else:
                     profile_values[i]=field_value
@@ -342,13 +341,16 @@ def changePassword(request: HttpRequest,u):
 @admin_required
 def view_employee(request: HttpRequest,u):
     try:
-        user=User.objects.get(username=u)
-    except:
+        user=get_object_or_404(User,username=u)
+        profile=Profile.objects.filter(Employee_id=user)
+    except Http404:
         return JsonResponse({"Message":"User not found.Incorrect username"},status=status.HTTP_404_NOT_FOUND)
     else:
-        profile=get_user_profile_object(user=user).values("Employee_id","Email_id","Designation","Date_of_birth","Date_of_join","Branch","Name","Photo_link","Role")
-    return JsonResponse(list(profile),safe=False)
-
+        if profile:
+            profile_data=profile.values("Employee_id","Email_id","Designation","Date_of_birth","Date_of_join","Branch","Name","Photo_link","Role")
+            return JsonResponse(list(profile_data),safe=False)
+        return JsonResponse([{}],safe=False)
+    
 # Delete Employee from all Records.
 @admin_required
 @csrf_exempt
@@ -360,7 +362,6 @@ def delete_user_profile(request: HttpRequest,u):
             print(e)
             return JsonResponse({"Message":"User not found.Incorrect username"},status=status.HTTP_404_NOT_FOUND)
         else:
-            # profile=get_user_profile_object(Profile,Employee_id=user)
             user.delete()
             return JsonResponse({"message":"user deleted successfully"})
     else:

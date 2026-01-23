@@ -7,13 +7,15 @@ from rest_framework import status
 # from django.shortcuts import get_object_or_404
 
 # get an user's "Profile" object from the user's "User" object
-def get_user_profile_object(user:User):
+def get_user_profile_object(user:User|None):
     try:
-        profile=Profile.objects.get(Employee_id=user)
-    except Exception as e:
-        return {"message":f"{e}"}
+        if user:
+            profile=Profile.objects.get(Employee_id=user)
+            return profile
+    except Profile.DoesNotExist as e:
+        return None
     else:
-        return profile
+        return None
     
 # get an user's "User" object from an username
 def get_user_object(username:str):
@@ -107,12 +109,11 @@ def get_designations_by_branch(request: HttpRequest):
 def get_role_wise_count(request:HttpRequest):
     ...
     
-def get_users_Name(user:User):
-    profile_obj=get_user_profile_object(user)
-    if isinstance(profile_obj,Profile):
-        return profile_obj.Name
-    else:
-        return None
+def get_users_Name(user:User|None):
+    if isinstance(user,User):
+        profile_obj=get_user_profile_object(user)        
+        return profile_obj.Name if profile_obj else None
+    return None
 # to verify POST request
 # use in the view that has been passed in the respective path function of the requested url.
 def verifyPost(request: HttpRequest):

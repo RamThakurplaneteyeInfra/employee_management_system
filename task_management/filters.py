@@ -2,7 +2,7 @@ from django.http import HttpRequest, HttpResponse, JsonResponse
 from accounts.models import Profile, Roles,Designation
 from django.db.models import Q,F
 from accounts.views import status
-from accounts.filters import get_user_profile_object
+from accounts.filters import get_user_profile_object,get_users_Name
 from task_management.models import *
 from accounts.filters import get_role_object,get_designation_object
 
@@ -126,7 +126,7 @@ def get_tasks_by_type(request:HttpRequest,type:str="all",self_created: bool=True
                 "title":user.task.title,
                 "description":user.task.description,
                 "status":user.task.status.status_name,
-                "created_by":get_user_profile_object(user.task.created_by).Name,
+                "created_by":(user.task.created_by).Name,
                 "due-date":user.task.due_date.strftime("%d/%m/%Y"),
             }
             task_data.append(sample)
@@ -142,7 +142,7 @@ def get_tasks_by_type(request:HttpRequest,type:str="all",self_created: bool=True
                     "title":user.task.title,
                     "description":user.task.description,
                     "status":user.task.status.status_name,
-                    "created_by":get_user_profile_object(user.task.created_by).Name,
+                    "created_by":get_users_Name(user.task.created_by),
                     "due-date":user.task.due_date.strftime("%d/%m/%Y"),
                 }
                 task_data.append(sample)
