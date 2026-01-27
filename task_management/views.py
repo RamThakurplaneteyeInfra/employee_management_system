@@ -1,3 +1,4 @@
+from accounts.filters import get_user_role
 from .filters import *
 from .models import *
 from ems.verify_methods import *
@@ -65,11 +66,9 @@ def create_task(request:HttpRequest):
 @csrf_exempt
 @login_required
 def update_task(request,task_id:int):
-    verify_method=verifyPost(request)
+    verify_method=verifyPatch(request)
     if verify_method:
         return verify_method
-    elif not isinstance(task_id,int):
-        return JsonResponse({"error": "Invalid data type of task_id.It must be integer"}, status=status.HTTP_404_NOT_FOUND)
     try:
         user = request.user
         task=get_task_object(task_id=task_id)
@@ -81,30 +80,31 @@ def update_task(request,task_id:int):
         print(e)
         return JsonResponse({"message":f"{e}"},status=status.HTTP_404_NOT_FOUND)
     
-    fields=["title","description","due_date","assigned_to","type"]
+    fields=["title","description","due_date","type"]
     body_data={}
     data=load_data(request)
-    for i in fields:
-        field_value=data.get(i)
-        if not field_value and i!="description":
-            return JsonResponse({"error": f"{i} is required"}, status=302)
-            ...
-        body_data[i]=data.get(i)
     try:
-        body_data["type"]=get_taskTypes_object(type_name=body_data["type"])
-        u_profile= Profile.objects.get(Name=body_data["assigned_to"])
-        body_data["assigned_to"]=u_profile.Employee_id
+        for i in fields:
+            field_value=data.get(i)
+            if field_value and i=="type":
+                body_data[i]=get_taskTypes_object(type_name=body_data["type"])
+            elif field_value and i in ["due_date","description","title"]:
+                body_data[i]=field_value
+            else:
+                continue
+            
+        for i in ["title","description","due_date","type"]:
+                if body_data.get(i,None):
+                    setattr(task,i,body_data[i])
+        task.save()
     except Exception as e:
         return JsonResponse({"message":f"{e}"},status=status.HTTP_404_NOT_FOUND)
-    try:
-        task=Task.objects.filter(task_id=task_id).update(**body_data)
     except Exception as e:
         JsonResponse({"message":f"{e}"},status_code=302)
     else:
         return JsonResponse(
         {"message": "Task updated successfully"},status=status.HTTP_200_OK) 
     ...
-    
 # Show self created tasks.applicable method-"GET"
 # endpoint-{{baseurl}}/tasks/viewTasks/?type=
 @login_required
@@ -231,9 +231,9 @@ def get_task_messages(request: HttpRequest, task_id:int):
         except PermissionDenied:
             return JsonResponse({"message":"you are not authorised to accessed this task conversation"},status=status.HTTP_403_FORBIDDEN)
         else:
-            messages= task.messages.select_related("sender").order_by("-created_at")
+            messages= TaskMessage.objects.filter(task=task).select_related("sender","task").order_by("-created_at")
             messages.update(seen=True)
-
+            
         data = [
             {   
                 "sender": m.sender.username,

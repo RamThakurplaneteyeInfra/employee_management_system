@@ -14,14 +14,14 @@ def add_task_count_for_Assignee(sender,created, instance:TaskAssignies, **kwargs
             for i in ["1 Day","SOS","10 Day","Monthly","Quaterly"]:
                 if instance.task.type.type_name==i:
                     value=getattr(obj,"count_"+i.replace(" ","_"))
-                    setattr(obj,"count_"+i.replace(" ","_"),value)
+                    setattr(obj,"count_"+i.replace(" ","_"),value+1)
                     obj.save()
                     break
         else:
             for i in ["1 Day","SOS","10 Day","Monthly","Quaterly"]:
                 if instance.task.type.type_name==i:
                     value=getattr(obj,"count_"+i.replace(" ","_"))
-                    setattr(obj,"count_"+i.replace(" ","_"),value)
+                    setattr(obj,"count_"+i.replace(" ","_"),value+1)
                     obj.save()
                     break
                 
@@ -34,16 +34,16 @@ def add_task_count_for_Assignee(sender,created, instance:Task, **kwargs):
         except CreatedTasksCount.DoesNotExist:
             obj=CreatedTasksCount.objects.create(creator=user)
             for i in ["1 Day","SOS","10 Day","Monthly","Quaterly"]:
-                if instance.task.type.type_name==i:
+                if instance.type.type_name==i:
                     value=getattr(obj,"count_"+i.replace(" ","_"))
-                    setattr(obj,"count_"+i.replace(" ","_"),value)
+                    setattr(obj,"count_"+i.replace(" ","_"),value+1)
                     obj.save()
                     break
         else:
             for i in ["1 Day","SOS","10 Day","Monthly","Quaterly"]:
-                if instance.task.type.type_name==i:
+                if instance.type.type_name==i:
                     value=getattr(obj,"count_"+i.replace(" ","_"))
-                    setattr(obj,"count_"+i.replace(" ","_"),value)
+                    setattr(obj,"count_"+i.replace(" ","_"),value+1)
                     obj.save()
                     break
             

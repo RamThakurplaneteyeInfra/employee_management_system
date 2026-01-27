@@ -1,4 +1,8 @@
-from django.http import HttpRequest
+from django.http import HttpRequest,Http404, JsonResponse
+from django.shortcuts import get_object_or_404
+from django.core.exceptions import PermissionDenied
+from rest_framework import status
+from accounts.filters import get_users_Name
 from .models import *
 
 def get_group_object(group_id:int):
@@ -74,7 +78,7 @@ def get_messages(request:HttpRequest,chat_id:str):
                         if request.user==i.participant:
                             Flag=True
                     if not Flag:
-                        raise PermissionDenied("Not authorised")
+                        raise PermissionDenied("Not authorised") # type: ignore
                 except PermissionDenied:
                     return JsonResponse({"message":"you are not authorised to accessed this conversation"},status=status.HTTP_403_FORBIDDEN)
                 else:

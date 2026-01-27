@@ -126,7 +126,7 @@ def get_tasks_by_type(request:HttpRequest,type:str="all",self_created: bool=True
                 "title":user.task.title,
                 "description":user.task.description,
                 "status":user.task.status.status_name,
-                "created_by":(user.task.created_by).Name,
+                "created_by":get_users_Name(user.task.created_by),
                 "due-date":user.task.due_date.strftime("%d/%m/%Y"),
             }
             task_data.append(sample)
