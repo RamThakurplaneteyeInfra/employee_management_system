@@ -54,6 +54,7 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    "corsheaders",
     "rest_framework",
     "rest_framework.authtoken",  # optional
     "accounts",
@@ -66,6 +67,7 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
+    "corsheaders.middleware.CorsMiddleware",
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -172,9 +174,11 @@ DATA_UPLOAD_MAX_NUMBER_FIELDS = 5000
 # CORS settings - Allow all origins for development and flexibility
 CORS_ALLOW_ALL_ORIGINS = True
 CORS_ALLOW_CREDENTIALS = True
+CORS_ALLOWED_ORIGINS = [
+    "https://planeteye-employee-portal.onrender.com",
+]
 CSRF_TRUSTED_ORIGINS = [
-    "https://employee-management-system-tmrl.onrender.com",
-    "https://planeteye-employee-portal.onrender.com/","https://planeteye-employee-portal.onrender.com",
+    "https://employee-management-system-tmrl.onrender.com","https://planeteye-employee-portal.onrender.com",
     "http://localhost:3000/","http://localhost:8000/","http://127.0.0.1:8000/"
 ]
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
@@ -201,7 +205,8 @@ CORS_ALLOW_HEADERS = [
     
 SESSION_COOKIE_AGE = 1800
 SESSION_SAVE_EVERY_REQUEST = True
-
+SESSION_COOKIE_SAMESITE = "None"
+CSRF_COOKIE_SAMESITE = "None"
 # LOGGING = {
 #     "version": 1,
 #     "handlers": {
