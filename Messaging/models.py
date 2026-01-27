@@ -22,8 +22,8 @@ class GroupChats(models.Model):
         User, on_delete=models.CASCADE, related_name="created_chats",db_column="created_by",to_field="username",verbose_name="created_groups"
     )
     created_at = models.DateTimeField(auto_now_add=True)
-    updated_at=models.DateTimeField(auto_now=True)
-    last_message_at=models.DateField(auto_now=True,null=True)
+    updated_at=models.DateTimeField(blank=True,null=True)
+    last_message_at=models.DateField(auto_now=True)
     class Meta:
         db_table='Groups'
         verbose_name="Group"
@@ -63,7 +63,7 @@ class IndividualChats(models.Model):
     participant1=models.ForeignKey(User,to_field="username",verbose_name="participant1",db_column="user1",null=True,on_delete=models.SET_NULL,related_name="as_participant1")
     participant2=models.ForeignKey(User,to_field="username",verbose_name="participant2",db_column="user2",null=True,on_delete=models.SET_NULL,related_name="as_participant2")
     created_at = models.DateTimeField(auto_now_add=True)
-    last_message_at=models.DateField(auto_now=True,null=True)
+    last_message_at=models.DateField(auto_now=True)
 
     class Meta:
         db_table='UsersChats'
@@ -91,13 +91,12 @@ class IndividualChats(models.Model):
         # Ensure consistent ordering (smaller ID first)
         if user1.id > user2.id:
             user1, user2 = user2, user1
-        
-        chat_id=generate_chat_id()
-        already_created=False
         try:
             obj=cls.objects.get(participant1=user1,participant2=user2)
             already_created=True
-        except:
+        except cls.DoesNotExist as e:
+            chat_id=generate_chat_id()
+            already_created=False
             obj=cls.objects.create(chat_id=chat_id,participant1=user1,participant2=user2)
         finally:
             return obj,already_created
@@ -109,7 +108,7 @@ class GroupMessages(models.Model):
     deleted=models.BooleanField(default=False)
     edited=models.BooleanField(default=False)
     deleted_at=models.DateTimeField(default=None,null=True,blank=True)
-    updated_at=models.DateTimeField(auto_now=True,blank=True)
+    updated_at=models.DateTimeField(blank=True,null=True)
     content = models.TextField()
     created_at = models.DateTimeField(auto_now_add=True)
     
@@ -140,7 +139,7 @@ class IndividualMessages(models.Model):
     deleted=models.BooleanField(default=False)
     edited=models.BooleanField(default=False)
     deleted_at=models.DateTimeField(default=None,null=True,blank=True)
-    updated_at=models.DateTimeField(auto_now=True,blank=True)
+    updated_at=models.DateTimeField(null=True,blank=True)
     created_at=models.DateTimeField(auto_now_add=True)
     seen=models.BooleanField(default=False)
     content=models.TextField()

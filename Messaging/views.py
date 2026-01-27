@@ -23,15 +23,17 @@ def access_or_create_conversation(request: HttpRequest):
             )
         else:
             object,is_created=IndividualChats.get_or_create_indivisual_Chat(user1=user1,user2=user2)
+            print(object,is_created)
             if not is_created:
+                other_user=object.get_other_participant(request.user)
                 chat_details={"chat_id":object.chat_id,
-                          "participant":object.get_other_participant(request.user),
-                          "messages":{}}
-                return JsonResponse(list(chat_details),safe=False)
+                        "participant":get_users_Name(other_user),
+                        "messages":{}}
+                return JsonResponse(chat_details)
             else:
                 messages=get_messages(request,chat_id=object.chat_id)
                 return messages
-            
+
 # create groups here
 # endpoint-
 @csrf_exempt
@@ -201,19 +203,25 @@ def delete_user(request: HttpRequest,group_id:str,user_id:str):
                     
             if can_Delete:
                 user=get_object_or_404(User,username=user_id)
-                GroupMembers.objects.filter(groupchat=group_obj,participant=user).first().delete()
+                group_member_obj=GroupMembers.objects.filter(groupchat=group_obj,participant=user).first()
+                if group_obj.participants>2:
                 # group_obj.participants=group_obj.participants-1
-                group_obj.participants-=1
-                group_obj.save()
-
-                message={"Message":"user deleted Successfully"}
-            else:
-                message={"Message":"selected user is not a group member"}
+                    group_member_obj.delete()
+                    group_obj.participants-=1
+                    group_obj.save()
+                    message={"Message":"user deleted Successfully"}
+                elif not group_member_obj:
+                    message={"Message":"selected user is not a group member"}
+                else:
+                    raise Http404("there should be at least 2 members in the group")
         else:
             raise PermissionDenied("Not allowed")
+    except Http404 as e:
+        print(e)
+        return JsonResponse({"message":f"{e}"},status=status.HTTP_404_NOT_FOUND)
     except Exception as e:
         print(e)
-        return JsonResponse({"message":f"{e}"},status=status.HTTP_403_FORBIDDEN)
+        return JsonResponse({"message":f"{e}"},status=status.HTTP_400_BAD_REQUEST)
     else:
         return JsonResponse(message,status=status.HTTP_200_OK)
 
@@ -260,6 +268,7 @@ def post_message(request,chat_id:str):
             return chat_obj
         else:
             GroupMessages.objects.create(group=chat_obj,sender=sender,content=message).save()
+            chat_obj.save()
     else:
         try:
             chat_obj=get_individual_chat_object(chat_id=chat_id)
@@ -269,6 +278,7 @@ def post_message(request,chat_id:str):
             return chat_obj
         else:
             IndividualMessages.objects.create(chat=chat_obj,sender=sender,content=message).save()
+            chat_obj.save()
 
     return JsonResponse({"message":"Message sent successfully"},status=status.HTTP_201_CREATED)
     

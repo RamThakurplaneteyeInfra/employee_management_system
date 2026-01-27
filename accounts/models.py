@@ -62,7 +62,7 @@ class Profile(models.Model):
     
 # A model for "Management_Profiles" table
 class management_Profile(models.Model):
-    Employee=models.OneToOneField(User,on_delete=models.PROTECT,to_field="username",null=False,related_name="management")
+    Employee=models.OneToOneField(User,on_delete=models.CASCADE,to_field="username",null=False,related_name="management")
     Role= models.ForeignKey(Roles,verbose_name="role",on_delete=models.CASCADE,db_column="Role",related_name="management_roles",null=True)
     Name=models.CharField(verbose_name="full_name",max_length=50,null=True)
     Email_id=models.EmailField(verbose_name="email_id",max_length=254,unique=True,validators=[validate_email])
