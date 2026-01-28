@@ -2,122 +2,7 @@ from accounts.filters import get_department_obj
 from ems.verify_methods import *
 from .models import *
 from task_management.filters import get_taskStatus_object
-
-def get_financial_year_details():
-    input_date = date.today()
-    year = input_date.year
-    month = input_date.month
-    day=input_date.day
-    
-    if month >= 4:
-        financial_year = f"{year}-{year + 1}"
-    else:
-        financial_year = f"{year - 1}-{year}"
-
-    if month in (4, 5, 6):
-        quarter = "Q1"
-    elif month in (7, 8, 9):
-        quarter = "Q2"
-    elif month in (10, 11, 12):
-        quarter = "Q3"
-    else:
-        quarter = "Q4"
-
-    quarter_months = {
-        "Q1": {4:"April", 5:"May", 6:"June"},
-        "Q2": {7:"July", 8:"August", 9:"September"},
-        "Q3": {10:"October", 11:"November", 12:"December"},
-        "Q4": {1:"January", 2:"February", 3:"March"},
-    }
-    
-    reversed_quater_month= {
-        "Q1": {"April":1, "May":2, "June":3},
-        "Q2": {"July":1, "August":2, "September":3},
-        "Q3": {"October":1, "November":2,"December":3},
-        "Q4": {"January":1, "February":2, "March":3},
-    }
-    quarter_month=quarter_months[quarter][month]
-    quarter_month_reversed=reversed_quater_month[quarter][quarter_month]
-    print(quarter_month,quarter_month_reversed)
-
-    return {
-        "financial_year": financial_year,
-        "quarter": quarter,
-        "respective_quarter_months": quarter_month,
-        "reverse_quater_month":quarter_month_reversed
-    }
-
-def get_addeded_entries_by_username_Date(request:HttpRequest,date=None,username=None):
-        try:
-            user_obj=get_object_or_404(User,username=username)
-            # Role-based filtering
-            if user_obj and date:
-                entries = UsersEntries.objects.select_related("user", "month_and_quater_id","status").filter(user=user_obj,date=date).order_by("date")
-            
-            elif user_obj and not date:
-                entries = UsersEntries.objects.select_related("user", "month_and_quater_id","status").filter(user=user_obj).order_by("date")
-                
-            else:
-                return JsonResponse({"error": "invalid query parameter"}, status=status.HTTP_203_NON_AUTHORITATIVE_INFORMATION)
-                
-            data = []
-            for entry in entries:
-                data.append({
-                    "id":entry.id,
-                    "note":entry.note,
-                    "meeting_head": entry.month_and_quater_id.Meeting_head,
-                    "meeting_sub_head": entry.month_and_quater_id.meeting_sub_head,
-                    "username": entry.user.username,
-                    "date": entry.date,
-                    "status": entry.status.status_name,
-                    "month_quater_id": entry.month_and_quater_id.quater.quater,
-                })
-            return data
-        except Http404 as e:
-            print(e)
-            return JsonResponse({"error": "User profile not found"}, status=404)
-        except Exception as e:
-            print(e)
-            return JsonResponse({"error": str(e)}, status=500)
-            ...
-            
-def get_meeting_head_and_subhead(request:HttpRequest,user_id:str):
-    verify_method=verifyGet(request)
-    if verify_method:
-        return verify_method
-    try:
-        user=get_object_or_404(User,username=user_id)
-        user_profile=get_object_or_404(Profile,Employee_id=user)
-        get_quater_data=get_financial_year_details()
-        quater=get_quater_data.get("quarter")
-        quarter_obj=get_object_or_404(Quaters,quater=quater)
-        actual_month=get_quater_data.get("respective_quarter_months")
-        department_obj=user_profile.Department
-        financial_year=get_quater_data.get("financial_year")
-        reverse_month=get_quater_data.get("reverse_quater_month")
-        print(get_quater_data)
-    except Http404 as e:
-        print(e)
-        return JsonResponse({"Message":"http occured"})
-    except Exception as e:
-        print(e)
-        return JsonResponse({"Message":"Error occured"}) 
-    else:
-        get_monthly_schedule_set=Monthly_department_head_and_subhead.objects.filter(month_of_the_quater=reverse_month,quater=quarter_obj,
-                                                                        department=department_obj)
-        values=[{"quater":obj.quater.quater,
-                "financial_year":financial_year,
-                "month":reverse_month,
-                "actual_month":actual_month,
-                "Meeting-head":obj.Meeting_head,
-                "Sub-Meeting-head":obj.meeting_sub_head,
-                "sub-head-D1":obj.Sub_Head_D1,
-                "sub-head-D2":obj.Sub_Head_D2,
-                "sub-head-D3":obj.Sub_Head_D3 
-                } for obj in get_monthly_schedule_set]
-        
-        return JsonResponse(values,safe=False)
-    ...
+from .filters import *
 
 @csrf_exempt
 @login_required
@@ -171,7 +56,7 @@ def create_multiple_user_entries(request):
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
     
-
+@login_required
 def get_entries(request: HttpRequest):
     verify_method=verifyGet(request)
     if verify_method:
@@ -179,20 +64,22 @@ def get_entries(request: HttpRequest):
     try:
         login_users_username=request.user.username
         data=request.GET
-        username=data.get("username")
-        date=data.get("Date")
+        query_parameter={}
+        for i in ["username","date","quater","month","department"]:
+            para_value=data.get(i)
+            if not para_value and i in ["date","quater","month","department"]:
+                ...
+            elif not para_value and i =="username":
+                raise Http404()
+            else:
+                query_parameter[i]=para_value
         superuser=request.user.is_superuser
-        if username and superuser and date:
-            data=get_addeded_entries_by_username_Date(request,date=date,username=username)
+        if query_parameter.get("username") and superuser:
+            data=get_addeded_entries(request,**query_parameter)
 
-        elif username and superuser and not date:
-            data=get_addeded_entries_by_username_Date(request,username=username)
+        elif query_parameter.get("username")==login_users_username and not superuser:
+            data=get_addeded_entries(request,**query_parameter)
             
-        elif username==login_users_username and not superuser and date:
-            data=get_addeded_entries_by_username_Date(request,username=username,date=date)
-                
-        elif username==login_users_username and not superuser and not date:
-            data=get_addeded_entries_by_username_Date(request,username=username)
         else:
                 raise PermissionDenied("Not authorised")
 
@@ -225,6 +112,52 @@ def change_status(request: HttpRequest,user_entry_id:int):
     else:
         return JsonResponse({"message":f"Status Changed to {changed_to}"})
 # Create your views here.
+
+@login_required
+def get_meeting_head_and_subhead(request:HttpRequest,user_id:str):
+    try:
+        user=get_object_or_404(User,username=user_id)
+        user_profile=get_object_or_404(Profile,Employee_id=user)
+        data=request.GET
+        if not data:
+            get_quater_data=get_financial_year_details()
+            actual_month=get_quater_data.get("respective_quarter_months")
+            financial_year=get_quater_data.get("financial_year")
+            reverse_month=get_quater_data.get("reverse_quater_month")
+            quater=get_quater_data.get("quarter")
+        else:
+            get_quater_data=data
+            month=get_quater_data.get("month")
+            actual_month=month
+            financial_year=get_current_financial_year()
+            actual_month=month
+            quater=get_quater_data.get("quater")
+            reverse_month=reversed_quater_month[quater][month]
+            
+        quarter_obj=get_quater_object(quater=quater)
+        department_obj=user_profile.Department
+    except Http404 as e:
+        print(e)
+        return JsonResponse({"Message":"http 404 error occured"})
+    except Exception as e:
+        print(e)
+        return JsonResponse({"Message":"Database error occured"}) 
+    else:
+        get_monthly_schedule_set=Monthly_department_head_and_subhead.objects.filter(month_of_the_quater=reverse_month,quater=quarter_obj,
+                                                                        department=department_obj)
+        values=[{"quater":obj.quater.quater,
+                "financial_year":financial_year,
+                "month":reverse_month,
+                "actual_month":actual_month,
+                "Meeting-head":obj.Meeting_head,
+                "Sub-Meeting-head":obj.meeting_sub_head,
+                "sub-head-D1":obj.Sub_Head_D1,
+                "sub-head-D2":obj.Sub_Head_D2,
+                "sub-head-D3":obj.Sub_Head_D3 
+                } for obj in get_monthly_schedule_set]
+        
+        return JsonResponse(values,safe=False)
+    ...
 
 @csrf_exempt       
 def add_meeting_head_subhead(request:HttpRequest):

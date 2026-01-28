@@ -1,6 +1,7 @@
-from django.http import HttpRequest
+from django.http import HttpRequest, JsonResponse
 from accounts.models import *
 from datetime import date
+from rest_framework import status
 
 # get an user's "Profile" object from the user's "User" object
 def get_user_profile_object(user:User|None):
