@@ -80,19 +80,18 @@ def get_financial_year_details():
 
 def get_addeded_entries(request:HttpRequest,**argu):
         try:
-            # print(argu)
+            print(argu)
             month=argu.get("month",None)
             quater=argu.get("quater",None)
             department=argu.get("department",None)
-            # print(month,quater,department)
+            user_obj=argu.get("user",None)
+            date=argu.get("date",None)
+            print(month,quater,department)
             if month and quater and department:
                 month_and_quater_obj=get_month_quater_object(month=month,quater=quater,department=department)
             else:
                 raise ValueError("Insuffiecient query data")
-            username=argu.get("username")
-            date=argu.get("date",None)
-            user_obj=get_object_or_404(User,username=username)
-            
+            print(user_obj.username)
             # Role-based filtering
             if user_obj and month_and_quater_obj:
                 entries = UsersEntries.objects.select_related("user", "month_and_quater_id","status").filter(user=user_obj,month_and_quater_id=month_and_quater_obj).order_by("date")
@@ -115,13 +114,13 @@ def get_addeded_entries(request:HttpRequest,**argu):
             return data
         except ValueError as e:
             print(e)
-            return JsonResponse({"error": "query parameter is absent"}, status=404)
+            return JsonResponse({"error": "query parameter is absent"}, status=status.HTTP_203_NON_AUTHORITATIVE_INFORMATION)
         except Http404 as e:
             print(e)
-            return JsonResponse({"error": "User profile not found"}, status=404)
+            return JsonResponse({"error": "User profile not found"}, status=status.HTTP_404_NOT_FOUND)
         except Exception as e:
             print(e)
-            return JsonResponse({"error": str(e)}, status=500)
+            return JsonResponse({"error": str(e)}, status=status.HTTP_404_NOT_FOUND)
         
 def has_user_entries_seen_access():
     ...

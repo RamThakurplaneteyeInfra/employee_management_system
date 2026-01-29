@@ -18,7 +18,6 @@ class AssetTypeSerializer(serializers.ModelSerializer):
 
 # 2 Asset Serializer
 class AssetSerializer(serializers.ModelSerializer):
-    asset_code = serializers.ReadOnlyField()
     asset_type = serializers.SlugRelatedField(
         queryset=AssetType.objects.all(),
         slug_field="name"
@@ -39,7 +38,7 @@ class AssetSerializer(serializers.ModelSerializer):
             'updated_at',
             'status'
         ]
-        read_only_fields = ['asset_code', 'created_at', 'updated_at']
+        read_only_fields = ['created_at', 'updated_at']
     
 # 3 Bill Category
 class BillCategorySerializer(serializers.ModelSerializer):

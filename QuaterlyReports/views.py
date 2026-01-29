@@ -3,6 +3,7 @@ from ems.verify_methods import *
 from .models import *
 from task_management.filters import get_taskStatus_object
 from .filters import *
+from rest_framework import status
 
 @csrf_exempt
 @login_required
@@ -19,7 +20,7 @@ def create_multiple_user_entries(request: HttpRequest):
         month_quater_id = data.get("month_quater_id")
         entries = data.get("entries")
         if not all(fields):
-            return JsonResponse({"error": "Invalid payload"}, status=400)
+            return JsonResponse({"error": "Invalid payload"},)
         user = request.user
         created_entries = []
         for entry in entries:
@@ -47,7 +48,7 @@ def create_multiple_user_entries(request: HttpRequest):
         }, safe=False,status=201)
 
     except User.DoesNotExist:
-        return JsonResponse({"error": "User not found, pass the correct username"}, status=404)
+        return JsonResponse({"error": "User not found, pass the correct username"},status=404)
     
     except TaskStatus.DoesNotExist:
         return JsonResponse({"error": "Incorrect Status passed in the body"}, status=404)
@@ -56,41 +57,43 @@ def create_multiple_user_entries(request: HttpRequest):
         return JsonResponse({"error": "Invalid month_quater_id"}, status=404)
     
     except PermissionDenied as e:
-        return JsonResponse({"error": e}, status=500)
+        return JsonResponse({"error": str(e)},status=404)
 
     except Exception as e:
-        return JsonResponse({"error": str(e)}, status=500)
+        return JsonResponse({"error": str(e)}, status=404)
     
 @login_required
-def get_entries(request: HttpRequest,user_id:str):
+def get_entries(request: HttpRequest):
     verify_method=verifyGet(request)
     if verify_method:
         return verify_method
     try:
-            
-        user_obj=get_object_or_404(User,username=user)
-        if request.user.is_superuser:
-            return JsonResponse([],safe=False,status=200)
         data=request.GET
         query_parameter={}
+        username=data.get("username",None)
+        if not username:
+            raise ValueError("username is required")
+        user_obj=get_object_or_404(User,username=username)
+        query_parameter["user"]=user_obj
+        if user_obj.is_superuser:
+            return JsonResponse([],safe=False,status=status.HTTP_200_OK)
+        login_users_username=request.user.username
+        
         for i in ["date","quater","month","department"]:
             para_value=data.get(i)
             if not para_value and i in ["quater","month","department"]:
-                raise ValueError(f"{i}is missing")
-            elif not para_value and i =="username":
-                raise Http404()
+                raise ValueError(f"{i} is missing")
             elif i=="date" and not para_value:
                 ...
             else:
                 query_parameter[i]=para_value
-        print(query_parameter)
+        # print(query_parameter)
         superuser=request.user.is_superuser
-        if query_parameter.get("username") and superuser:
+        if superuser:
             data=get_addeded_entries(request,**query_parameter)
 
-        elif query_parameter.get("username")==login_users_username and not superuser:
+        elif username==login_users_username and not superuser:
             data=get_addeded_entries(request,**query_parameter)
-            
         else:
             raise PermissionDenied("Not authorised")
         
