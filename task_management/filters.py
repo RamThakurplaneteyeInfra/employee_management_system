@@ -79,6 +79,13 @@ def get_assignees(task:Task):
     else:
         return assignees
     
+def get_default_task_status():
+    TaskStatus_obj=get_taskStatus_object(status_name="PENDING")
+    if not None:
+        return TaskStatus_obj
+    else:
+        None
+    
 # Fetch tasks by its types
 # endpoint for "Created_Tasks"-{{baseurl}}/tasks/viewTasks/?type= 
 # endpoint for "Assigned_Reported"-{{baseurl}}/tasks/viewAssignedTasks/?type= 

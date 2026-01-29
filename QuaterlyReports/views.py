@@ -6,11 +6,13 @@ from .filters import *
 
 @csrf_exempt
 @login_required
-def create_multiple_user_entries(request):
+def create_multiple_user_entries(request: HttpRequest):
     verify_method=verifyPost(request)
     if verify_method:
         return verify_method
     try:
+        if request.user.is_superuser:
+            raise PermissionDenied("You cannot create entries")
         fields=["date","entries","month_quater_id"]
         data = load_data(request)
         entry_date = data.get("date")
@@ -52,27 +54,36 @@ def create_multiple_user_entries(request):
 
     except Monthly_department_head_and_subhead.DoesNotExist:
         return JsonResponse({"error": "Invalid month_quater_id"}, status=404)
+    
+    except PermissionDenied as e:
+        return JsonResponse({"error": e}, status=500)
 
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
     
 @login_required
-def get_entries(request: HttpRequest):
+def get_entries(request: HttpRequest,user_id:str):
     verify_method=verifyGet(request)
     if verify_method:
         return verify_method
     try:
-        login_users_username=request.user.username
+            
+        user_obj=get_object_or_404(User,username=user)
+        if request.user.is_superuser:
+            return JsonResponse([],safe=False,status=200)
         data=request.GET
         query_parameter={}
-        for i in ["username","date","quater","month","department"]:
+        for i in ["date","quater","month","department"]:
             para_value=data.get(i)
-            if not para_value and i in ["date","quater","month","department"]:
-                ...
+            if not para_value and i in ["quater","month","department"]:
+                raise ValueError(f"{i}is missing")
             elif not para_value and i =="username":
                 raise Http404()
+            elif i=="date" and not para_value:
+                ...
             else:
                 query_parameter[i]=para_value
+        print(query_parameter)
         superuser=request.user.is_superuser
         if query_parameter.get("username") and superuser:
             data=get_addeded_entries(request,**query_parameter)
@@ -81,14 +92,17 @@ def get_entries(request: HttpRequest):
             data=get_addeded_entries(request,**query_parameter)
             
         else:
-                raise PermissionDenied("Not authorised")
-
+            raise PermissionDenied("Not authorised")
+        
+    except ValueError as e:
+            print(e)
+            return JsonResponse({"message":f"{e}"},status=status.HTTP_203_NON_AUTHORITATIVE_INFORMATION)
     except PermissionDenied as e:
             print(e)
             return JsonResponse({"message":"you are not authorised to access other users records"},status=status.HTTP_403_FORBIDDEN)
     except Exception as e:
             print(e)
-            return JsonResponse({"error": str(e)}, status=500)
+            return JsonResponse({"error": str(e)}, status=status.HTTP_501_NOT_IMPLEMENTED)
     else:
         if isinstance(data,JsonResponse):
             return data
@@ -118,6 +132,8 @@ def get_meeting_head_and_subhead(request:HttpRequest,user_id:str):
     try:
         user=get_object_or_404(User,username=user_id)
         user_profile=get_object_or_404(Profile,Employee_id=user)
+        if user_profile.Role.role_name in ["MD","Admin"]:
+            return JsonResponse([],safe=False,status=status.HTTP_200_OK)
         data=request.GET
         if not data:
             get_quater_data=get_financial_year_details()
@@ -141,7 +157,7 @@ def get_meeting_head_and_subhead(request:HttpRequest,user_id:str):
         return JsonResponse({"Message":"http 404 error occured"})
     except Exception as e:
         print(e)
-        return JsonResponse({"Message":"Database error occured"}) 
+        return JsonResponse({"Message":f"{e}"}) 
     else:
         get_monthly_schedule_set=Monthly_department_head_and_subhead.objects.filter(month_of_the_quater=reverse_month,quater=quarter_obj,
                                                                         department=department_obj)

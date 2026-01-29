@@ -41,7 +41,7 @@ def create_task(request:HttpRequest):
         # print(body_data)
         # body_data["assigned_to"]=u_profile.Employee_id
     except Http404 as e:
-        print(e)
+        # print(e)
         return JsonResponse({"message":f"{e}"},status=status.HTTP_403_FORBIDDEN)
     except Exception as e:
         # print(e)
@@ -246,6 +246,79 @@ def get_task_messages(request: HttpRequest, task_id:int):
         ]
 
         return JsonResponse(data, safe=False)
+
+
+def add_task_assignees(request: HttpRequest):
+    verify_method = verifyPatch(request)
+    if verify_method:
+        return verify_method
+
+    data = load_data(request)
+    task_id = data.get("task_id")
+    assignees = data.get("assignees")
+
+    if not task_id or not assignees:
+        return JsonResponse(
+            {"error": "task_id and assignees are required"},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    try:
+        task = get_object_or_404(Task, task_id=task_id)
+
+        for username in assignees:
+            user = get_object_or_404(User, username=username)
+            TaskAssignies.objects.get_or_create(
+                task=task,
+                assigned_to=user
+            )
+
+        return JsonResponse(
+            {"message": "Assignees added successfully"},
+            status=status.HTTP_200_OK
+        )
+
+    except Http404 as e:
+        return JsonResponse({"error": str(e)}, status=status.HTTP_404_NOT_FOUND)
+
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+def remove_task_assignees(request: HttpRequest):
+    verify_method = verifyDelete(request)
+    if verify_method:
+        return verify_method
+
+    data = load_data(request)
+    task_id = data.get("task_id")
+    assignees = data.get("assignees")
+
+    if not task_id or not assignees:
+        return JsonResponse(
+            {"error": "task_id and assignees are required"},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    try:
+        task = get_object_or_404(Task, id=task_id)
+
+        for username in assignees:
+            user = get_object_or_404(User, username=username)
+            TaskAssignies.objects.filter(
+                task=task,
+                assigned_to=user
+            ).delete()
+
+        return JsonResponse(
+            {"message": "Assignees removed successfully"},
+            status=status.HTTP_200_OK
+        )
+
+    except Http404 as e:
+        return JsonResponse({"error": str(e)}, status=status.HTTP_404_NOT_FOUND)
+
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 def sort_tasks_by_date(request: HttpRequest):

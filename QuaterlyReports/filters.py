@@ -44,7 +44,7 @@ def get_month_quater_object(month:str,quater:str,department:str):
     month=reversed_quater_month[quater][month]
     department_obj=get_department_object(dept=department)
     try:
-        obj=Monthly_department_head_and_subhead.objects.filter(department=department_obj,quater=quater_obj,month_of_the_quater=month)
+        obj=Monthly_department_head_and_subhead.objects.filter(department=department_obj,quater=quater_obj,month_of_the_quater=month).first()
         return obj
     except Monthly_department_head_and_subhead.DoesNotExist as e:
         print(e)
@@ -80,9 +80,11 @@ def get_financial_year_details():
 
 def get_addeded_entries(request:HttpRequest,**argu):
         try:
+            # print(argu)
             month=argu.get("month",None)
             quater=argu.get("quater",None)
             department=argu.get("department",None)
+            # print(month,quater,department)
             if month and quater and department:
                 month_and_quater_obj=get_month_quater_object(month=month,quater=quater,department=department)
             else:
@@ -120,4 +122,6 @@ def get_addeded_entries(request:HttpRequest,**argu):
         except Exception as e:
             print(e)
             return JsonResponse({"error": str(e)}, status=500)
-            ...
+        
+def has_user_entries_seen_access():
+    ...
