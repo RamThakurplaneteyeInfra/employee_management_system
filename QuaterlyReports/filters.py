@@ -115,9 +115,9 @@ def get_addeded_entries(request:HttpRequest,**argu):
         except ValueError as e:
             print(e)
             return JsonResponse({"error": "query parameter is absent"}, status=status.HTTP_203_NON_AUTHORITATIVE_INFORMATION)
-        except Http404 as e:
-            print(e)
-            return JsonResponse({"error": "User profile not found"}, status=status.HTTP_404_NOT_FOUND)
+        # except Http404 as e:
+        #     print(e)
+        #     return JsonResponse({"error": "User profile not found"}, status=status.HTTP_404_NOT_FOUND)
         except Exception as e:
             print(e)
             return JsonResponse({"error": str(e)}, status=status.HTTP_404_NOT_FOUND)

@@ -164,7 +164,8 @@ def get_meeting_head_and_subhead(request:HttpRequest,user_id:str):
     else:
         get_monthly_schedule_set=Monthly_department_head_and_subhead.objects.filter(month_of_the_quater=reverse_month,quater=quarter_obj,
                                                                         department=department_obj)
-        values=[{"quater":obj.quater.quater,
+        values=[{"id":obj.id,
+                "quater":obj.quater.quater,
                 "financial_year":financial_year,
                 "month":reverse_month,
                 "actual_month":actual_month,
