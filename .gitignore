@@ -1,5 +1,14 @@
 .env
 db.sqlite3
 accounts/__pycache__
+events/__pycache__
+Messaging/__pycache__
+adminpanel/__pycache__
+ems/__pycache__
+maintenance/__pycache__
+QuaterlyReports/__pycache__
+task_management/__pycache__
+adminpanel/__pycache__
+events/__pycache__
 ActionableGoals.csv
 FunctionGoals.csv

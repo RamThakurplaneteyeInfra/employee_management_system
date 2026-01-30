@@ -20,7 +20,7 @@ def create_multiple_user_entries(request: HttpRequest):
         month_quater_id = data.get("month_quater_id")
         entries = data.get("entries")
         if not all(fields):
-            return JsonResponse({"error": "Invalid payload"},)
+            return JsonResponse({"message": "Invalid payload"},)
         user = request.user
         month_quater = Monthly_department_head_and_subhead.objects.get(id=month_quater_id)
         created_entries = []
@@ -51,7 +51,7 @@ def create_multiple_user_entries(request: HttpRequest):
         return JsonResponse({"error": "User not found, pass the correct username"},status=404)
     
     except TaskStatus.DoesNotExist:
-        return JsonResponse({"error": "Incorrect Status passed in the body"}, status=404)
+        return JsonResponse({"message": "Incorrect Status passed in the body"},status=404)
 
     except Monthly_department_head_and_subhead.DoesNotExist:
         return JsonResponse({"error": "Invalid month_quater_id"}, status=404)
@@ -128,6 +128,25 @@ def change_status(request: HttpRequest,user_entry_id:int):
         return JsonResponse({"message":f"{e}"})
     else:
         return JsonResponse({"message":f"Status Changed to {changed_to}"})
+    
+@login_required
+@csrf_exempt
+def delete_entry(request: HttpRequest,user_entry_id:int):
+    request_method=verifyDelete(request)
+    if request_method:
+        return request_method
+    try:
+        user_entry=get_object_or_404(UsersEntries,id=user_entry_id)
+        if user_entry.user==request.user:
+            user_entry.delete()
+        else:
+            raise PermissionDenied("you are not authorised")
+    except PermissionDenied as e:
+        return JsonResponse({"message":f"{e}"},status=status.HTTP_403_FORBIDDEN)
+    except Http404 as e:
+        return JsonResponse({"message":f"{e}"},status=status.HTTP_404_NOT_FOUND)
+    else:
+        return JsonResponse({"message":f"entry deleted successfully"},status=status.HTTP_200_OK)
 # Create your views here.
 
 @login_required

@@ -5,5 +5,6 @@ urlpatterns = [
     path("addDayEntries/",create_multiple_user_entries),
     path("getUserEntries/",get_entries),
     path("changeStatus/<int:user_entry_id>/",change_status),
+    path("deleteEntry/<int:user_entry_id>/",delete_entry),
     path("addMeetingHeadSubhead/",add_meeting_head_subhead),
 ]

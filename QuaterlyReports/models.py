@@ -120,22 +120,4 @@ class SalesStatistics(models.Model):
             ordering=["grp"]
 # Create your models here.
 
-# function_goal_obj=FunctionsGoals.objects.get(id=21)
-# for i in ["Making raw material cheaper","Completing the process quickly","Controlling all centres of value creation","Process/ingredient quality doesn’t have to be pushed","Procuring the product from another"]:
-#     ActionableGoals.objects.create(FunctionGoal=function_goal_obj,purpose=i)
-
-# function_goal_obj=FunctionsGoals.objects.get(id=22)
-# for i in ["Does reduction","Increasing effectiveness over a longer period of time","Increasing the activity spectrum","Maintaining effectiveness in different situations"]:
-#     ActionableGoals.objects.create(FunctionGoal=function_goal_obj,purpose=i)
-    
-# function_goal_obj=FunctionsGoals.objects.get(id=23)
-# for i in ["Finding flows in a product through the eyes of the customer","Product never feels customer-oriented","Which quality makes the product long-term in the market","Making the quality stronger","Finding out which feature/part of the product is underutilized"]:
-#     ActionableGoals.objects.create(FunctionGoal=function_goal_obj,purpose=i)
-    
-# function_goal_obj=FunctionsGoals.objects.get(id=24)
-# for i in ["Identifying needs through regular contact","Find out where quality fails short","New product iterations, four directions of study","If your product is not there, there is a need for it","Find out what will be done"]:
-#     ActionableGoals.objects.create(FunctionGoal=function_goal_obj,purpose=i)
-    
-# function_goal_obj=FunctionsGoals.objects.get(id=25)
-# for i in ["competition monitoring","Trend tracking","Edge creation"]:
-#     ActionableGoals.objects.create(FunctionGoal=function_goal_obj,purpose=i)
+# data={"Marketing":[{"quater":"Q1","month":}]}

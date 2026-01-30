@@ -60,6 +60,7 @@ INSTALLED_APPS = [
     "accounts",
     "task_management",
     "Messaging",
+    "events",
     "QuaterlyReports",
     "adminpanel",
     # "channels",

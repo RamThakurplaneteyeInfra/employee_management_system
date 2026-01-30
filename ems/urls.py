@@ -27,6 +27,7 @@ urlpatterns = [
     path("messaging/",include("Messaging.urls"),name="Messaging"),
     path("",include("QuaterlyReports.urls"),name="QuaterlyReports"),
     path('adminapi/', include('adminpanel.urls'),name="adminpanelapi"),
+    path('eventsapi/', include('events.urls'),name="eventsapi")
 ]
 
 if settings.DEBUG:
