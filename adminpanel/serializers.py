@@ -59,7 +59,7 @@ class BillSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = Bill
-        fields = ['id', 'category', 'amount', 'recipient', 'created_at',"status"]
+        fields = ['id', 'category', 'amount', 'recipient', 'created_at',"status","date"]
         read_only_fields = ['created_at']
 
 

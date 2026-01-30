@@ -22,6 +22,7 @@ def create_multiple_user_entries(request: HttpRequest):
         if not all(fields):
             return JsonResponse({"error": "Invalid payload"},)
         user = request.user
+        month_quater = Monthly_department_head_and_subhead.objects.get(id=month_quater_id)
         created_entries = []
         for entry in entries:
             note=entry.get("note")
@@ -31,7 +32,6 @@ def create_multiple_user_entries(request: HttpRequest):
                 continue
 
             status_obj=get_taskStatus_object(status_name=status)
-            month_quater = Monthly_department_head_and_subhead.objects.get(id=month_quater_id)
 
             obj = UsersEntries.objects.create(
                 status=status_obj,

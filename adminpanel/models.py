@@ -33,6 +33,7 @@ class Asset(models.Model):
         return self.asset_name
     
 #  Bill Category (Dropdown)
+# This class represents a bill category in a Python Django model.
 class BillCategory(models.Model):
     name = models.CharField(max_length=100, unique=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -48,8 +49,9 @@ class BillCategory(models.Model):
 # Bills
 class Bill(models.Model):
     status = models.ForeignKey(TaskStatus,db_column="current_status",null=True,on_delete=models.CASCADE,serialize=True)
-    category = models.ForeignKey(BillCategory, on_delete=models.PROTECT)
+    category = models.ForeignKey(BillCategory, on_delete=models.CASCADE)
     amount = models.DecimalField(max_digits=10, decimal_places=2)
+    date=models.DateField(auto_now_add=False,auto_now=False,default=None,null=True)
     recipient = models.CharField(max_length=200)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at=models.DateTimeField(auto_now=True)

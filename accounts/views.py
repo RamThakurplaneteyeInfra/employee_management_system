@@ -154,18 +154,12 @@ def get_session_data(request: HttpRequest):
 def user_login(request:HttpRequest):
     # request content type is in json format
     verify_method=verifyPost(request)
-    if not verify_method:
-        if request.content_type=="application/json":
-            data=json.loads(request.body)
-            u= data.get('username')
-            p = data.get('password')
-    # for other types of body content 
-        else:
-            data=request.POST
-            u=data.get('username')
-            p=data.get('password')
-    else: 
+    if verify_method:
         return verify_method
+    data=load_data(request)
+    u=data.get("username")
+    p=data.get("password")
+    # for other types of body content    
     try:
         if not u or not p:
             return JsonResponse({"message":"username or password is missing"},status=status.HTTP_204_NO_CONTENT)

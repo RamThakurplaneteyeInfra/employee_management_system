@@ -96,29 +96,9 @@ class Functions(models.Model):
     
 # obj=Quaters.create_quater(quater="Q3",starting_month=9,ending_month=12)
 # Financial_years_Quaters_Mapping.add_quaterwise_year(quater=obj,financial_year_start=2026,financial_year_end=2027)
-# Roles.objects.create(role_name="Admin")  
-# Roles.objects.create(role_name="MD")        
-# Roles.objects.create(role_name="Employee")        
-# Roles.objects.create(role_name="Intern")        
-# Roles.objects.create(role_name="TeamLead")        
-
+# Roles.objects.create(role_name="Admin")       
 # Branch.objects.create(branch_name="Farm Core")
-# Branch.objects.create(branch_name="Farm Tech")
-# Branch.objects.create(branch_name="Infra Core")
-# Branch.objects.create(branch_name="Infra Tech")
-# Branch.objects.create(branch_name="Technology")
-
 # Designation.objects.create(designation="Python Developer")
-# Designation.objects.create(designation="AI/ML Developer")
-# Designation.objects.create(designation="Web Developer")
-# Designation.objects.create(designation="Backend Developer")
-# Designation.objects.create(designation="Precision Agriculture Manager")
-# Designation.objects.create(designation="Digital Marketing Manager")
-# Designation.objects.create(designation="Project Supervisor")
-# Designation.objects.create(designation="Designer Engineer")
-# Designation.objects.create(designation="Site Engineer")
-# Designation.objects.create(designation="Field Officer")
-
 # for i in ["NPD","MMR","RG","HC","IP"]:
 #     Functions.objects.create(function=i)
 
