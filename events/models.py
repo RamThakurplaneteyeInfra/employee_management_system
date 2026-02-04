@@ -120,3 +120,22 @@ class Event(models.Model):
 
     def __str__(self):
         return self.title
+class Meeting(models.Model):
+    """
+    Model representing a meeting booking.
+    """
+    MEETING_TYPE_CHOICES = [("individual", "Individual"),("group", "Group Meeting"),]
+
+    users = models.ManyToManyField(User)
+    meeting_type=models.CharField(choices=MEETING_TYPE_CHOICES)
+    time = models.SmallIntegerField(default=5)
+    meeting_room = models.ForeignKey(Room,on_delete=models.CASCADE,null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    is_active=models.BooleanField(default=True,null=False)
+    
+    class Meta:
+        db_table='team_management"."MeetingPush'
+        ordering=["-created_at","is_active"]
+    
+    def __str__(self):
+        return f"{self.title} - {self.name} ({self.meeting_room})"

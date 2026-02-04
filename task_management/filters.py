@@ -1,6 +1,6 @@
 from django.http import HttpRequest, JsonResponse
 from accounts.models import Profile
-from django.db.models import Q,F
+from django.db.models import Q,F,Count
 from accounts.views import status
 from accounts.filters import get_users_Name
 from task_management.models import *
@@ -128,13 +128,15 @@ def get_tasks_by_type(request:HttpRequest,type:str="all",self_created: bool=True
         assignees=TaskAssignies.objects.filter(assigned_to=request.user)
         task_data=[]
         for user in assignees:
+            task_obj=user.task
             sample={
-                "task_id":user.task.task_id,
-                "title":user.task.title,
-                "description":user.task.description,
-                "status":user.task.status.status_name,
-                "created_by":get_users_Name(user.task.created_by),
-                "due-date":user.task.due_date.strftime("%d/%m/%Y"),
+                "task_id":task_obj.task_id,
+                "title":task_obj.title,
+                "description":task_obj.description,
+                "status":task_obj.status.status_name,
+                "created_by":get_users_Name(task_obj.created_by),
+                "due-date":task_obj.due_date.strftime("%d/%m/%Y"),
+                "type":task_obj.type.type_name,
             }
             task_data.append(sample)
         return task_data
@@ -143,14 +145,16 @@ def get_tasks_by_type(request:HttpRequest,type:str="all",self_created: bool=True
         assignees=TaskAssignies.objects.filter(assigned_to=request.user)
         task_data=[]
         for user in assignees:
-            if user.task.type.type_name==type:
+            task_obj=user.task
+            if task_obj.type.type_name==type:
                 sample={
-                    "task_id":user.task.task_id,
-                    "title":user.task.title,
-                    "description":user.task.description,
-                    "status":user.task.status.status_name,
-                    "created_by":get_users_Name(user.task.created_by),
-                    "due-date":user.task.due_date.strftime("%d/%m/%Y"),
+                    "task_id":task_obj.task_id,
+                    "title":task_obj.title,
+                    "description":task_obj.description,
+                    "status":task_obj.status.status_name,
+                    "created_by":get_users_Name(task_obj.created_by),
+                    "due-date":task_obj.due_date.strftime("%d/%m/%Y"),
+                    "type":task_obj.type.type_name,
                 }
                 task_data.append(sample)
         return task_data

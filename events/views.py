@@ -6,15 +6,8 @@ from rest_framework.response import Response
 
 from events.permissions import IsAdminOrMD
 from rest_framework.permissions import IsAuthenticated,AllowAny
-from .models import Holiday, BookSlot, Tour, Event, Room, BookingStatus
-from .serializers import (
-    HolidaySerializer,
-    BookSlotSerializer,
-    TourSerializer,
-    EventSerializer,
-    RoomSerializer,
-    BookingStatusSerializer
-)
+from .models import *
+from .serializers import *
 
 class BookSlotViewSet(ModelViewSet):
     queryset = BookSlot.objects.all()
@@ -102,6 +95,26 @@ class EventViewSet(ModelViewSet):
     serializer_class = EventSerializer
     authentication_classes = [CsrfExemptSessionAuthentication]
 
+class MeetingViewSet(ModelViewSet):
+    # Optimized query with prefetch for M2M users and select for ForeignKey room
+    queryset = Meeting.objects.all().select_related('meeting_room').prefetch_related('users')
+    serializer_class = MeetingSerializer
+    authentication_classes = [CsrfExemptSessionAuthentication]
+    
+    def get_permissions(self):
+        """
+        Assigns permissions based on the HTTP action.
+        """
+        if self.action in ['list', 'retrieve']:
+            # Open to everyone
+            return [IsAuthenticated()]
+        
+        elif self.action in ['create', 'update', 'partial_update', 'destroy']:
+            # Restrict to Superusers only
+            return [IsAuthenticated(),IsAdminOrMD()]
+        else:
+            return [AllowAny()]
+        
 # @api_view(["GET"])
 # def rooms_dropdown(request):
 #     rooms = Room.objects.filter(is_active=True)

@@ -8,7 +8,7 @@ def add_task_count_for_Assignee(sender,created, instance:TaskAssignies, **kwargs
     if created:
         user=instance.assigned_to
         try:
-            obj=AssingnedTasksCount.objects.get(assigned_to=user)
+            obj=AssingnedTasksCount.objects.get(assignee=user)
         except AssingnedTasksCount.DoesNotExist:
             obj=AssingnedTasksCount.objects.create(assignee=user)
             for i in ["1 Day","SOS","10 Day","Monthly","Quaterly"]:

@@ -2,6 +2,7 @@ from accounts.filters import get_user_role
 from .filters import *
 from .models import *
 from ems.verify_methods import *
+
 # # # # # #  baseurl="http://localhost:8000" # # # # # # # # # # # # 
 
 # Lands on the Home page.applicable method-"GET"
@@ -130,7 +131,9 @@ def show_created_tasks(request: HttpRequest):
 def show_assigned_tasks(request: HttpRequest):
     if request.method!="GET":
         return JsonResponse({"error": "Method not allowed"}, status=405)
-    type=request.GET.get("type")
+    query_parameter=request.GET
+    type=query_parameter.get("type")
+    status=query_parameter.get("status")
     try:
         if type in ["all","SOS","1 Day","10 Day","Monthly","Quaterly"]:
             response=get_tasks_by_type(request,type=type,self_created=False)
@@ -247,6 +250,19 @@ def get_task_messages(request: HttpRequest, task_id:int):
 
         return JsonResponse(data, safe=False)
 
+@login_required
+def get_task_count_from_username(request:HttpRequest,username:str):
+    verify_method=verifyGet(request)
+    if verify_method:
+        return verify_method
+    try:
+        user_obj=get_object_or_404(User,username=username)
+        TaskAssignies_set_count=TaskAssignies.objects.filter(assigned_to=user_obj).values(status=F("task__status__status_name")).annotate(count=Count("task_id")).order_by("status")
+    except Exception as e:
+        print(e)
+        return JsonResponse({"msg":str(e)},status=400)
+    else:
+        return JsonResponse(list(TaskAssignies_set_count),safe=False,status=200)
 
 def add_task_assignees(request: HttpRequest):
     verify_method = verifyPatch(request)
