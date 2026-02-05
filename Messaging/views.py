@@ -1,10 +1,9 @@
-from accounts.filters import get_user_object, get_users_Name
-from accounts.models import Profile,User
-from .models import *
+# from accounts.filters import get_user_object, get_users_Name
+# from accounts.models import Profile,User
+# from .models import *
 from .permissions import *
 from .snippet import add_participant_to_groupMembers
 from .filters import *
-from ems.verify_methods import *
 
 @csrf_exempt
 @login_required
@@ -320,7 +319,7 @@ def search_or_find_conversation(request:HttpRequest):
             return verify_method
     data=request.GET
     if data:
-        search_name=request.get("search_name")
+        search_name=data.get("search_name")
         profiles=Profile.objects.filter(Name__startswith=search_name).exclude(Employee_id=request.user).order_by("Name").values("Names")
     else:
         profiles=Profile.objects.exclude(Employee_id=request.user).order_by("Name").values("Names")
