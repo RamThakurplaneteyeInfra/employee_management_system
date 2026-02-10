@@ -1,5 +1,6 @@
 from rest_framework import serializers
 from .models import Functions, FunctionsGoals, ActionableGoals,FunctionsEntries
+from task_management.models import TaskStatus
 
 class ActionableGoalSerializer(serializers.ModelSerializer):
     class Meta:
@@ -24,11 +25,27 @@ class FunctionDetailSerializer(serializers.ModelSerializer):
         
         
 class FunctionsEntriesSerializer(serializers.ModelSerializer):
-    # We display the string representation but expect the ID for writes
-    status_display = serializers.CharField(source='status.status_name', read_only=True)
-    goal_purpose = serializers.CharField(source='goal.purpose', read_only=True)
-
+    status= serializers.SlugRelatedField(
+        slug_field='status_name',
+        queryset=TaskStatus.objects.all()
+    )
     class Meta:
         model = FunctionsEntries
-        fields = ['id', 'goal', 'goal_purpose', 'Creator', 'date', 'time', 'status', 'status_display', 'note']
-        read_only_fields = ['time', 'Creator'] # Creator is usually set via the request user
+        fields = ['id', 'goal',"Creator",'date', 'time', 'status', 'note']
+        read_only_fields = ['time', 'Creator']
+
+    # def create(self, validated_data):
+        # notes = validated_data.pop('note')
+        # # creator = validated_data.get('Creator')
+        
+        # # If 'note' is a list, create multiple entries
+        # if isinstance(notes, list):
+        #     entries = [
+        #         FunctionsEntries(**validated_data, note=n) 
+        #         for n in notes
+        #     ]
+        #     # bulk_create is highly optimized for performance
+        #     return FunctionsEntries.objects.bulk_create(entries)
+        
+        # # If 'note' is a single string, create normally
+        # return FunctionsEntries.objects.create(note=notes, **validated_data)

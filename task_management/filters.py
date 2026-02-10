@@ -5,6 +5,7 @@ from accounts.views import status
 from accounts.filters import get_users_Name
 from task_management.models import *
 from accounts.filters import get_role_object,get_designation_object
+from datetime import date
 
 # # # # # #  baseurl="http://localhost:8000" # # # # # # # # # # # # 
     
@@ -86,22 +87,30 @@ def get_default_task_status():
     else:
         None
     
+
 # Fetch tasks by its types
 # endpoint for "Created_Tasks"-{{baseurl}}/tasks/viewTasks/?type= 
 # endpoint for "Assigned_Reported"-{{baseurl}}/tasks/viewAssignedTasks/?type= 
-def get_tasks_by_type(request:HttpRequest,type:str="all",self_created: bool=True):
-
+def get_tasks_by_type(request:HttpRequest,type:str="all",self_created: bool=True,Date=None):
+    # if not Date:
+    #     current_date=datetime.now().date()
     if type.lower()=="all" and self_created:
         tasks=Task.objects.filter(created_by=request.user)
         task_data=[]
         for t in tasks:
+            users_name=get_users_Name(t.created_by)
+            assignee=list(get_assignees(task=t))
             sample={
                 "task_id":t.task_id,
                 "title":t.title,
                 "description":t.description,
                 "status":t.status.status_name,
                 "due-date":t.due_date.strftime("%d/%m/%Y"),
-                "assignees":list(get_assignees(task=t)),
+                "report_to":users_name,
+                "created_by":users_name,
+                "created_at":t.created_at.strftime("%d/%m/%Y"),
+                "assigned_to":assignee,
+                "reported_by":assignee,
                 "type":t.type.type_name,
             }
             task_data.append(sample)
@@ -112,51 +121,67 @@ def get_tasks_by_type(request:HttpRequest,type:str="all",self_created: bool=True
         tasks=Task.objects.filter(created_by=request.user,type=type_obj)
         task_data=[]
         for t in tasks:
+            users_name=get_users_Name(t.created_by)
+            assignee=list(get_assignees(task=t))
             sample={
                 "task_id":t.task_id,
                 "title":t.title,
                 "description":t.description,
                 "status":t.status.status_name,
                 "due-date":t.due_date.strftime("%d/%m/%Y"),
-                "assignees":list(get_assignees(task=t)),
+                "created_at":t.created_at.strftime("%d/%m/%Y"),
+                "report_to":users_name,
+                "created_by":users_name,
+                "assigned_to":assignee,
+                "reported_by":assignee,
                 "type":t.type.type_name,
             }
             task_data.append(sample)
         return task_data
     
     elif type.lower()=="all" and not self_created:
-        assignees=TaskAssignies.objects.filter(assigned_to=request.user)
+        Task_assignee=TaskAssignies.objects.select_related("task").filter(assigned_to=request.user)
         task_data=[]
-        for user in assignees:
-            task_obj=user.task
+        for task in Task_assignee:
+            task_obj=task.task
+            users_name=get_users_Name(task_obj.created_by)
+            # print(task_obj.created_at.date())
+            # print(task_obj.created_at.date()==current_date)
+            # if task_obj.created_at.date() == current_date:
             sample={
-                "task_id":task_obj.task_id,
-                "title":task_obj.title,
-                "description":task_obj.description,
-                "status":task_obj.status.status_name,
-                "created_by":get_users_Name(task_obj.created_by),
-                "due-date":task_obj.due_date.strftime("%d/%m/%Y"),
-                "type":task_obj.type.type_name,
-            }
-            task_data.append(sample)
-        return task_data
-    
-    elif type and not self_created:
-        assignees=TaskAssignies.objects.filter(assigned_to=request.user)
-        task_data=[]
-        for user in assignees:
-            task_obj=user.task
-            if task_obj.type.type_name==type:
-                sample={
                     "task_id":task_obj.task_id,
                     "title":task_obj.title,
                     "description":task_obj.description,
                     "status":task_obj.status.status_name,
-                    "created_by":get_users_Name(task_obj.created_by),
+                    "created_by":users_name,
+                    "report_to":users_name,
+                    "created_at":task_obj.created_at.strftime("%d/%m/%Y"),
                     "due-date":task_obj.due_date.strftime("%d/%m/%Y"),
+                    "created_at":task_obj.created_at.strftime("%d/%m/%Y"),
                     "type":task_obj.type.type_name,
                 }
-                task_data.append(sample)
+            task_data.append(sample)
+        return task_data
+    
+    elif type and not self_created:
+        Task_assignee=TaskAssignies.objects.select_related("task").filter(assigned_to=request.user)
+        task_data=[]
+        for task in Task_assignee:
+            task_obj=task.task
+            users_name=get_users_Name(task_obj.created_by)
+            # if task_obj.type.type_name==type and task_obj.created_at.date()==current_date:
+            sample={
+                    "task_id":task_obj.task_id,
+                    "title":task_obj.title,
+                    "description":task_obj.description,
+                    "status":task_obj.status.status_name,
+                    "created_by":users_name,
+                    "report_to":users_name,
+                    "due-date":task_obj.due_date.strftime("%d/%m/%Y"),
+                    "created_at":task_obj.created_at.strftime("%d/%m/%Y"),
+                    "type":task_obj.type.type_name,
+                }
+            task_data.append(sample)
         return task_data
 
     else:

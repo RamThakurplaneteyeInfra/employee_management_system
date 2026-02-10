@@ -5,7 +5,10 @@ from task_management.filters import get_taskStatus_object
 from .filters import *
 from rest_framework import status
 from .serializers import FunctionsEntriesSerializer
-from rest_framework.decorators import api_view
+from rest_framework.decorators import api_view,permission_classes
+from datetime import date
+from rest_framework.permissions import IsAuthenticated
+from .permissions import EntryPermission
 
 
 @csrf_exempt
@@ -271,30 +274,42 @@ def get_functions_and_actionable_goals(request: HttpRequest):
     except Functions.DoesNotExist:
         return JsonResponse({"error": f"Function '{function_name}' not found."}, status=404)
     ...
-    
 
 
 @api_view(['GET', 'POST'])
-def entry_list_create(request):
+@permission_classes([IsAuthenticated, EntryPermission]) 
+def entry_list_create(request: HttpRequest):
     # FETCH ALL (Read)
-    if request.method == 'GET':
-        entries = FunctionsEntries.objects.all()
-        serializer = FunctionsEntriesSerializer(entries, many=True)
-        return Response(serializer.data)
-
-    # ADD ENTRY (Create)
-    elif request.method == 'POST':
-        serializer = FunctionsEntriesSerializer(data=request.data)
-        if serializer.is_valid():
-            # Injecting the current user as the Creator
-            serializer.save(Creator=request.user)
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-@api_view(['GET', 'PUT', 'DELETE'])
-def entry_detail_update_delete(request, pk):
     try:
-        entry = FunctionsEntries.objects.get(pk=pk)
+        if request.method == 'GET':
+            current_date=date.today()
+            current_month=current_date.month
+            current_year=current_date.year
+            entries = FunctionsEntries.objects.all().filter(Creator=request.user,date__month=current_month,date__year=current_year)
+            serializer = FunctionsEntriesSerializer(entries, many=True)
+            return Response(serializer.data)
+
+        # ADD ENTRY (Create)
+        elif request.method == 'POST':
+            # is_many = isinstance(request.data, list)
+            print(request.data)
+            serializer = FunctionsEntriesSerializer(data=request.data)
+            # serializer = FunctionsEntriesSerializer(data=request.data)
+            # print(serializer)
+            if serializer.is_valid():
+                # Injecting the current user as the Creator
+                print(request.user)
+                serializer.save(Creator=request.user)
+                return Response(serializer.data, status=status.HTTP_201_CREATED)
+            return Response("error occured", status=status.HTTP_400_BAD_REQUEST)
+    except Exception as e:
+        return Response(f"{e}", status=status.HTTP_400_BAD_REQUEST)
+
+@api_view(['GET', 'PUT', 'DELETE',"PATCH"])
+@permission_classes([IsAuthenticated, EntryPermission]) 
+def entry_detail_update_delete(request, id):
+    try:
+        entry = FunctionsEntries.objects.get(pk=id)
     except FunctionsEntries.DoesNotExist:
         return Response({'error': 'Entry not found'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -304,7 +319,7 @@ def entry_detail_update_delete(request, pk):
         return Response(serializer.data)
 
     # UPDATE ENTRY (Status and Content)
-    elif request.method == 'PUT':
+    elif request.method in ["PUT", "PATCH"]:
         # partial=True allows updating just 'status' or 'note' without sending all fields
         serializer = FunctionsEntriesSerializer(entry, data=request.data, partial=True)
         if serializer.is_valid():

@@ -26,7 +26,7 @@ def create_task(request:HttpRequest):
     data=load_data(request)
     required_fields=["title","description","due_date","assigned_to","type"]
     body_data={}
-    participant=[]
+    # participant=[]
     # print("error2")
     for i in required_fields:
         field_value=data.get(i)
@@ -42,14 +42,14 @@ def create_task(request:HttpRequest):
         # print(body_data)
         # body_data["assigned_to"]=u_profile.Employee_id
     except Http404 as e:
-        print(e)
+        # print(e)
         return JsonResponse({"message":f"{e}"},status=status.HTTP_403_FORBIDDEN)
     except Exception as e:
         # print(e)
         return JsonResponse({"message":f"{e}"},status=status.HTTP_501_NOT_IMPLEMENTED)
     else:
         try:
-            print(body_data)
+            # print(body_data)
             task = Task.objects.create(**body_data)
             for userid in assignees:
                     user= get_object_or_404(User,username=userid)
@@ -57,10 +57,10 @@ def create_task(request:HttpRequest):
             # print("error 5")
             return JsonResponse({"message": "Task created"},status=status.HTTP_201_CREATED) 
         except Exception as e:
-            print(e)
+            # print(e)
             return JsonResponse({"message":f"{e}"},status=status.HTTP_501_NOT_IMPLEMENTED)
         except Http404 as e:
-            print(e)
+            # print(e)
             return JsonResponse({"message":f"{e}"},status=status.HTTP_404_NOT_FOUND)
 # Update a particular Task. applicable method-"POST",insert path parameter "task_id" of type integer. 
 # endpoint-{{baseurl}}/tasks/{task_id}/updateTask/
@@ -78,7 +78,7 @@ def update_task(request,task_id:int):
     except PermissionDenied:
         return JsonResponse({"message":"you cannot update or edit this task"},status=status.HTTP_403_FORBIDDEN)
     except Exception as e:
-        print(e)
+        # print(e)
         return JsonResponse({"message":f"{e}"},status=status.HTTP_404_NOT_FOUND)
     
     fields=["title","description","due_date","type"]
@@ -114,15 +114,16 @@ def show_created_tasks(request: HttpRequest):
     if verify_method:
         return verify_method
     type=request.GET.get("type")
+    date=request.GET.get("date")
     try:
         if type in ["all","SOS","1 Day","10 Day","Monthly","Quaterly"]:
-            response=get_tasks_by_type(request=request,type=type)
+            response= get_tasks_by_type(request=request,type=type)
         else:
-            response=get_tasks_by_type(request)
+            response= get_tasks_by_type(request)
         # print(response)
         return JsonResponse(response,safe=False)
     except Exception as e:
-        return JsonResponse({"msg":f"{e}"},status=status.HTTP_501_NOT_IMPLEMENTED)
+        return JsonResponse({"msg":f"{e}"})
     ...
     
 # Shows assigned/reporting tasks by other users.applicable method-"GET"
@@ -353,7 +354,3 @@ def sort_tasks_by_assigend_to(request: HttpRequest):
     
 def sort_tasks_by_assigned_by(request: HttpRequest):
     ...
-    
-    
-    
-
