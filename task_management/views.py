@@ -337,6 +337,7 @@ def remove_task_assignees(request: HttpRequest):
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+# ***************************************************** Initialised APIs ************************************************************
 
 def sort_tasks_by_date(request: HttpRequest):
     ...

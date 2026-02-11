@@ -284,8 +284,24 @@ def entry_list_create(request: HttpRequest):
         if request.method == 'GET':
             current_date=date.today()
             current_month=current_date.month
-            current_year=current_date.year
-            entries = FunctionsEntries.objects.all().filter(Creator=request.user,date__month=current_month,date__year=current_year)
+            query_data=request.GET()
+            username=query_data.get("username")
+            month=query_data.get("month")
+            permissible=False
+            if username and request.user.is_superuser:
+                user_obj=get_object_or_404(User,username=username)
+                permissible=True
+            if not username and not month:
+                entries = FunctionsEntries.objects.all().filter(Creator=request.user,date__month=current_month)
+            elif not username and month:
+                entries = FunctionsEntries.objects.all().filter(Creator=request.user,date__month=month)
+            elif permissible and month:
+                entries = FunctionsEntries.objects.all().filter(Creator=user_obj,date__month=month)
+            elif permissible:
+                entries = FunctionsEntries.objects.all().filter(Creator=user_obj,date__month=current_month)
+            else:
+                raise PermissionDenied("You are not authorised to do this action")
+            # current_year=current_date.year
             serializer = FunctionsEntriesSerializer(entries, many=True)
             return Response(serializer.data)
 
@@ -299,6 +315,8 @@ def entry_list_create(request: HttpRequest):
             return Response("error occured", status=status.HTTP_400_BAD_REQUEST)
     except Exception as e:
         return Response(f"{e}", status=status.HTTP_400_BAD_REQUEST)
+    except PermissionDenied as e:
+        return Response(e, status=status.HTTP_400_BAD_REQUEST)
 
 @api_view(['GET', 'PUT', 'DELETE',"PATCH"])
 @permission_classes([IsAuthenticated, EntryPermission]) 

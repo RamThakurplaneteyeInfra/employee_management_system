@@ -87,8 +87,10 @@ def get_default_task_status():
         return TaskStatus_obj
     else:
         None
-    
-
+        
+def get_all_TaskStatuses(request: HttpRequest):
+    values=TaskStatus.objects.all().values("status_name")
+    return JsonResponse(list(values), safe=False, status=status.HTTP_200_OK)
 # Fetch tasks by its types
 # endpoint for "Created_Tasks"-{{baseurl}}/tasks/viewTasks/?type= 
 # endpoint for "Assigned_Reported"-{{baseurl}}/tasks/viewAssignedTasks/?type= 

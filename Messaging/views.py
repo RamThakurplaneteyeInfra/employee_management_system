@@ -268,7 +268,7 @@ def load_groups_and_chats(request: HttpRequest):
     verify_method=verifyGet(request)
     if verify_method:
         return verify_method
-    groups=GroupMembers.objects.filter(participant=request.user)
+    groups=GroupMembers.objects.filter(participant=request.user).select_related("groupchat")
     chats=IndividualChats.objects.filter(Q(participant1=request.user)|Q(participant2=request.user))
     groups_info=[{
         "group_id":g.groupchat.group_id,
@@ -284,7 +284,6 @@ def load_groups_and_chats(request: HttpRequest):
     } for c in chats]
     response={"Group_info":groups_info,"chats_info":chats_info}
     return JsonResponse(response,safe=False)
-
 
 # ************************************ Un-used apis **************************************************
 

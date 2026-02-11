@@ -15,6 +15,17 @@ class Command(BaseCommand):
         # Designation.objects.filter(designation="Designer Engineer").update(designation="Design Engineer")
         # Roles.objects.create(role_name="HR")
         # Branch.objects.create(branch_name="None")
+        # User.objects.filter(username="20011").update(username="200011")
+        # User.objects.filter(username="5001").update(username="50001")
+        # User.objects.filter(username="5001").update(username="50001")
+        # User.objects.filter(username="5001").update(username="50001")
+        # User.objects.filter(username="5001").update(username="50001")
+        # User.objects.filter(username="5001").update(username="50001")
+        # User.objects.filter(username="5001").update(username="50001")
+        # User.objects.filter(username="5001").update(username="50001")
+        # User.objects.filter(username="5001").update(username="50001")
+        # User.objects.filter(username="5001").update(username="50001")
+        # User.objects.filter(username="5001").update(username="50001")
 
         # for i in ["NPD","MMR","RG","HC","IP"]:
         #     Functions.objects.create(function=i)

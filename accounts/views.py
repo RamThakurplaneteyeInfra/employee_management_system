@@ -95,7 +95,7 @@ def create_employee_login(request: HttpRequest):
 @login_required
 def get_all_employees(request: HttpRequest):
         admin_role=get_role_object(role="Admin")
-        profile_data=Profile.objects.all().select_related("Role","Designation","Branch","Department")
+        profile_data=Profile.objects.all().select_related("Role","Designation","Branch","Department","Function","Employee_id")
         users_data=[]
         for pd in profile_data:
             role=pd.Role.role_name
@@ -395,3 +395,22 @@ def FetchImage(request: HttpRequest,username:str):
     #     return  JsonResponse({"messege":f"{e}"},status=status.HTTP_501_NOT_IMPLEMENTED)
     return HttpResponse("None")
     ...
+    
+@csrf_exempt
+def updateUsername(request: HttpRequest,username:str):
+    verify_method=verifyPost(request)
+    if verify_method:
+        return verify_method
+    
+    data=request.POST
+    new_u=data.get("new_username")
+    try:
+        user_obj=User.objects.filter(username=username)
+    except Exception as e:
+        return HttpResponse("Error occured")
+    else:
+        user_obj.update(username=new_u)
+        # user_obj.save()
+        return HttpResponse("username updated")
+    
+    

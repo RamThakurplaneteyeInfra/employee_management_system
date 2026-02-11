@@ -2,7 +2,8 @@ from ems.urlImports import *
 from . import views
 
 task_filters=[path("getNamesfromRoleandDesignation/",views.get_Names_from_selected_role_and_desigantion,name="sort"),
-    path("getTaskTypes/",views.get_types,name="sort")]
+    path("getTaskTypes/",views.get_types,name="sort"),
+    path("getTaskStatuses/",views.get_all_TaskStatuses,name="sort")]
 
 urlpatterns = [
     path("",views.home,name="Tasks_management"),

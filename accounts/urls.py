@@ -11,7 +11,8 @@ session_urls=[path('login/',views.user_login),
             path('logout/', views.user_logout),
             path('sessiondata/', views.get_session_data),]
 employee_urls=[path('employee/dashboard/', views.employee_dashboard),
-            path('employees/', views.get_all_employees),]
+            path('employees/', views.get_all_employees),
+            path('updateUsername/<slug:username>/', views.updateUsername),]
 
 admin_urls= [
     path('', views.home, name='Home'),
