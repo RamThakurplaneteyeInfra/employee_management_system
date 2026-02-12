@@ -55,6 +55,8 @@ def create_employee_login(request: HttpRequest):
     except Exception as e:
         print("error3")
         return JsonResponse({"messege":f"{e}"},status=status.HTTP_406_NOT_ACCEPTABLE)
+    except DatabaseError as e:
+        return  JsonResponse({"message":f"{e}"},status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     else:
         try:
             check_user=get_user_object(username=login_values["username"])
@@ -94,6 +96,7 @@ def create_employee_login(request: HttpRequest):
 #Get a view of all employees/users present in the record. 
 @login_required
 def get_all_employees(request: HttpRequest):
+    try:
         admin_role=get_role_object(role="Admin")
         profile_data=Profile.objects.all().select_related("Role","Designation","Branch","Department","Function","Employee_id")
         users_data=[]
@@ -128,24 +131,29 @@ def get_all_employees(request: HttpRequest):
                     "teamlead":None,
                     "function":None}
                 users_data.append(user)
-                
+    except DatabaseError as e:
+        return  JsonResponse({"message":f"{e}"},status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    else:                
         return  JsonResponse(users_data,safe=False,status=status.HTTP_200_OK)
 
 # get the session data of a logged_in user.
 @login_required
 def get_session_data(request: HttpRequest):
-    verify_method=verifyGet(request)
-    if verify_method:
-        return verify_method
-    if not request.user:
-        return JsonResponse({"messege":"login credentials required"},status=status.HTTP_200_OK)
-    else:
-        session_data={}
-        session_data["expiray-age"]=request.session.get_expiry_age()
-        session_data["expiray-date"]=request.session.get_expiry_date()
-        session_data["accessed"]=request.session.accessed
-        session_data["is_empty"]=request.session.is_empty()
-        return JsonResponse(session_data)
+    try:
+        verify_method=verifyGet(request)
+        if verify_method:
+            return verify_method
+        if not request.user:
+            return JsonResponse({"messege":"login credentials required"},status=status.HTTP_200_OK)
+        else:
+            session_data={}
+            session_data["expiray-age"]=request.session.get_expiry_age()
+            session_data["expiray-date"]=request.session.get_expiry_date()
+            session_data["accessed"]=request.session.accessed
+            session_data["is_empty"]=request.session.is_empty()
+            return JsonResponse(session_data)
+    except DatabaseError as e:
+        return  JsonResponse({"message":f"{e}"},status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 #Login view.    
 @csrf_exempt
@@ -173,30 +181,38 @@ def user_login(request:HttpRequest):
             return JsonResponse({"messege":"You are logged in","username":f"{user.username}","Role":None},status=status.HTTP_206_PARTIAL_CONTENT)
     except Exception as e:
                     return JsonResponse({"messege":f"{e}"},status=status.HTTP_403_FORBIDDEN)
+    except DatabaseError as e:
+        return  JsonResponse({"message":f"{e}"},status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 # Get logged_in users Profile data
 @login_required
 def employee_dashboard(request: HttpRequest):
-    user_role=get_user_role(user=request.user)
-    if request.user.is_superuser and user_role and user_role=="Admin":
-        profile=Profile.objects.filter(Employee_id=request.user).select_related("Role").annotate(role=F("Role__role_name")).values("Employee_id","Email_id","Date_of_birth","Date_of_join","Name","Photo_link","role")
-    elif request.user.is_superuser and user_role and user_role=="MD":
-        profile=Profile.objects.filter(Employee_id=request.user).annotate(role=F("Role__role_name")).select_related("Role").values("Employee_id","Email_id","Date_of_birth","Date_of_join","Name","Photo_link","role")
+    try:
+        user_role=get_user_role(user=request.user)
+        if request.user.is_superuser and user_role and user_role=="Admin":
+            profile=Profile.objects.select_related("Role").filter(Employee_id=request.user).annotate(role=F("Role__role_name")).values("Employee_id","Email_id","Date_of_birth","Date_of_join","Name","Photo_link","role")
+        elif request.user.is_superuser and user_role and user_role=="MD":
+            profile=Profile.objects.select_related("Role").filter(Employee_id=request.user).annotate(role=F("Role__role_name")).values("Employee_id","Email_id","Date_of_birth","Date_of_join","Name","Photo_link","role")
+        else:
+            profile=Profile.objects.select_related("Department","Branch","Designation","Role","Function").filter(Employee_id=request.user).annotate(department=F("Department__dept_name"),
+                role=F("Role__role_name"),designation=F("Designation__designation"),branch=F("Branch__branch_name"),function_name=F("Function__function")).values("Employee_id",
+                    "Email_id","designation","Date_of_birth","Date_of_join","branch","Name","Photo_link","role","department","function_name")
+            # profile=Profile.objects.filter(Employee_id=request.user).values()
+    except DatabaseError as e:
+        return  JsonResponse({"message":f"{e}"},status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     else:
-        profile=Profile.objects.filter(Employee_id=request.user).select_related("Department","Branch","Designation","Role").annotate(department=F("Department__dept_name"),
-                role=F("Role__role_name"),designation=F("Designation__designation"),branch=F("Branch__branch_name")).values("Employee_id",
-                    "Email_id","designation","Date_of_birth","Date_of_join","branch","Name","Photo_link","role","department")
-        
-    return  JsonResponse(list(profile),safe=False)
+        return  JsonResponse(list(profile),safe=False)
 
 # Logout the logged_in user and delete the sessions.
 @login_required
 def user_logout(request: HttpRequest):
-    user_id=request.user.username
-    logout(request)
-    request.session.flush()
-    return  JsonResponse({"messege":f"Logout successfully {user_id}"},status=status.HTTP_200_OK)
-
+    try:
+        user_id=request.user.username
+        logout(request)
+        request.session.flush()
+        return  JsonResponse({"messege":f"Logout successfully {user_id}"},status=status.HTTP_200_OK)
+    except DatabaseError as e:
+        return  JsonResponse({"message":f"{e}"},status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 #Update particular user profile using his/her username.
 @csrf_exempt
 @admin_required
@@ -212,7 +228,9 @@ def update_profile(request: HttpRequest,username):
         return JsonResponse({"messege":"User Not Found. Incorrect Username Passed in the URL"},status=status.HTTP_404_NOT_FOUND)
     except Exception as e:
         print(e)
-        return  JsonResponse({"messege":"User Profile is missing."},status=status.HTTP_404_NOT_FOUND) 
+        return  JsonResponse({"messege":"User Profile is missing."},status=status.HTTP_404_NOT_FOUND)
+    except DatabaseError as e:
+        return  JsonResponse({"message":f"{e}"},status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     else:
         fields=['Name','Role','Email_id','Designation','Date_of_join','Date_of_birth','Branch',"Department","Teamlead","Function"]
         not_required_fields=["Designation","Branch","Department","Teamlead","Function"]
@@ -258,17 +276,21 @@ def update_profile(request: HttpRequest,username):
         except Exception as e:
             print(e)
             return  JsonResponse({"messege":f"{e}"},status=status.HTTP_406_NOT_ACCEPTABLE)
+        except DatabaseError as e:
+            return  JsonResponse({"message":f"{e}"},status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         else:
             try:
                     Profile.objects.filter(Employee_id=user).update(**profile_values)
-            except Http404 as e:
-                print(e)
-                return  JsonResponse({"messege":f"{e}"},status=status.HTTP_404_NOT_FOUND)
+            # except Http404 as e:
+            #     print(e)
+            #     return  JsonResponse({"messege":f"{e}"},status=status.HTTP_404_NOT_FOUND)
             except Exception as e:
                     print(e)
                     return  JsonResponse({"messege":f"{e}"},status=status.HTTP_304_NOT_MODIFIED)
+            except DatabaseError as e:
+                return  JsonResponse({"message":f"{e}"},status=status.HTTP_500_INTERNAL_SERVER_ERROR)
             else:
-                    return  JsonResponse({"messege":"user details update successfully"},status=status.HTTP_205_RESET_CONTENT)
+                return  JsonResponse({"messege":"user details update successfully"},status=status.HTTP_205_RESET_CONTENT)
 
 @csrf_exempt
 @login_required

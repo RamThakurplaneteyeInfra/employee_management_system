@@ -284,7 +284,7 @@ def entry_list_create(request: HttpRequest):
         if request.method == 'GET':
             current_date=date.today()
             current_month=current_date.month
-            query_data=request.GET()
+            query_data=request.GET
             username=query_data.get("username")
             month=query_data.get("month")
             permissible=False
@@ -314,33 +314,37 @@ def entry_list_create(request: HttpRequest):
                 return Response(serializer.data, status=status.HTTP_201_CREATED)
             return Response("error occured", status=status.HTTP_400_BAD_REQUEST)
     except Exception as e:
-        return Response(f"{e}", status=status.HTTP_400_BAD_REQUEST)
+        return Response({"message":str(e)}, status=status.HTTP_400_BAD_REQUEST)
     except PermissionDenied as e:
-        return Response(e, status=status.HTTP_400_BAD_REQUEST)
+        return Response({"message":str(e)}, status=status.HTTP_400_BAD_REQUEST)
+    except DatabaseError as e:
+        return  JsonResponse({"message":f"{e}"},status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 @api_view(['GET', 'PUT', 'DELETE',"PATCH"])
 @permission_classes([IsAuthenticated, EntryPermission]) 
 def entry_detail_update_delete(request, id):
     try:
         entry = FunctionsEntries.objects.get(pk=id)
+    # FETCH SINGLE ENTRY
+        if request.method == 'GET':
+            serializer = FunctionsEntriesSerializer(entry)
+            return Response(serializer.data)
+
+        # UPDATE ENTRY (Status and Content)
+        elif request.method in ["PUT", "PATCH"]:
+            # partial=True allows updating just 'status' or 'note' without sending all fields
+            serializer = FunctionsEntriesSerializer(entry, data=request.data, partial=True)
+            if serializer.is_valid():
+                serializer.save()
+                return Response(serializer.data)
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        # DELETE ENTRY
+        elif request.method == 'DELETE':
+            entry.delete()
+            return Response(status=status.HTTP_204_NO_CONTENT)
+    
     except FunctionsEntries.DoesNotExist:
         return Response({'error': 'Entry not found'}, status=status.HTTP_404_NOT_FOUND)
-
-    # FETCH SINGLE ENTRY
-    if request.method == 'GET':
-        serializer = FunctionsEntriesSerializer(entry)
-        return Response(serializer.data)
-
-    # UPDATE ENTRY (Status and Content)
-    elif request.method in ["PUT", "PATCH"]:
-        # partial=True allows updating just 'status' or 'note' without sending all fields
-        serializer = FunctionsEntriesSerializer(entry, data=request.data, partial=True)
-        if serializer.is_valid():
-            serializer.save()
-            return Response(serializer.data)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-    # DELETE ENTRY
-    elif request.method == 'DELETE':
-        entry.delete()
-        return Response(status=status.HTTP_204_NO_CONTENT)
+    except DatabaseError as e:
+        return  JsonResponse({"message":f"{e}"},status=status.HTTP_500_INTERNAL_SERVER_ERROR)

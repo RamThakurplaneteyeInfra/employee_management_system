@@ -15,17 +15,17 @@ class ChatConsumer(AsyncWebsocketConsumer):
         self.room_chat_name = f"chat_{self.chat_id}"
         user = self.scope["user"]
 
-        # if user.is_anonymous:
-        #     await self.close()
-        #     print("User Not Found")
-        #     return JsonResponse({"message":"User Not Found"},status=status.HTTP_404_NOT_FOUND)
+        if user.is_anonymous:
+            await self.close()
+            print("User Not Found")
+            return JsonResponse({"message":"User Not Found"},status=status.HTTP_404_NOT_FOUND)
         
-        # allowed = await self.Validate_group_or_chat_id(user)
+        allowed = await self.Validate_group_or_chat_id(user)
 
-        # if not allowed:
-        #     await self.close()
-        #     print("Chat or Group Not Found")
-        #     return JsonResponse({"message":"Chat or Group Not Found"},status=status.HTTP_404_NOT_FOUND)
+        if not allowed:
+            await self.close()
+            print("Chat or Group Not Found")
+            return JsonResponse({"message":"Chat or Group Not Found"},status=status.HTTP_404_NOT_FOUND)
 
         # Join room
         await self.channel_layer.group_add(self.room_chat_name,self.channel_name)
@@ -36,26 +36,26 @@ class ChatConsumer(AsyncWebsocketConsumer):
         await self.channel_layer.group_discard(self.room_chat_name,self.channel_name)
 
     async def receive(self, text_data):
-        # message = data.get("message")
+        message = text_data.get("message")
         message=text_data
-        # sender = self.scope["user"]
+        sender = self.scope["user"]
 
         if not message:
             return JsonResponse({"message":"message Not Found"},status=status.HTTP_404_NOT_FOUND)
 
         # Save message into DB
-        # is_saved=await self.save_message(sender.username, message)
-        # if isinstance(is_saved,JsonResponse):
-        #     return is_saved
+        is_saved=await self.save_message(sender.username, message)
+        if isinstance(is_saved,JsonResponse):
+            return is_saved
 
         # Broadcast to group
         await self.channel_layer.group_send(
             self.room_chat_name,
             {
                 "type": "chat_message",
-                # "sender": sender.username,
+                "sender": sender.username,
                 "message": message,
-                # "at": get_created_time_format(is_saved.created_at),
+                "at": get_created_time_format(is_saved.created_at),
             })
 
     async def chat_message(self, event):
