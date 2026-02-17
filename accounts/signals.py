@@ -35,4 +35,3 @@ def create_profile_from_user(sender, instance: User, created, **kwargs):
         print(e)
         return JsonResponse({"Error occured"},status=404)
         
-        

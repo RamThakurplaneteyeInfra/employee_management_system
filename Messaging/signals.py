@@ -15,15 +15,15 @@ def create_notification_for_groupmessage(sender, instance:GroupMessages, created
         for i in group_mem:
             obj=Notification.objects.create(from_user=instance.sender,receipient=i.participant,message=instance.content,type_of_notification=notification_type_obj)
             
-        channel_layer = get_channel_layer()
-        async_to_sync(channel_layer.group_send)(
-            f"user_{instance.sender.username}",
-            {
-                "type": "send_notification",
-                "title": f"{obj.type_of_notification.type_name} from {group_obj.group_name}",
-                "message":obj.message
-            }
-        )
+            channel_layer = get_channel_layer()
+            async_to_sync(channel_layer.group_send)(
+                f"user_{i.participant.username}",
+                {
+                    "type": "send_notification",
+                    "title": f"{obj.type_of_notification.type_name} from {group_obj.group_name}",
+                    "message":obj.message
+                }
+            )
             
 @receiver(post_save, sender=IndividualMessages)
 def create_notification_for_chatmessage(sender, instance:IndividualMessages, created, **kwargs):
@@ -37,7 +37,7 @@ def create_notification_for_chatmessage(sender, instance:IndividualMessages, cre
         
         channel_layer = get_channel_layer()
         async_to_sync(channel_layer.group_send)(
-            f"user_{instance.sender.username}",
+            f"user_{other_user.username}",
             {
                 "type": "send_notification",
                 "title": f"{obj.type_of_notification.type_name} from {sender}",

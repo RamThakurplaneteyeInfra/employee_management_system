@@ -248,7 +248,7 @@ def post_message(request: HttpRequest,chat_id:str):
         except:
             return chat_obj
         else:
-            IndividualMessages.objects.create(chat=chat_obj,sender=sender,content=message).save()
+            IndividualMessages.objects.create(chat=chat_obj,sender=sender,content=message)
             chat_obj.save()
 
     return JsonResponse({"message":"Message sent successfully"},status=status.HTTP_201_CREATED)

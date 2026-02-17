@@ -12,6 +12,23 @@ def home(request: HttpRequest):
     # return redirect("login")
     return HttpResponse(status=204)
 
+def birthdaycounter(request: HttpRequest,username=None):
+    try:
+        user_obj=get_object_or_404(User,username=username)
+        user_profile=Profile.objects.select_related("Employee_id").filter(Employee_id=user_obj).first()
+            
+        if request.method=="POST":
+            with transaction.atomic:
+                user_profile.birthday_counter+=1
+                user_profile.save()
+                
+        return JsonResponse({"birthday_counter":user_profile.birthday_counter},status=status.HTTP_200_OK)
+    except Http404:
+                return JsonResponse({"message":"user not found"},status=status.HTTP_400_BAD_REQUEST)
+    except DatabaseError as e:
+            return  JsonResponse({"message":f"{e}"},status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                
+
 @csrf_exempt
 @admin_required
 def create_employee_login(request: HttpRequest):
@@ -104,43 +121,67 @@ def create_employee_login(request: HttpRequest):
 def get_all_employees(request: HttpRequest):
     try:
         with transaction.atomic():
-            profile_data=Profile.objects.all().select_related("Role","Designation","Branch","Department","Function","Employee_id")
-        users_data=[]
-        for pd in profile_data:
-            role=pd.Role.role_name
-            if  role not in ["MD","Admin"]:
-                user={"Employee_id":pd.Employee_id.username,
-                    "Name":pd.Name,
-                    "Role":pd.Role.role_name,
-                    "Branch":pd.Branch.branch_name,
-                    "Designation":pd.Designation.designation,
-                    "Date_of_birth":pd.Date_of_birth,
-                    "Date_of_join":pd.Date_of_join,
-                    "Number_of_days_from_joining":completed_years_and_days(start_date=pd.Date_of_join),
-                    "Email_id":pd.Email_id,
-                    "Photo_link":get_photo_url(pd),
-                    "department":pd.Department.dept_name,
-                    "Teamleader":get_users_Name(pd.Teamlead),
-                    "function":pd.Function.function}
-                users_data.append(user)
-            else:
-                user={"Employee_id":pd.Employee_id.username,
-                    "Name":pd.Name,
-                    "Role":pd.Role.role_name,
-                    "Branch":None,
-                    "Designation":None,
-                    "Date_of_birth":pd.Date_of_birth,
-                    "Date_of_join":pd.Date_of_join,
-                    "Number_of_days_from_joining":completed_years_and_days(start_date=pd.Date_of_join),
-                    "Email_id":pd.Email_id,
-                    "Photo_link":get_photo_url(pd),
-                    "teamlead":None,
-                    "function":None}
-                users_data.append(user)
+            users_data=Profile.objects.all().select_related("Role","Designation","Branch","Department","Function",
+                                            "Employee_id","Teamlead").annotate(branch=F("Branch__branch_name"),emp_id=F("Employee_id__username"),
+                                            designation=F("Designation__designation"),role=F("Role__role_name"),department=F("Department__dept_name"),
+                                            function=F("Function__function"),lead=F("Teamlead__accounts_profile__Name")).values("branch","Date_of_birth",
+                                            "lead","Date_of_join","Name","emp_id","designation","function","role","department","Photo_link","Email_id")
+            data_list=[{"Name":i["Name"],
+                        "Branch":i["branch"],
+                        "Designation":i["designation"],
+                        "Function":i["function"],
+                        "Department":i["department"],
+                        "Role":i["role"],
+                        "Teamleader":i["lead"],
+                        "Photo_link":i["Photo_link"],
+                        "Employee_id":i["emp_id"],
+                        "Date_of_join":i["Date_of_join"],
+                        "Date_of_birth":i["Date_of_birth"],
+                        "Email_id":i["Email_id"],
+                        "Number_of_days_from_joining":completed_years_and_days(start_date=i["Date_of_join"])
+                        } for i in users_data]
     except DatabaseError as e:
         return  JsonResponse({"message":f"{e}"},status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     else:                
-        return  JsonResponse(users_data,safe=False,status=status.HTTP_200_OK)
+        return  JsonResponse(data_list,safe=False,status=status.HTTP_200_OK)
+            
+    #         profile_data=Profile.objects.all().select_related("Role","Designation","Branch","Department","Function","Employee_id","Teamlead")
+    #     users_data=[]
+    #     for pd in profile_data:
+    #         role=pd.Role.role_name
+    #         if  role not in ["MD","Admin"]:
+    #             user={"Employee_id":pd.Employee_id.username,
+    #                 "Name":pd.Name,
+    #                 "Role":pd.Role.role_name,
+    #                 "Branch":pd.Branch.branch_name,
+    #                 "Designation":pd.Designation.designation,
+    #                 "Date_of_birth":pd.Date_of_birth,
+    #                 "Date_of_join":pd.Date_of_join,
+    #                 "Number_of_days_from_joining":completed_years_and_days(start_date=pd.Date_of_join),
+    #                 "Email_id":pd.Email_id,
+    #                 "Photo_link":get_photo_url(pd),
+    #                 "department":pd.Department.dept_name,
+    #                 "Teamleader":get_users_Name(pd.Teamlead),
+    #                 "function":pd.Function.function}
+    #             users_data.append(user)
+    #         else:
+    #             user={"Employee_id":pd.Employee_id.username,
+    #                 "Name":pd.Name,
+    #                 "Role":pd.Role.role_name,
+    #                 "Branch":None,
+    #                 "Designation":None,
+    #                 "Date_of_birth":pd.Date_of_birth,
+    #                 "Date_of_join":pd.Date_of_join,
+    #                 "Number_of_days_from_joining":completed_years_and_days(start_date=pd.Date_of_join),
+    #                 "Email_id":pd.Email_id,
+    #                 "Photo_link":get_photo_url(pd),
+    #                 "teamlead":None,
+    #                 "function":None}
+    #             users_data.append(user)
+    # except DatabaseError as e:
+    #     return  JsonResponse({"message":f"{e}"},status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    # else:                
+    #     return  JsonResponse(users_data,safe=False,status=status.HTTP_200_OK)
 
 # get the session data of a logged_in user.
 @login_required

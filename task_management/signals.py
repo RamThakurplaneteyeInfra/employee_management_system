@@ -67,17 +67,18 @@ def task_assigned_notification(sender, instance:Task, created, **kwargs):
 
     if created and assignee:
         for i in assignee:
+            print(i)
             obj=Notification.objects.create(from_user=instance.created_by,receipient=i,message=f"task created by {instance.created_by.username}",
                                             type_of_notification=Notification_obj)
             
 #         # realtime push
-        channel_layer = get_channel_layer()
-        async_to_sync(channel_layer.group_send)(
-            f"user_{instance.assigned_to.id}",
-            {
-                "type": "send_notification",
-                "title": obj.type_of_notification.type_name,
-                "message": obj.message,
-            }
-        )
+            channel_layer = get_channel_layer()
+            async_to_sync(channel_layer.group_send)(
+                f"user_{i.username}",
+                {
+                    "type": "send_notification",
+                    "title": obj.type_of_notification.type_name,
+                    "message": obj.message,
+                }
+            )
 
