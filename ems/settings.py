@@ -149,7 +149,7 @@ DATABASES = {
             "options": "-c search_path=events,task_management,notifications,project,quatery_reports,login_details,messaging,team_farm,team_infra,team_interns,team_management,public",
             "connect_timeout": 10,
         },
-        "CONN_MAX_AGE": 0,
+        "CONN_MAX_AGE": 60,
         "DISABLE_SERVER_SIDE_CURSORS": True,
         "POOL_OPTIONS": {
             "POOL_SIZE": DB_POOL_SIZE,
