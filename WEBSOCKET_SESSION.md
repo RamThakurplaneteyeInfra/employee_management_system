@@ -68,34 +68,10 @@ setInterval(() => {
 
 ---
 
-### Chat WebSocket
-
-```javascript
-const chatId = 'C123';  // or 'G456' for group
-const wsUrl = `${protocol}//${backendHost}${port}/ws/chat/${chatId}/`;
-
-const chatWs = new WebSocket(wsUrl);
-
-chatWs.onopen = () => {
-  console.log('Chat WebSocket connected');
-};
-
-chatWs.onmessage = (event) => {
-  const data = JSON.parse(event.data);
-  console.log('Message from', data.sender, ':', data.message);
-};
-
-// Send message
-chatWs.send(JSON.stringify({ message: 'Hello!' }));
-```
-
----
-
 ## Endpoints
 
 | Path                    | Purpose                      |
 |-------------------------|------------------------------|
 | `ws/notifications/`     | User-specific notifications  |
-| `ws/chat/<chat_id>/`    | Real-time chat (C* or G*)    |
 
-Both require an authenticated session. Anonymous connections receive close code `4001`.
+Requires an authenticated session. Anonymous connections receive close code `4001`.

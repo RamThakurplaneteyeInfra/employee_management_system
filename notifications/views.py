@@ -49,13 +49,9 @@ def websocket_info(request):
     """Returns WebSocket URLs and usage for testing."""
     return Response({
         "websockets": {
-            "chat": {
-                "url": "ws://HOST/ws/chat/<chat_id>/",
-                "description": "Real-time chat. chat_id: group (G12345) or individual (C12345678). Requires auth.",
-            },
             "notifications": {
                 "url": "ws://HOST/ws/notifications/",
-                "description": "User notifications stream. Requires auth. Sends: message posted, task assigned, group created, slot booked, meeting scheduled.",
+                "description": "User notifications stream. Requires auth. Sends: task assigned, group message, private message, group created, slot booked, meeting scheduled.",
             },
         },
         "triggers": [

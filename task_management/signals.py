@@ -1,7 +1,10 @@
 """
 Task management signals: counts, logs, and WebSocket notifications.
+
+Important: Django dispatches signals synchronously. Receivers must be sync functions.
+Async receivers are never awaited, so notification/WebSocket would never run.
 """
-from asgiref.sync import sync_to_async, async_to_sync
+from asgiref.sync import async_to_sync
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 from channels.layers import get_channel_layer
@@ -27,8 +30,8 @@ def _add_task_count_for_assignee_sync(sender, created, instance: TaskAssignies, 
 
 
 @receiver(post_save, sender=TaskAssignies)
-async def add_task_count_for_assignee(sender, created, instance: TaskAssignies, **kwargs):
-    await sync_to_async(_add_task_count_for_assignee_sync)(sender, created, instance, **kwargs)
+def add_task_count_for_assignee(sender, created, instance: TaskAssignies, **kwargs):
+    _add_task_count_for_assignee_sync(sender, created, instance, **kwargs)
 
 
 def _add_task_count_for_creator_sync(sender, created, instance: Task, **kwargs):
@@ -48,8 +51,8 @@ def _add_task_count_for_creator_sync(sender, created, instance: Task, **kwargs):
 
 
 @receiver(post_save, sender=Task)
-async def add_task_count_for_creator(sender, created, instance: Task, **kwargs):
-    await sync_to_async(_add_task_count_for_creator_sync)(sender, created, instance, **kwargs)
+def add_task_count_for_creator(sender, created, instance: Task, **kwargs):
+    _add_task_count_for_creator_sync(sender, created, instance, **kwargs)
 
 
 def _task_edit_and_create_logs_sync(sender, created, instance: Task, **kwargs):
@@ -58,8 +61,8 @@ def _task_edit_and_create_logs_sync(sender, created, instance: Task, **kwargs):
 
 
 @receiver(post_save, sender=Task)
-async def task_edit_and_create_logs(sender, created, instance: Task, **kwargs):
-    await sync_to_async(_task_edit_and_create_logs_sync)(sender, created, instance, **kwargs)
+def task_edit_and_create_logs(sender, created, instance: Task, **kwargs):
+    _task_edit_and_create_logs_sync(sender, created, instance, **kwargs)
 
 
 def _task_assigned_notification_sync(sender, created, instance: TaskAssignies, **kwargs):
@@ -74,7 +77,7 @@ def _task_assigned_notification_sync(sender, created, instance: TaskAssignies, *
         nt = notification_type.objects.get(type_name="Task_Created")
     except notification_type.DoesNotExist:
         return
-    Notification.objects.create(
+    notification_obj=Notification.objects.create(
         from_user=creator,
         receipient=assignee,
         message=msg,
@@ -83,10 +86,10 @@ def _task_assigned_notification_sync(sender, created, instance: TaskAssignies, *
     channel_layer = get_channel_layer()
     async_to_sync(channel_layer.group_send)(
         f"user_{assignee.username}",
-        {"type": "send_notification", "title": "Task Assigned", "message": msg, "extra": {"task_id": task.task_id}},
+        {"type": "send_notification", "title": "Task Assigned", "message": msg, "extra": {"time": notification_obj.created_at.strftime("%d/%m/%Y, %H:%M:%S")}},
     )
 
 
 @receiver(post_save, sender=TaskAssignies)
-async def task_assigned_notification(sender, created, instance: TaskAssignies, **kwargs):
-    await sync_to_async(_task_assigned_notification_sync)(sender, created, instance, **kwargs)
+def task_assigned_notification(sender, created, instance: TaskAssignies, **kwargs):
+    _task_assigned_notification_sync(sender, created, instance, **kwargs)

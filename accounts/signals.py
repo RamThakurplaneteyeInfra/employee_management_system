@@ -1,10 +1,9 @@
 import os
-from asgiref.sync import sync_to_async
-from django.db.models.signals import post_delete, post_save, pre_save, post_init
+from django.db.models.signals import post_delete, post_save
 from django.dispatch import receiver
+
 from .models import Profile, User, management_Profile
 from .filters import _get_role_object_sync
-from django.http import JsonResponse
 
 
 def _delete_profile_photo_sync(sender, instance: Profile, **kwargs):
@@ -14,8 +13,8 @@ def _delete_profile_photo_sync(sender, instance: Profile, **kwargs):
 
 
 @receiver(post_delete, sender=Profile)
-async def delete_profile_photo(sender, instance: Profile, **kwargs):
-    await sync_to_async(_delete_profile_photo_sync)(sender, instance, **kwargs)
+def delete_profile_photo(sender, instance: Profile, **kwargs):
+    _delete_profile_photo_sync(sender, instance, **kwargs)
 
 
 def _create_emp_profile_sync(sender, instance: Profile, created, **kwargs):
@@ -33,8 +32,8 @@ def _create_emp_profile_sync(sender, instance: Profile, created, **kwargs):
 
 
 @receiver(post_save, sender=Profile)
-async def create_emp_profile(sender, instance: Profile, created, **kwargs):
-    await sync_to_async(_create_emp_profile_sync)(sender, instance, created, **kwargs)
+def create_emp_profile(sender, instance: Profile, created, **kwargs):
+    _create_emp_profile_sync(sender, instance, created, **kwargs)
 
 
 def _create_profile_from_user_sync(sender, instance: User, created, **kwargs):
@@ -52,6 +51,6 @@ def _create_profile_from_user_sync(sender, instance: User, created, **kwargs):
 
 
 @receiver(post_save, sender=User)
-async def create_profile_from_user(sender, instance: User, created, **kwargs):
-    await sync_to_async(_create_profile_from_user_sync)(sender, instance, created, **kwargs)
+def create_profile_from_user(sender, instance: User, created, **kwargs):
+    _create_profile_from_user_sync(sender, instance, created, **kwargs)
         

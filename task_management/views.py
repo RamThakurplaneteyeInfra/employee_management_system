@@ -32,6 +32,8 @@ async def home(request: HttpRequest):
 # Create a new task.
 # URL: {{baseurl}}/tasks/createTask/
 # Method: POST
+# Debugging: Step-into often skips sync_to_async body. Set breakpoints inside _create_task_sync
+# (and inside task_management.signals._task_assigned_notification_sync) to trace task + notification flow.
 def _create_task_sync(user, data):
     body_data = {k: data.get(k) for k in ["title", "description", "due_date", "type"] if data.get(k)}
     body_data["type"] = get_object_or_404(TaskTypes, type_name=data["type"])

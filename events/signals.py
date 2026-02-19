@@ -1,4 +1,4 @@
-from asgiref.sync import sync_to_async, async_to_sync
+from asgiref.sync import async_to_sync
 from django.db.models.signals import pre_save, post_save
 from django.dispatch import receiver
 from channels.layers import get_channel_layer
@@ -15,8 +15,8 @@ def _cleanup_old_meetings_sync(sender, instance: Meeting, **kwargs):
 
 
 @receiver(pre_save, sender=Meeting)
-async def cleanup_old_meetings(sender, instance: Meeting, **kwargs):
-    await sync_to_async(_cleanup_old_meetings_sync)(sender, instance, **kwargs)
+def cleanup_old_meetings(sender, instance: Meeting, **kwargs):
+    _cleanup_old_meetings_sync(sender, instance, **kwargs)
 
 
 def _notify_slot_booked_sync(sender, created, instance: SlotMembers, **kwargs):
@@ -33,7 +33,7 @@ def _notify_slot_booked_sync(sender, created, instance: SlotMembers, **kwargs):
     except notification_type.DoesNotExist:
         return
     msg = f"Slot '{slot.meeting_title}' on {slot.date} has been scheduled. You are invited."
-    Notification.objects.create(
+    notification_obj=Notification.objects.create(
         from_user=creator,
         receipient=member,
         message=msg,
@@ -42,13 +42,13 @@ def _notify_slot_booked_sync(sender, created, instance: SlotMembers, **kwargs):
     channel_layer = get_channel_layer()
     async_to_sync(channel_layer.group_send)(
         f"user_{member.username}",
-        {"type": "send_notification", "title": "Slot Booked", "message": msg, "extra": {"slot_id": slot.id}},
+        {"type": "send_notification", "title": "Slot Booked", "message": msg, "extra": {"time": notification_obj.created_at.strftime("%d/%m/%Y, %H:%M:%S")}},
     )
 
 
 @receiver(post_save, sender=SlotMembers)
-async def notify_slot_booked(sender, created, instance: SlotMembers, **kwargs):
-    await sync_to_async(_notify_slot_booked_sync)(sender, created, instance, **kwargs)
+def notify_slot_booked(sender, created, instance: SlotMembers, **kwargs):
+    _notify_slot_booked_sync(sender, created, instance, **kwargs)
 
 
 def _notify_meeting_scheduled_sync(sender, instance: Meeting, created, **kwargs):
@@ -68,13 +68,13 @@ def _notify_meeting_scheduled_sync(sender, instance: Meeting, created, **kwargs)
     from_user = users[0]
     channel_layer = get_channel_layer()
     for u in users:
-        Notification.objects.create(from_user=from_user, receipient=u, message=msg, type_of_notification=nt)
+        notification_obj=Notification.objects.create(from_user=from_user, receipient=u, message=msg, type_of_notification=nt)
         async_to_sync(channel_layer.group_send)(
             f"user_{u.username}",
-            {"type": "send_notification", "title": "Meeting Scheduled", "message": msg, "extra": {}},
+            {"type": "send_notification", "title": "Meeting Scheduled", "message": msg, "extra": {"time":notification_obj.created_at.strftime("%d/%m/%Y, %H:%M:%S")}},
         )
 
 
 @receiver(post_save, sender=Meeting)
-async def notify_meeting_scheduled(sender, created, instance: Meeting, **kwargs):
-    await sync_to_async(_notify_meeting_scheduled_sync)(sender, instance, created, **kwargs)
+def notify_meeting_scheduled(sender, created, instance: Meeting, **kwargs):
+    _notify_meeting_scheduled_sync(sender, instance, created, **kwargs)
