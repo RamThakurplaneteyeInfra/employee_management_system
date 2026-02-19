@@ -14,8 +14,8 @@ from datetime import timedelta
 # Paths & Environment
 # =============================================================================
 BASE_DIR = Path(__file__).resolve().parent.parent
-load_dotenv(f"{BASE_DIR}/development.env")
-# load_dotenv(f"{BASE_DIR}/.env")
+# load_dotenv(f"{BASE_DIR}/development.env")
+load_dotenv(f"{BASE_DIR}/.env")
 
 # =============================================================================
 # Security
@@ -250,6 +250,7 @@ else:
     SESSION_COOKIE_SAMESITE = os.getenv("SESSION_COOKIE_SAMESITE", "None")
     CSRF_COOKIE_SAMESITE = os.getenv("CSRF_COOKIE_SAMESITE", "None")
     SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+    SESSION_COOKIE_HTTPONLY=False
 
 # =============================================================================
 # Logging (request logging for debugging)
