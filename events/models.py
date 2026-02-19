@@ -83,6 +83,7 @@ class tourmembers(models.Model):
         verbose_name="tourmember"
         unique_together = ("tour", "member")
         ordering=["tour"]
+
 class Holiday(models.Model):
     FIXED = "fixed"
     UNFIXED = "unfixed"
@@ -101,10 +102,11 @@ class Holiday(models.Model):
     )
     
     class Meta:
-        db_table='holiday'
-        verbose_name="Holiday"
-        verbose_name_plural = "Holiday"
-        ordering=["date"]
+    #     # Match original migration 0001; migration 0003 may have left table in task_management
+        db_table = 'events"."Holiday'
+    #     verbose_name = "holiday"
+    #     verbose_name_plural = "holiday"
+        ordering = ["date"]
 
     def __str__(self):
         return f"{self.name}-{self.date}"

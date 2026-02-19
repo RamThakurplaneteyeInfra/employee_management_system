@@ -44,7 +44,7 @@ class Profile(models.Model):
     Department=models.ForeignKey("Departments",verbose_name="department",db_column="department",on_delete=models.CASCADE,related_name="department",null=True)
     Teamlead=models.ForeignKey(User,on_delete=models.CASCADE,related_name="teamlead",null=True,verbose_name="teamlead",default=None,db_column="teamlead")
     Function=models.ForeignKey("Functions",on_delete=models.CASCADE,null=True,verbose_name="function",default=None,db_column="function")
-    birthday_counter=models.SmallIntegerField(default=0,null=True)
+    birthday_counter=models.SmallIntegerField(default=0)
     class Meta:
         verbose_name = "Employee Profile"
         verbose_name_plural = "Employees Profile"

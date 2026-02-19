@@ -1,7 +1,7 @@
 from rest_framework import serializers
 from .models import *
 from ems.RequiredImports import *
-from accounts.filters import get_users_Name
+from accounts.filters import _get_users_Name_sync
 class SlotMemberSerializer(serializers.ModelSerializer):
     member=serializers.SlugRelatedField(
         queryset=User.objects.all(),
@@ -39,14 +39,14 @@ class BookSlotSerializer(serializers.ModelSerializer):
         # return [
         #     {
         #         "username": user.username,
-        #         "full_name": get_users_Name(user) # fallback if name is empty
+        #         "full_name": _get_users_Name_sync(user) # fallback if name is empty
         #     }]
         return list(SlotMembers.objects.select_related("slot","member").filter(slot=obj).values(full_name=F("member__accounts_profile__Name")))
         
         
     def get_creater_details(self, obj: BookSlot):
         return {
-                "full_name": get_users_Name(user=obj.created_by) # fallback if name is empty
+                "full_name": _get_users_Name_sync(obj.created_by) # fallback if name is empty
             }
         
     def create(self, validated_data):
@@ -113,13 +113,13 @@ class TourSerializer(serializers.ModelSerializer):
         return [
             {
                 "username": user.username,
-                "full_name": get_users_Name(user) # fallback if name is empty
+                "full_name": _get_users_Name_sync(user) # fallback if name is empty
             } 
             for user in obj.members.all()]
         
     def get_creater_details(self, obj):
         return {
-                "full_name": get_users_Name(obj.created_by) # fallback if name is empty
+                "full_name": _get_users_Name_sync(obj.created_by) # fallback if name is empty
             }
 
     def create(self, validated_data):
@@ -194,7 +194,7 @@ class MeetingSerializer(serializers.ModelSerializer):
         return [
             {
                 "username": user.username, 
-                "full_name": get_users_Name(user)
+                "full_name": _get_users_Name_sync(user)
             } for user in obj.users.all()
         ]
         

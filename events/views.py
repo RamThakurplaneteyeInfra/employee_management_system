@@ -1,3 +1,7 @@
+from django.http import JsonResponse
+from django.views.decorators.http import require_GET
+from django.views.decorators.csrf import csrf_exempt
+from rest_framework.decorators import api_view, permission_classes
 from ems.auth_utils import CsrfExemptSessionAuthentication
 from rest_framework.viewsets import ModelViewSet
 from .permissions import *
@@ -5,10 +9,24 @@ from rest_framework.decorators import action, api_view
 from rest_framework.response import Response
 
 from events.permissions import IsAdminOrMD
-from rest_framework.permissions import IsAuthenticated,AllowAny
+
+# # # # # #  baseurl="http://localhost:8000"  # # # # # # # # # # # #
+# Base path: {{baseurl}}/eventsapi/
+from rest_framework.permissions import IsAuthenticated, AllowAny
 from .models import *
 from .serializers import *
 
+# Note: DRF ViewSets do not support async methods - they don't await coroutines.
+# Sync views work under ASGI; Django runs them in a thread pool automatically.
+
+
+def holidays_ping(request):
+    """Test endpoint: GET /eventsapi/holidays-ping/ - plain Django, no DRF/auth/DB."""
+    return JsonResponse({"status": "ok", "message": "holidays route reachable"})
+
+
+# ==================== BookSlotViewSet ====================
+# URL: {{baseurl}}/eventsapi/book-slots/  | CRUD
 class BookSlotViewSet(ModelViewSet):
     queryset = BookSlot.objects.all().select_related("room","created_by","status")
     serializer_class = BookSlotSerializer
@@ -48,45 +66,52 @@ class BookSlotViewSet(ModelViewSet):
     #     # This will override/ensure the created_by field is the logged-in user
     #     serializer.save(created_by=self.request.user)
 
+
+# ==================== RoomViewSet ====================
+# URL: {{baseurl}}/eventsapi/rooms/  | CRUD
 class RoomViewSet(ModelViewSet):
     queryset = Room.objects.all()
     serializer_class = RoomSerializer
     permission_classes=[AllowAny]
 
+
+# ==================== BookingStatusViewset ====================
+# URL: {{baseurl}}/eventsapi/booking-statuses/  | CRUD
 class BookingStatusViewset(ModelViewSet):
     queryset = BookingStatus.objects.all()
     serializer_class = BookingStatusSerializer
     # authentication_classes = [CsrfExemptSessionAuthentication]
 
+
+# ==================== TourViewSet ====================
+# URL: {{baseurl}}/eventsapi/tours/  | CRUD
 class TourViewSet(ModelViewSet):
     queryset = Tour.objects.all()
     serializer_class = TourSerializer
     authentication_classes = [CsrfExemptSessionAuthentication]
     permission_classes=[IsAuthenticated]
 
+
+# ==================== HolidayViewSet ====================
+# URL: {{baseurl}}/eventsapi/holidays/  | CRUD
+# Aligned with RoomViewSet (AllowAny) - other events endpoints work with this pattern
 class HolidayViewSet(ModelViewSet):
     queryset = Holiday.objects.all().order_by("date")
     serializer_class = HolidaySerializer
-    authentication_classes = [CsrfExemptSessionAuthentication]
-    # permission_classes = [IsAuthenticated,IsAdminOrMD] 
-    
-    def get_permissions(self):
-        """
-        Instantiates and returns the list of permissions that this view requires.
-        """
-        # 1. Open to everyone for GET requests (list and retrieve)
-        if self.action in ['list', 'retrieve']:
-            permission_classes = [IsAuthenticated]
-            
-        # 2. Restrict POST, PUT, PATCH, DELETE to Superusers only
-        elif self.action in ['create', 'update', 'partial_update', 'destroy']:
-            permission_classes = [IsAuthenticated, IsAdminOrMD]
-            
-        # 3. Default fallback (e.g., must be logged in)
-        else:
-            permission_classes = [AllowAny]
-            
-        return [permission() for permission in permission_classes]
+    # authentication_classes = [CsrfExemptSessionAuthentication]
+    permission_classes=[AllowAny]
+    # def get_authenticators(self):
+    #     """Skip auth for list/retrieve to avoid ASGI + SessionAuth hang (sync DB in async context)."""
+    #     if self.action in ["list", "retrieve"]:
+    #         return []
+    #     return super().get_authenticators()
+
+    # def get_permissions(self):
+    #     if self.action in ["list", "retrieve"]:
+    #         return [AllowAny()]
+    #     elif self.action in ["create", "update", "partial_update", "destroy"]:
+    #         return [IsAuthenticated(), IsAdminOrMD()]
+    #     return [AllowAny()]
 
     # # ✅ /api/holidays/
     # @action(detail=False, methods=["get"], url_path="fixed")
@@ -102,11 +127,17 @@ class HolidayViewSet(ModelViewSet):
     #     serializer = self.get_serializer(qs, many=True)
     #     return Response(serializer.data)
 
+
+# ==================== EventViewSet ====================
+# URL: {{baseurl}}/eventsapi/events/  | CRUD
 class EventViewSet(ModelViewSet):
     queryset = Event.objects.all()
     serializer_class = EventSerializer
     authentication_classes = [CsrfExemptSessionAuthentication]
 
+
+# ==================== MeetingViewSet ====================
+# URL: {{baseurl}}/eventsapi/meetings/  | CRUD
 class MeetingViewSet(ModelViewSet):
     # Optimized query with prefetch for M2M users and select for ForeignKey room
     queryset = Meeting.objects.all().select_related('meeting_room').prefetch_related('users')

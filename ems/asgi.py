@@ -10,11 +10,20 @@ django_Asgi_app=get_asgi_application()
 
 import ems.routing as routing
 
+# WebSocket: session-only auth (no JWT/tokens).
+# Cookies sent automatically by browser for same-site or cross-origin (SameSite=None; Secure).
 application = ProtocolTypeRouter({
+
     "http": django_Asgi_app,
-    "websocket": AllowedHostsOriginValidator(AuthMiddlewareStack(
+
+    "websocket": AuthMiddlewareStack(
+
         URLRouter(
+
             routing.websocket_urlpatterns
-        ))
+
+        )
+
     ),
-})
+
+}) 

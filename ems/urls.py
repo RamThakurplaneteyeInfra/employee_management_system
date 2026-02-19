@@ -24,13 +24,14 @@ urlpatterns = [
     path("", home,name="Home"),
     path('accounts/', include('accounts.urls'),name="accounts"),
     path("tasks/",include("task_management.urls"),name="task_management"),
-    path("messaging/",include("Messaging.urls"),name="Messaging"),
-    path("",include("QuaterlyReports.urls"),name="QuaterlyReports"),
+    path("messaging/", include("Messaging.urls"), name="Messaging"),
+    path("", include("QuaterlyReports.urls"), name="QuaterlyReports"),
+    path("notifications/", include("notifications.urls"), name="notifications"),
     path('adminapi/', include('adminpanel.urls'),name="adminpanelapi"),
     path('eventsapi/', include('events.urls'),name="eventsapi")
 ]
 
-if settings.DEBUG:
+if True:
     urlpatterns += static(
         settings.MEDIA_URL,
         document_root=settings.MEDIA_ROOT

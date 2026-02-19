@@ -1,7 +1,9 @@
 from django.urls import path
-from .views import get_notifications, mark_as_read
- 
+from .views import get_notifications, mark_as_read, websocket_info,get_notification_types
+
 urlpatterns = [
-    path('notifications/', get_notifications),
-    path('notifications/read/<int:pk>/', mark_as_read),
+    path("", get_notifications),
+    path("types/", get_notification_types),
+    path("read/<int:pk>/", mark_as_read),
+    path("ws-info/", websocket_info),
 ]

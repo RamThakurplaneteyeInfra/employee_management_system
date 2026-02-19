@@ -1,6 +1,6 @@
 from django.db import models
 from task_management.models import TaskStatus
-from task_management.filters import get_default_task_status
+# from task_management.filters import get_default_task_status
 
 # 1️⃣ AssetType table (Hardware, Software)
 class AssetType(models.Model):

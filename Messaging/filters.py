@@ -1,101 +1,119 @@
+from asgiref.sync import sync_to_async
 from ems.verify_methods import *
-from accounts.filters import *
+from accounts.filters import _get_users_Name_sync
 from .models import *
 
-def get_group_object(group_id:int):
-    try:
-        group=GroupChats.objects.get(group_id=group_id)
-    except Exception as e:
-        print(e)
-        return JsonResponse({"message":f"{e}"},status=404)
-    else:
-        return group
-    
-def get_groupmember_object(group:GroupChats,participant:User):
-    try:
-            member=GroupMembers.objects.get(groupchat=group,participant=participant)
-    except Exception as e:
-            print(e)
-            return JsonResponse({"message":f"{e}"},status=404)
-    else:
-            return member
-    
-def check_user_member(user: User,group_id:int):
-    group=get_group_object(user=user,group_id=group_id)
-    if isinstance(group,GroupChats):
-        member_instance=get_groupmember_object(group=group,participant=user)
-        if isinstance(member_instance,GroupMembers):
-            return member_instance
-        else:
-            return member_instance
-    else:
-        return group
-    
-def get_individual_chat_object(chat_id:int):
-    try:
-        chat=IndividualChats.objects.get(chat_id=chat_id)
-    except Exception as e:
-        print(e)
-        return JsonResponse({"message":f"{e}"},status=404)
-    else:
-        return chat
-    
-def check_group_or_chat(id:str):
-    if id.startswith("G"):
-        is_group=True
-    else:
-        is_group=False
-    return is_group
+# # # # # #  baseurl="http://localhost:8000"  # # # # # # # # # # # #
 
-def get_group_members(group_id:str):
+
+# ==================== get_group_object ====================
+def _get_group_object_sync(group_id: str):
+    """Sync helper: DB query."""
     try:
-        get_group_object=get_object_or_404(GroupChats,group_id=group_id)
+        return GroupChats.objects.get(group_id=group_id)
+    except Exception as e:
+        return JsonResponse({"message": f"{e}"}, status=404)
+
+
+async def get_group_object(group_id: str):
+    return await sync_to_async(_get_group_object_sync)(group_id)
+
+
+# ==================== get_groupmember_object ====================
+def _get_groupmember_object_sync(group: GroupChats, participant: User):
+    """Sync helper: DB query."""
+    try:
+        return GroupMembers.objects.get(groupchat=group, participant=participant)
+    except Exception as e:
+        return JsonResponse({"message": f"{e}"}, status=404)
+
+
+async def get_groupmember_object(group: GroupChats, participant: User):
+    return await sync_to_async(_get_groupmember_object_sync)(group, participant)
+
+
+# ==================== check_user_member ====================
+def check_user_member(user: User, group_id: str):
+    """Sync: uses get_group_object."""
+    group = _get_group_object_sync(group_id=group_id)
+    if isinstance(group, GroupChats):
+        member_instance = _get_groupmember_object_sync(group=group, participant=user)
+        if isinstance(member_instance, GroupMembers):
+            return member_instance
+        return member_instance
+    return group
+
+
+# ==================== get_individual_chat_object ====================
+def _get_individual_chat_object_sync(chat_id: str):
+    """Sync helper: DB query."""
+    try:
+        return IndividualChats.objects.get(chat_id=chat_id)
+    except Exception as e:
+        return JsonResponse({"message": f"{e}"}, status=404)
+
+
+async def get_individual_chat_object(chat_id: str):
+    return await sync_to_async(_get_individual_chat_object_sync)(chat_id)
+
+
+# ==================== check_group_or_chat ====================
+def check_group_or_chat(id: str):
+    return id.startswith("G")
+
+
+# ==================== get_group_members ====================
+def _get_group_members_sync(group_id: str):
+    """Sync helper: DB query."""
+    try:
+        group_obj = get_object_or_404(GroupChats, group_id=group_id)
+        members = GroupMembers.objects.filter(groupchat=group_obj).select_related("participant").annotate(
+            participant_name=F("participant__accounts_profile__Name")
+        ).values("participant", "participant_name", "groupchat")
+        return JsonResponse(list(members), safe=False)
     except Http404 as e:
-        print(e)
-        error_response=JsonResponse({"message":f"{e}"},status=status.HTTP_404_NOT_FOUND)
-        return error_response
-    else:
-        Members_object=GroupMembers.objects.filter(groupchat=get_group_object).select_related("participant").annotate(participant_name=F("participant__accounts_profile__Name")).values("participant","participant_name","groupchat")
-        return JsonResponse(list(Members_object),safe=False)
-    
-def get_messages(request:HttpRequest,chat_id:str):
-        try:
-            is_group=True
-            group_obj= get_object_or_404(GroupChats, group_id=chat_id)
-        except Http404 as e:
-            # print(e)
-            is_group=False
-        finally:
-            if is_group:
-                participants=GroupMembers.objects.filter(groupchat=group_obj).select_related("participant")
-                Flag=False
-                try:
-                    for i in participants:
-                        if request.user==i.participant:
-                            Flag=True
-                    if not Flag:
-                        raise PermissionDenied("Not authorised") # type: ignore
-                except PermissionDenied:
-                    return JsonResponse({"message":"you are not authorised to accessed this conversation"},status=status.HTTP_403_FORBIDDEN)
-                else:
-                    messages= GroupMessages.objects.filter(group=group_obj).order_by("-created_at")
-                    GroupMembers.objects.filter(groupchat=group_obj,participant=request.user).update(seen=True)
-            else:
-                try:
-                    chat_obj=get_object_or_404(IndividualChats,chat_id=chat_id)
-                except Http404 as e:
-                    print(e)
-                    return JsonResponse({"message":f"{e}"},status=status.HTTP_403_FORBIDDEN)
-                else:
-                    messages=IndividualMessages.objects.filter(chat=chat_obj).order_by("-created_at")
+        return JsonResponse({"message": f"{e}"}, status=status.HTTP_404_NOT_FOUND)
 
-        data = [
-            {
-                "sender": get_users_Name(m.sender),
-                "message": m.content,
-                "date":m.created_at.strftime("%d/%m/%y"),
-                "time": m.created_at.strftime("%H:%M"),
-            }
-            for m in messages
-        ]
-        return JsonResponse(data, safe=False)
+
+async def get_group_members(group_id: str):
+    return await sync_to_async(_get_group_members_sync)(group_id)
+
+
+# ==================== get_messages ====================
+def _get_messages_sync(request: HttpRequest, chat_id: str):
+    """Sync helper: DB operations for group or individual messages."""
+    try:
+        is_group = True
+        group_obj = get_object_or_404(GroupChats, group_id=chat_id)
+    except Http404:
+        is_group = False
+        group_obj = None
+
+    if is_group and group_obj:
+        participants = GroupMembers.objects.filter(groupchat=group_obj).select_related("participant")
+        flag = any(request.user == i.participant for i in participants)
+        if not flag:
+            return JsonResponse({"message": "you are not authorised to accessed this conversation"}, status=status.HTTP_403_FORBIDDEN)
+        messages = GroupMessages.objects.filter(group=group_obj).order_by("-created_at")
+        GroupMembers.objects.filter(groupchat=group_obj, participant=request.user).update(seen=True)
+    else:
+        try:
+            chat_obj = get_object_or_404(IndividualChats, chat_id=chat_id)
+        except Http404 as e:
+            return JsonResponse({"message": f"{e}"}, status=status.HTTP_403_FORBIDDEN)
+        messages = IndividualMessages.objects.filter(chat=chat_obj).order_by("-created_at")
+
+    data = [
+        {
+            "sender": _get_users_Name_sync(m.sender),
+            "message": m.content,
+            "date": m.created_at.strftime("%d/%m/%y"),
+            "time": m.created_at.strftime("%H:%M"),
+        }
+        for m in messages
+    ]
+    return JsonResponse(data, safe=False)
+
+
+async def get_messages(request: HttpRequest, chat_id: str):
+    return await sync_to_async(_get_messages_sync)(request, chat_id)

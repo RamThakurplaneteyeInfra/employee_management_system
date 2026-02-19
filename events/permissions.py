@@ -1,5 +1,6 @@
-from rest_framework.permissions import IsAuthenticated,AllowAny,BasePermission
-from django.http import HttpRequest
+from rest_framework.permissions import IsAuthenticated, AllowAny, BasePermission
+from ems.RequiredImports import HttpRequest
+
 
 class IsAdminOrMD(BasePermission):
     """

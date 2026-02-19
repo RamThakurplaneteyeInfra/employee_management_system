@@ -2,7 +2,16 @@ from rest_framework.routers import DefaultRouter
 from django.urls import path, include
 
 
-from .views import *
+from .views import (
+    BookSlotViewSet,
+    TourViewSet,
+    HolidayViewSet,
+    EventViewSet,
+    RoomViewSet,
+    BookingStatusViewset,
+    MeetingViewSet,
+    holidays_ping,
+)
 
 router = DefaultRouter()
 router.register("bookslots", BookSlotViewSet, basename="bookslots")
@@ -14,5 +23,7 @@ router.register("status", BookingStatusViewset, basename="status")
 router.register("meetingpush",MeetingViewSet , basename="meetingpush")
 
 urlpatterns = [
-    path("", include(router.urls))
+    # path("holidays-ping", holidays_ping),
+    # path("holidays-ping/", holidays_ping),
+    path("", include(router.urls)),
 ]

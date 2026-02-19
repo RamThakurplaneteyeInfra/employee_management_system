@@ -10,6 +10,9 @@ QuaterlyReports/__pycache__
 task_management/__pycache__
 adminpanel/__pycache__
 events/__pycache__
+notifications/__pycache__
 ActionableGoals.csv
 FunctionGoals.csv
 development.env
+Procfile
+.venv
