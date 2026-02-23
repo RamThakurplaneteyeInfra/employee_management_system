@@ -133,13 +133,12 @@ CHANNEL_LAYERS = {
 # Database – Connection pooling for AWS RDS (max 79 connections)
 # =============================================================================
 # Requires: pip install django-db-connection-pool[postgresql] (engine: dj_db_conn_pool)
-# Formula: total_connections = GUNICORN_WORKERS × (POOL_SIZE + MAX_OVERFLOW).
-# Keep total under ~65 so RDS (79) has headroom for admin/migrations.
-# Effective max concurrent DB operations ≈ total_connections (limits peak users/requests).
-DB_POOL_SIZE = int(os.getenv("DB_POOL_SIZE", "6"))
-DB_MAX_OVERFLOW = int(os.getenv("DB_MAX_OVERFLOW", "8"))
+# Total connections = GUNICORN_WORKERS × (POOL_SIZE + MAX_OVERFLOW). Keep under 65 for RDS 79.
+# CONN_MAX_AGE=0 is required: returns connection to pool after each request so pool is not exhausted.
+DB_POOL_SIZE = int(os.getenv("DB_POOL_SIZE", "15"))
+DB_MAX_OVERFLOW = int(os.getenv("DB_MAX_OVERFLOW", "5"))
 DB_RECYCLE_SECONDS = int(os.getenv("DB_RECYCLE_SECONDS", "3600"))
-# DB_POOL_TIMEOUT = int(os.getenv("DB_POOL_TIMEOUT", "45"))
+DB_POOL_TIMEOUT = int(os.getenv("DB_POOL_TIMEOUT", "60"))
 
 DATABASES = {
     "default": {
@@ -151,15 +150,15 @@ DATABASES = {
         "PORT": os.getenv("POSTGRES_PORT"),
         "OPTIONS": {
             "options": "-c search_path=events,task_management,notifications,project,quatery_reports,login_details,messaging,team_farm,team_infra,team_interns,team_management,public",
-            "connect_timeout": 10,
+            # "connect_timeout": 10,
         },
-        "CONN_MAX_AGE": None,
+        "CONN_MAX_AGE": 0,
         "DISABLE_SERVER_SIDE_CURSORS": True,
         "POOL_OPTIONS": {
             "POOL_SIZE": DB_POOL_SIZE,
             "MAX_OVERFLOW": DB_MAX_OVERFLOW,
             "RECYCLE": DB_RECYCLE_SECONDS,
-            # "timeout": DB_POOL_TIMEOUT,
+            "timeout": DB_POOL_TIMEOUT,
         },
     }
 }

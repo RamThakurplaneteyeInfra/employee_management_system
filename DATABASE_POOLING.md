@@ -2,20 +2,23 @@
 
 ## Overview
 
-The project uses **django-db-connection-pool** so PostgreSQL connection slots on AWS RDS (limit ~79) are not exhausted. With **3 workers**, pool settings are tuned so total connections stay under ~65 and the system can handle a predictable **max concurrent load** (effective user/request limit).
+The project uses **django-db-connection-pool** so PostgreSQL on AWS RDS (max **79** connections) is not exhausted. With **3 workers**, pool size 15 and max overflow 5 give **60 total connections** (under 79). For **~50 clients**, this is sufficient provided connections are **returned to the pool** after each request.
 
-## Approach: 3 workers, optimized and limited
+## Critical: CONN_MAX_AGE = 0
 
-1. **Fix total connection budget**  
-   `total_connections = 3 × (POOL_SIZE + MAX_OVERFLOW)`. Keep this **≤ 65** so RDS has headroom.
+**You must set `CONN_MAX_AGE = 0`** in database settings. With pooling:
 
-2. **Optimise per-worker pool**  
-   - Smaller **POOL_SIZE** = fewer idle connections; **MAX_OVERFLOW** handles bursts.  
-   - **CONN_MAX_AGE=0** (in settings) so connections are returned to the pool after each request.  
-   - **RECYCLE** so long-lived connections are refreshed.
+- **CONN_MAX_AGE = 0** → Django returns the connection to the pool at the end of each request so it can be reused. The pool does not get exhausted.
+- **CONN_MAX_AGE = None** (or a positive value) → Connections can be held and not returned to the pool, so the pool hits its limit (15+5 per worker) and you get `QueuePool limit reached, connection timed out`.
 
-3. **Limit effective max users/load**  
-   The hard limit is **concurrent DB operations** (requests + WebSockets that hit the DB). With 3 workers and a total of ~42 connections (recommended default), you can sustain about **40–50 concurrent request/WS operations** that use the DB. Total “users” can be higher if many are idle; “max users” in practice = how many can be active at once without hitting pool timeouts.
+Also set **pool timeout** (e.g. 60 seconds) in `POOL_OPTIONS` so that during bursts the app waits longer for a free connection instead of failing after 30s.
+
+## Approach: 3 workers, 50 clients, RDS 79 max
+
+1. **Total connections** = `3 × (15 + 5) = 60` (under 79).
+2. **CONN_MAX_AGE = 0** so each request returns its connection to the pool.
+3. **RECYCLE = 3600** so connections are refreshed every hour.
+4. **timeout = 60** in POOL_OPTIONS so wait up to 60s for a connection before raising.
 
 ## How connections are used
 
@@ -31,12 +34,14 @@ Overridden via environment variables:
 
 | Variable            | Default | Description                                  |
 |---------------------|---------|----------------------------------------------|
-| `DB_POOL_SIZE`      | 6       | Connections kept per worker                  |
-| `DB_MAX_OVERFLOW`   | 8       | Extra connections per worker when pool full  |
+| `DB_POOL_SIZE`      | 15      | Connections kept per worker                  |
+| `DB_MAX_OVERFLOW`   | 5       | Extra connections per worker when pool full  |
 | `DB_RECYCLE_SECONDS`| 3600    | Recycle connections after this many seconds |
-| `DB_POOL_TIMEOUT`   | 45      | Seconds to wait for a connection from pool   |
+| `DB_POOL_TIMEOUT`   | 60      | Seconds to wait for a connection from pool  |
 
-**With 3 workers:** 3 × (6 + 8) = **42 max connections** (optimised, under limit).
+**CONN_MAX_AGE** must be **0** (return connection to pool after each request).
+
+**With 3 workers:** 3 × (15 + 5) = **60 max connections** (under RDS 79, suitable for ~50 clients).
 
 ### 2. Workers (Procfile / Render)
 
@@ -44,18 +49,17 @@ The app runs with **Gunicorn + UvicornWorker** (ASGI). Each worker is a separate
 
 | Setting             | Value  | Effect                                      |
 |---------------------|--------|---------------------------------------------|
-| Workers (default)   | 3      | 3 processes × 14 = 42 max connections      |
+| Workers (default)   | 3      | 3 processes × 20 = 60 max connections      |
 | Override            | `GUNICORN_WORKERS` in Render | Change worker count |
 
 ### Connection budget (RDS ~79 max)
 
 | Workers | POOL_SIZE | MAX_OVERFLOW | Total connections | Use case              |
 |---------|-----------|--------------|-------------------|------------------------|
-| 3       | 6         | 8            | **42**            | Recommended default   |
-| 3       | 8         | 10           | 54                | Higher concurrency    |
-| 3       | 10        | 15           | 75                | Near RDS limit        |
-| 2       | 6         | 8            | 28                | Fewer workers         |
-| 4       | 5         | 8            | 52                | More workers          |
+| 3       | 15        | 5            | **60**            | Recommended (50 clients, RDS 79) |
+| 3       | 10        | 10           | 60                | Alternative            |
+| 2       | 15        | 5            | 40                | Fewer workers         |
+| 4       | 10        | 5            | 60                | More workers          |
 
 ## Render setup
 
@@ -71,18 +75,19 @@ gunicorn ems.asgi:application -k uvicorn.workers.UvicornWorker --workers 3 --bin
 
 | Variable             | Suggested | Notes                                           |
 |----------------------|-----------|-------------------------------------------------|
-| `DB_POOL_SIZE`       | 6         | Per-worker pool size                            |
-| `DB_MAX_OVERFLOW`    | 8         | Per-worker overflow                             |
-| `DB_POOL_TIMEOUT`    | 45        | Wait for connection from pool (seconds)        |
+| `DB_POOL_SIZE`       | 15        | Per-worker pool size                            |
+| `DB_MAX_OVERFLOW`    | 5         | Per-worker overflow                             |
+| `DB_POOL_TIMEOUT`    | 60        | Wait for connection from pool (seconds)        |
 | `DB_RECYCLE_SECONDS` | 3600      | Recycle connections periodically                |
 | `GUNICORN_WORKERS`   | 3         | Override in dashboard to change worker count   |
 
+Ensure **CONN_MAX_AGE=0** in settings (not overridden by env) so connections are returned to the pool.
+
 ### Max users / concurrency limit
 
-- **Effective limit** = number of concurrent operations that need a DB connection (HTTP requests + WebSocket handlers that query DB).
-- With **42 connections** (3 workers × 14): plan for **~40–50** such operations at once.
-- To support more concurrent users: increase `DB_POOL_SIZE` and/or `DB_MAX_OVERFLOW` **without** exceeding `workers × (POOL_SIZE + MAX_OVERFLOW) ≤ 65`.
-- If you see `QueuePool limit reached` / timeouts: either increase pool (within 65 total) or add a higher-level limit (e.g. rate limiting, max concurrent sessions per user).
+- **Effective limit** = concurrent operations that need a DB connection (HTTP + WebSocket DB access).
+- With **60 connections** (3 workers × 20) and **CONN_MAX_AGE=0**, connections are returned after each request, so **~50 clients** can be served without exhausting the pool.
+- If you still see `QueuePool limit reached`: ensure **CONN_MAX_AGE=0** (not `None`), ensure **timeout** is set in POOL_OPTIONS (e.g. 60), and that total connections stay **≤ 65** (RDS max 79).
 
 ## Install
 
