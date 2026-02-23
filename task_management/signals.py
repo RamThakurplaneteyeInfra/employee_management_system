@@ -8,8 +8,9 @@ from asgiref.sync import async_to_sync
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 from channels.layers import get_channel_layer
+from accounts.filters import  _get_users_Name_sync
 
-from .models import Task, TaskAssignies, AssingnedTasksCount, CreatedTasksCount, TaskCreateAndEditLogs
+from .models import Task, TaskAssignies, AssingnedTasksCount, CreatedTasksCount, TaskCreateAndEditLogs, TaskMessage
 from notifications.models import Notification, notification_type
 
 
@@ -72,7 +73,7 @@ def _task_assigned_notification_sync(sender, created, instance: TaskAssignies, *
     assignee = instance.assigned_to
     task = instance.task
     creator = task.created_by
-    msg = f"New task '{task.title}' assigned to you by {creator.username}"
+    msg = f"New task '{task.title}' assigned to you by {_get_users_Name_sync(creator)}"
     try:
         nt = notification_type.objects.get(type_name="Task_Created")
     except notification_type.DoesNotExist:
@@ -86,10 +87,51 @@ def _task_assigned_notification_sync(sender, created, instance: TaskAssignies, *
     channel_layer = get_channel_layer()
     async_to_sync(channel_layer.group_send)(
         f"user_{assignee.username}",
-        {"type": "send_notification", "title": "Task Assigned", "message": msg, "extra": {"time": notification_obj.created_at.strftime("%d/%m/%Y, %H:%M:%S")}},
+        {"type": "send_notification", "title": "Task Assigned","category":"Task_Created", "message": msg, "extra": {"time": notification_obj.created_at.strftime("%d/%m/%Y, %H:%M:%S")}},
     )
 
 
 @receiver(post_save, sender=TaskAssignies)
 def task_assigned_notification(sender, created, instance: TaskAssignies, **kwargs):
     _task_assigned_notification_sync(sender, created, instance, **kwargs)
+
+def _task_message_notification_sync(sender, created, instance: TaskMessage, **kwargs):
+    """When a task message is created, notify all assigned members (excluding the sender)."""
+    if not created:
+        return
+    task = instance.task
+    sender_user = instance.sender
+    sender_name = _get_users_Name_sync(sender_user)
+    message_preview = (instance.message[:80] + "…") if len(instance.message) > 80 else instance.message
+    msg = f"{sender_name} sent a message on task '{task.title}': {message_preview}"
+    try:
+        nt = notification_type.objects.get(type_name="Task_Message")
+    except notification_type.DoesNotExist:
+        return
+    assignees = TaskAssignies.objects.filter(task=task).select_related("assigned_to")
+    channel_layer = get_channel_layer()
+    for ta in assignees:
+        assignee = ta.assigned_to
+        if assignee == sender_user:
+            continue
+        notification_obj = Notification.objects.create(
+            from_user=sender_user,
+            receipient=assignee,
+            message=msg,
+            type_of_notification=nt,
+        )
+        async_to_sync(channel_layer.group_send)(
+            f"user_{assignee.username}",
+            {
+                "type": "send_notification",
+                "title": f"Task Message from {sender_name} for task {task.title}",
+                "category": "Task_Message",
+                "message": msg,
+                "extra": {"time": notification_obj.created_at.strftime("%d/%m/%Y, %H:%M:%S")},
+            },
+        )
+
+
+@receiver(post_save, sender=TaskMessage)
+def task_message_notification(sender, created, instance: TaskMessage, **kwargs):
+    _task_message_notification_sync(sender, created, instance, **kwargs)

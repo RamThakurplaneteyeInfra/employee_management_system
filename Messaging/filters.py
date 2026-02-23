@@ -94,18 +94,27 @@ def _get_messages_sync(request: HttpRequest, chat_id: str):
         flag = any(request.user == i.participant for i in participants)
         if not flag:
             return JsonResponse({"message": "you are not authorised to accessed this conversation"}, status=status.HTTP_403_FORBIDDEN)
-        messages = GroupMessages.objects.filter(group=group_obj).order_by("-created_at")
-        GroupMembers.objects.filter(groupchat=group_obj, participant=request.user).update(seen=True)
+        messages = GroupMessages.objects.filter(group=group_obj).select_related("sender__accounts_profile").order_by("-created_at")
+        # Mark as seen and reset unseen count when user fetches messages
+        GroupMembers.objects.filter(groupchat=group_obj, participant=request.user).update(seen=True, unseenmessages=0)
     else:
         try:
             chat_obj = get_object_or_404(IndividualChats, chat_id=chat_id)
         except Http404 as e:
             return JsonResponse({"message": f"{e}"}, status=status.HTTP_403_FORBIDDEN)
-        messages = IndividualMessages.objects.filter(chat=chat_obj).order_by("-created_at")
+        messages = IndividualMessages.objects.filter(chat=chat_obj).select_related("sender__accounts_profile").order_by("-created_at")
+        # Mark messages from the other participant as seen when user fetches chat
+        other = chat_obj.get_other_participant(request.user)
+        if other:
+            IndividualMessages.objects.filter(chat=chat_obj, sender=other, seen=False).update(seen=True)
+
+    def _sender_name(sender):
+        profile = getattr(sender, "accounts_profile", None)
+        return getattr(profile, "Name", None) if profile else _get_users_Name_sync(sender)
 
     data = [
         {
-            "sender": _get_users_Name_sync(m.sender),
+            "sender": _sender_name(m.sender),
             "message": m.content,
             "date": m.created_at.strftime("%d/%m/%y"),
             "time": m.created_at.strftime("%H:%M"),

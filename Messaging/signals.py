@@ -5,7 +5,7 @@ from asgiref.sync import sync_to_async, async_to_sync
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 from channels.layers import get_channel_layer
-from accounts.filters import get_users_Name
+from accounts.filters import _get_users_Name_sync
 
 from .models import GroupChats, GroupMessages, GroupMembers, IndividualMessages
 from notifications.models import Notification, notification_type
@@ -32,7 +32,9 @@ def _create_notification_for_groupmessage_sync(sender, instance: GroupMessages, 
             f"user_{m.participant.username}",
             {
                 "type": "send_notification",
+                "category":"Group_message",
                 "title": f"Group message from {group_obj.group_name}",
+                "from":f"{_get_users_Name_sync(instance.sender)}",
                 "message": instance.content,
                 "extra":{"time": notification_obj.created_at.strftime("%d/%m/%Y, %H:%M:%S")}
             }
@@ -63,7 +65,9 @@ def _create_notification_for_chatmessage_sync(sender, instance: IndividualMessag
         f"user_{other.username}",
         {
             "type": "send_notification",
-            "title": f"Received a Message from {get_users_Name(instance.sender.username)}",
+            "category":"private_message",
+            "title": f"Received a Message",
+            "from":f"{_get_users_Name_sync(instance.sender)}",
             "message": instance.content,
             "extra":{"time": notification_obj.created_at.strftime("%d/%m/%Y, %H:%M:%S")}
         }
@@ -88,7 +92,7 @@ def _notify_added_to_group_sync(sender, created, instance: GroupMembers, **kwarg
         nt = notification_type.objects.get(type_name="Group_Created")
     except notification_type.DoesNotExist:
         return
-    msg = f"You were added to group '{group.group_name}' by {get_users_Name(creator.username)}"
+    msg = f"You were added to group '{group.group_name}' by {(creator.username)}"
     notification_obj=Notification.objects.create(
         from_user=creator,
         receipient=added_user,
@@ -98,7 +102,7 @@ def _notify_added_to_group_sync(sender, created, instance: GroupMembers, **kwarg
     channel_layer = get_channel_layer()
     async_to_sync(channel_layer.group_send)(
         f"user_{added_user.username}",
-        {"type": "send_notification", "title": "Added to a Group", "message": msg, "extra": {"time": notification_obj.created_at.strftime("%d/%m/%Y, %H:%M:%S")}},
+        {"type": "send_notification", "title": f"Added to a Group {instance.groupchat.group_name}","category":"Group_Created","extra": {"time": notification_obj.created_at.strftime("%d/%m/%Y, %H:%M:%S")}},
     )
 
 

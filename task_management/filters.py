@@ -175,27 +175,32 @@ def _get_tasks_by_type_sync(request: HttpRequest, type: str = "all", self_create
         return task_data
     
     elif type and not self_created:
-        Task_assignee=TaskAssignies.objects.select_related("task","task__status","task__type","task__created_by").filter(assigned_to=request.user)
-        task_data=[]
-        for task in Task_assignee:
-            task_obj = task.task
-            users_name = _get_users_Name_sync(task_obj.created_by)
-            # if task_obj.type.type_name==type and task_obj.created_at.date()==current_date:
-            tasks= TaskAssignies.objects.filter(assigned_to=request.user).annotate(Task_id=F('task__task_id'),Title=F('task__title'),
-                                    Description=F('task__description'),Status=F('task__status__status_name'),
-                                    Created_by=F('task__created_by__accounts_profile__Name'),Report_to=F("task__created_by__accounts_profile__Name"),
-                                    Due_date=F('task__due_date'),Created_at=F('task__created_at'),
-                                    Task_type=F('task__type__type_name')).values('Task_id', 'Title', 'Description', 'Status','Created_by', 'Report_to', 'Due_date', 'Created_at', 'Task_type')
-        
-            task_data = [{
-            **item,
-            "Due_date": item['Due_date'].strftime("%d/%m/%Y"),
-            "Created_at": item['Created_at'].strftime("%d/%m/%Y")}for item in tasks]
+        type_obj = _get_taskTypes_object_sync(type_name=type)
+        if not type_obj:
+            return [{"message": "Invalid task type"}]
+        tasks = (
+            TaskAssignies.objects.filter(assigned_to=request.user, task__type=type_obj)
+            .annotate(
+                Task_id=F("task__task_id"),
+                Title=F("task__title"),
+                Description=F("task__description"),
+                Status=F("task__status__status_name"),
+                Created_by=F("task__created_by__accounts_profile__Name"),
+                Report_to=F("task__created_by__accounts_profile__Name"),
+                Due_date=F("task__due_date"),
+                Created_at=F("task__created_at"),
+                Task_type=F("task__type__type_name"),
+            )
+            .values("Task_id", "Title", "Description", "Status", "Created_by", "Report_to", "Due_date", "Created_at", "Task_type")
+        )
+        task_data = [
+            {**item, "Due_date": item["Due_date"].strftime("%d/%m/%Y"), "Created_at": item["Created_at"].strftime("%d/%m/%Y")}
+            for item in tasks
+        ]
+        return task_data
 
     else:
-        tasks = [{"message": "Incorrect type for tasks"}]
-
-    return JsonResponse(tasks, safe=False, status=status.HTTP_200_OK)
+        return [{"message": "Incorrect type for tasks"}]
 
 
 async def get_tasks_by_type(request: HttpRequest, type: str = "all", self_created: bool = True, Date=None):

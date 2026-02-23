@@ -1,5 +1,5 @@
 from asgiref.sync import sync_to_async
-from accounts.filters import _get_user_role_sync
+from accounts.filters import _get_user_role_sync, _get_users_Name_sync
 from .filters import (
     get_task_object,
     _get_taskTypes_object_sync,
@@ -223,10 +223,22 @@ async def get_task_messages(request: HttpRequest, task_id: int):
             for i in assignees:
                 if not (user != task.created_by and user != i.assigned_to):
                     raise PermissionDenied("Not allowed")
-            messages = TaskMessage.objects.filter(task=task).select_related("sender", "task").order_by("-created_at")
+            messages = TaskMessage.objects.filter(task=task).select_related("sender__accounts_profile", "task").order_by("-created_at")
             messages.update(seen=True)
-            return [{"sender": m.sender.username, "message": m.message, "date": m.created_at.strftime("%d/%m/%y"),
-                "time": m.created_at.strftime("%H:%M"), "seen": m.seen} for m in messages]
+            def _name(s):
+                p = getattr(s, "accounts_profile", None)
+                return getattr(p, "Name", None) if p else _get_users_Name_sync(s)
+            return [
+                {
+                    "sender": m.sender.username,
+                    "full_name": _name(m.sender),
+                    "message": m.message,
+                    "date": m.created_at.strftime("%d/%m/%y"),
+                    "time": m.created_at.strftime("%H:%M"),
+                    "seen": m.seen,
+                }
+                for m in messages
+            ]
         data = await sync_to_async(_fetch)(request.user)
         return JsonResponse(data, safe=False)
     except PermissionDenied:

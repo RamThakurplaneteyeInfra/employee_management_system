@@ -1,4 +1,3 @@
-from asgiref.sync import sync_to_async
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
@@ -14,12 +13,11 @@ from .Serializers import NotificationSerializer
 # Method: GET
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
-async def get_notifications(request):
-    def _fetch(user):
-        qs = Notification.objects.filter(receipient=user).select_related("type_of_notification", "from_user").order_by("-created_at")
-        return NotificationSerializer(qs, many=True).data
-
-    data = await sync_to_async(_fetch)(request.user)
+def get_notifications(request):
+    qs = Notification.objects.filter(receipient=request.user).select_related(
+        "type_of_notification", "from_user"
+    ).order_by("-created_at")
+    data = NotificationSerializer(qs, many=True).data
     return Response(data)
 
 
@@ -29,13 +27,10 @@ async def get_notifications(request):
 # Method: POST
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
-async def mark_as_read(request, pk):
-    def _mark(user):
-        notification = Notification.objects.get(pk=pk, receipient=user)
-        notification.is_read = True
-        notification.save()
-
-    await sync_to_async(_mark)(request.user)
+def mark_as_read(request, pk):
+    notification = Notification.objects.get(pk=pk, receipient=request.user)
+    notification.is_read = True
+    notification.save()
     return Response({"status": "read"})
 
 

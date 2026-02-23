@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from django.db.models import Q
 from .models import *
 from ems.RequiredImports import *
 from accounts.filters import _get_users_Name_sync
@@ -34,21 +35,97 @@ class BookSlotSerializer(serializers.ModelSerializer):
             'created_at','member_details',"creater_details","created_by"
         ]
         
-    def get_member_details(self, obj:BookSlot):
-        # Accesses the ManyToMany relationship
-        # return [
-        #     {
-        #         "username": user.username,
-        #         "full_name": _get_users_Name_sync(user) # fallback if name is empty
-        #     }]
-        return list(SlotMembers.objects.select_related("slot","member").filter(slot=obj).values(full_name=F("member__accounts_profile__Name")))
-        
-        
-    def get_creater_details(self, obj: BookSlot):
-        return {
-                "full_name": _get_users_Name_sync(obj.created_by) # fallback if name is empty
+    def get_member_details(self, obj: BookSlot):
+        # Use prefetched slotmembers (no extra query per slot).
+        return [
+            {
+                "full_name": (
+                    getattr(m.member.accounts_profile, "Name", None)
+                    or _get_users_Name_sync(m.member)
+                )
             }
-        
+            for m in obj.slotmembers.all()
+        ]
+
+    def get_creater_details(self, obj: BookSlot):
+        # Use prefetched created_by__accounts_profile when available.
+        if obj.created_by_id is None:
+            return {"full_name": None}
+        profile = getattr(obj.created_by, "accounts_profile", None)
+        name = getattr(profile, "Name", None) if profile else None
+        return {"full_name": name or _get_users_Name_sync(obj.created_by)}
+
+    def _get_overlapping_slots(self, date_val, start_time, end_time, exclude_slot_id=None):
+        """Slots on the same date whose time range overlaps (start_time, end_time)."""
+        qs = BookSlot.objects.filter(
+            date=date_val
+        ).filter(
+            Q(start_time__lt=end_time) & Q(end_time__gt=start_time)
+        )
+        if exclude_slot_id is not None:
+            qs = qs.exclude(pk=exclude_slot_id)
+        return qs
+
+    def validate(self, attrs):
+        date_val = attrs.get("date")
+        start_time = attrs.get("start_time")
+        end_time = attrs.get("end_time")
+        room = attrs.get("room")
+        members = attrs.get("members", [])
+
+        if date_val is None or start_time is None or end_time is None:
+            return attrs
+
+        if start_time >= end_time:
+            raise serializers.ValidationError(
+                "end_time must be after start_time."
+            )
+        if not members:
+            raise serializers.ValidationError(
+                "There should be at least one member in the slot."
+            )
+
+        exclude_slot_id = self.instance.pk if self.instance else None
+        overlapping = self._get_overlapping_slots(
+            date_val, start_time, end_time, exclude_slot_id=exclude_slot_id
+        )
+
+        total_rooms = Room.objects.filter(is_active=True).count()
+        if total_rooms == 0:
+            raise serializers.ValidationError("No rooms are available for booking.")
+
+        rooms_booked_in_period = overlapping.values_list("room_id", flat=True).distinct()
+        rooms_booked_count = len(set(rooms_booked_in_period))
+        if rooms_booked_count >= total_rooms:
+            raise serializers.ValidationError(
+                "No room empty for booking the slot."
+            )
+
+        if overlapping.filter(room=room).exists():
+            raise serializers.ValidationError(
+                "This room is already booked for the selected time slot."
+            )
+
+        request = self.context.get("request")
+        if request and request.user:
+            creator = request.user
+            if overlapping.filter(created_by=creator).exists():
+                raise serializers.ValidationError(
+                    "You already have a slot in this time frame."
+                )
+
+        for member in members:
+            if overlapping.filter(created_by=member).exists():
+                raise serializers.ValidationError(
+                    {"members": f"User {member.username} already has a slot in this time frame."}
+                )
+            if SlotMembers.objects.filter(slot__in=overlapping, member=member).exists():
+                raise serializers.ValidationError(
+                    {"members": f"User {member.username} already has a slot in this time frame."}
+                )
+
+        return attrs
+
     def create(self, validated_data):
         # Extract the list of user objects identified by username
         member_users = validated_data.pop('members', [])
@@ -109,18 +186,22 @@ class TourSerializer(serializers.ModelSerializer):
         ]
         
     def get_member_details(self, obj):
-        # Accesses the ManyToMany relationship
+        # Use prefetched tourmembers to avoid N+1.
         return [
             {
-                "username": user.username,
-                "full_name": _get_users_Name_sync(user) # fallback if name is empty
-            } 
-            for user in obj.members.all()]
-        
-    def get_creater_details(self, obj):
-        return {
-                "full_name": _get_users_Name_sync(obj.created_by) # fallback if name is empty
+                "username": tm.member.username,
+                "full_name": (
+                    getattr(tm.member.accounts_profile, "Name", None)
+                    or _get_users_Name_sync(tm.member)
+                ),
             }
+            for tm in obj.tourmembers.all()
+        ]
+
+    def get_creater_details(self, obj):
+        profile = getattr(obj.created_by, "accounts_profile", None)
+        name = getattr(profile, "Name", None) if profile else None
+        return {"full_name": name or _get_users_Name_sync(obj.created_by)}
 
     def create(self, validated_data):
         # Extract the list of user objects identified by username
@@ -193,9 +274,13 @@ class MeetingSerializer(serializers.ModelSerializer):
     def get_user_details(self, obj):
         return [
             {
-                "username": user.username, 
-                "full_name": _get_users_Name_sync(user)
-            } for user in obj.users.all()
+                "username": user.username,
+                "full_name": (
+                    getattr(user.accounts_profile, "Name", None)
+                    or _get_users_Name_sync(user)
+                ),
+            }
+            for user in obj.users.all()
         ]
         
     # def get_schedule_time(self,obj:Meeting):

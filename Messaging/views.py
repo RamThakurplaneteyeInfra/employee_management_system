@@ -1,4 +1,5 @@
 from asgiref.sync import sync_to_async
+from django.db.models import F, Count
 from accounts.models import Profile
 from ems.verify_methods import *
 from .models import *
@@ -286,25 +287,64 @@ async def get_chats(request: HttpRequest, chat_id: str):
 
 
 # ==================== load_groups_and_chats ====================
-# Load groups and individual chats for logged-in user.
+# Load groups and individual chats for logged-in user, ordered by last_message_at.
+# Includes unseen message count per group/chat.
 # URL: {{baseurl}}/messaging/loadChats/
 # Method: GET
 def _load_groups_and_chats_sync(user):
-    """Sync helper: DB operations to fetch user's groups and individual chats."""
-    groups = GroupMembers.objects.select_related("groupchat").filter(participant=user).annotate(group_id=F("groupchat__group_id"),group_name=F("groupchat__group_name"),
-                description=F("groupchat__description"),created_by=F("groupchat__created_by__accounts_profile__Name"),total_participant=F("groupchat__participants"),created_at=F("groupchat__created_at")).values("group_id","group_name",
-                        "total_participant","created_by","description","created_at")
-    chats = IndividualChats.objects.filter(Q(participant1=user) | Q(participant2=user))
-    # groups_info = [{
-    #     "group_id": g.groupchat.group_id,
-    #     "group_name": g.groupchat.group_name,
-    #     "total_participant": g.groupchat.participants,
-    #     "created_by": _get_users_Name_sync(g.groupchat.created_by),
-    #     "description": g.groupchat.description,
-    #     "created_at": get_created_time_format(g.groupchat.created_at)
-    # } for g in groups]
-    chats_info = [{"chat_id": c.chat_id, "with": _get_users_Name_sync(c.get_other_participant(user))} for c in chats]
-    return {"Group_info": list(groups), "chats_info": chats_info}
+    """Sync helper: DB operations to fetch user's groups and individual chats ordered by last_message_at with unseen counts."""
+    groups_qs = (
+        GroupMembers.objects.select_related("groupchat")
+        .filter(participant=user)
+        .order_by("-groupchat__last_message_at")
+        .annotate(
+            group_id=F("groupchat__group_id"),
+            group_name=F("groupchat__group_name"),
+            description=F("groupchat__description"),
+            created_by=F("groupchat__created_by__accounts_profile__Name"),
+            total_participant=F("groupchat__participants"),
+            created_at=F("groupchat__created_at"),
+            last_message_at=F("groupchat__last_message_at"),
+            unseen_count=F("unseenmessages"),
+        )
+        .values(
+            "group_id", "group_name", "total_participant", "created_by",
+            "description", "created_at", "last_message_at", "unseen_count",
+        )
+    )
+    group_info = []
+    for g in groups_qs:
+        row = dict(g)
+        if row.get("last_message_at"):
+            row["last_message_at"] = row["last_message_at"].isoformat()
+        group_info.append(row)
+
+    chats = (
+        IndividualChats.objects.filter(Q(participant1=user) | Q(participant2=user))
+        .order_by("-last_message_at")
+    )
+    chat_ids = [c.chat_id for c in chats]
+    unread_map = {}
+    if chat_ids:
+        unread_qs = (
+            IndividualMessages.objects.filter(chat_id__in=chat_ids, seen=False)
+            .exclude(sender=user)
+            .values("chat_id")
+            .annotate(unread=Count("id"))
+        )
+        unread_map = {r["chat_id"]: r["unread"] for r in unread_qs}
+
+    chats_info = [
+        {
+            "chat_id": c.chat_id,
+            "with": _get_users_Name_sync(c.get_other_participant(user)),
+            "last_message_at": c.last_message_at.isoformat() if c.last_message_at else None,
+            "unseen_count": unread_map.get(c.chat_id, 0),
+        }
+        for c in chats
+    ]
+
+    return {"Group_info": group_info, "chats_info": chats_info}
 
 
 @login_required

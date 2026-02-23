@@ -27,8 +27,7 @@ SECRET_KEY = os.getenv("SECRET_KEY")
 ALLOWED_HOSTS = [
     "*",
     "employee-management-system-tmrl.onrender.com",
-    "https://planeteye-employee-portal.onrender.com/",
-    "https://planeteye-employee-portal.onrender.com",
+    "https://employee-management-system-1-jwyn.onrender.com",
     # "http://192.168.41.55:3000",
     # "http://192.168.41.55:3000/",
     "http://192.168.42.107:3000/",
@@ -135,10 +134,17 @@ CHANNEL_LAYERS = {
 # Requires: pip install django-db-connection-pool[postgresql] (engine: dj_db_conn_pool)
 # Total connections = GUNICORN_WORKERS × (POOL_SIZE + MAX_OVERFLOW). Keep under 65 for RDS 79.
 # CONN_MAX_AGE=0 is required: returns connection to pool after each request so pool is not exhausted.
-DB_POOL_SIZE = int(os.getenv("DB_POOL_SIZE", "15"))
-DB_MAX_OVERFLOW = int(os.getenv("DB_MAX_OVERFLOW", "5"))
-DB_RECYCLE_SECONDS = int(os.getenv("DB_RECYCLE_SECONDS", "3600"))
-DB_POOL_TIMEOUT = int(os.getenv("DB_POOL_TIMEOUT", "60"))
+# DB_POOL_SIZE = int(os.getenv("DB_POOL_SIZE", "15"))
+# DB_MAX_OVERFLOW = int(os.getenv("DB_MAX_OVERFLOW", "5"))
+# DB_RECYCLE_SECONDS = int(os.getenv("DB_RECYCLE_SECONDS", "3600"))
+# DB_POOL_TIMEOUT = int(os.getenv("DB_POOL_TIMEOUT", "60"))
+
+# Schema-based apps: set on every new DB connection (Neon pooler does not allow startup "search_path").
+# Used by ems.db to run SET search_path when connection is created.
+DB_SEARCH_PATH = os.getenv(
+    "DB_SEARCH_PATH",
+    "events,task_management,notifications,project,quatery_reports,login_details,messaging,team_farm,team_infra,team_interns,team_management,public",
+)
 
 DATABASES = {
     "default": {
@@ -148,18 +154,20 @@ DATABASES = {
         "PASSWORD": os.getenv("POSTGRES_PASSWORD"),
         "HOST": os.getenv("POSTGRES_HOST"),
         "PORT": os.getenv("POSTGRES_PORT"),
+        # Neon pooler does not allow startup "search_path". It is set in code per connection via ems.db (DB_SEARCH_PATH).
         "OPTIONS": {
-            "options": "-c search_path=events,task_management,notifications,project,quatery_reports,login_details,messaging,team_farm,team_infra,team_interns,team_management,public",
-            # "connect_timeout": 10,
+            "connect_timeout": 10,
+            "sslmode": "require",
+            "channel_binding": "require",
         },
-        "CONN_MAX_AGE": 0,
-        "DISABLE_SERVER_SIDE_CURSORS": True,
-        "POOL_OPTIONS": {
-            "POOL_SIZE": DB_POOL_SIZE,
-            "MAX_OVERFLOW": DB_MAX_OVERFLOW,
-            "RECYCLE": DB_RECYCLE_SECONDS,
-            "timeout": DB_POOL_TIMEOUT,
-        },
+        # "CONN_MAX_AGE": 0,
+        # "DISABLE_SERVER_SIDE_CURSORS": True,
+        # "POOL_OPTIONS": {
+        #     "POOL_SIZE": DB_POOL_SIZE,
+        #     "MAX_OVERFLOW": DB_MAX_OVERFLOW,
+        #     "RECYCLE": DB_RECYCLE_SECONDS,
+        #     "timeout": DB_POOL_TIMEOUT,
+        # },
     }
 }
 
@@ -202,6 +210,7 @@ CORS_ALLOW_ALL_ORIGINS = True
 CORS_ALLOW_CREDENTIALS = True
 CORS_ALLOWED_ORIGINS = [
     "https://planeteye-employee-portal.onrender.com",
+    "https://employee-management-system-1-jwyn.onrender.com",
     "http://localhost:3000",
     "http://127.0.0.1:8000",
     # "http://192.168.41.55:3000",
@@ -221,7 +230,7 @@ CORS_ALLOW_HEADERS = [
 ]
 
 CSRF_TRUSTED_ORIGINS = [
-    "https://employee-management-system-tmrl.onrender.com",
+    "https://employee-management-system-1-jwyn.onrender.com",
     "https://planeteye-employee-portal.onrender.com",
     # "http://192.168.41.55:3000",
     # "http://localhost:3000/",
@@ -269,3 +278,6 @@ LOGGING = {
         "django.server": {"handlers": ["console"], "level": "INFO"},
     },
 }
+
+# Register DB connection hook so search_path is set on every new connection (Neon pooler compatible).
+import ems.db  # noqa: E402

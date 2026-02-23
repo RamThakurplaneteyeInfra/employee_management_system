@@ -39,6 +39,10 @@ class Task(models.Model):
         verbose_name="task"
         verbose_name_plural = "tasks"
         ordering=["-created_by"]
+        indexes = [
+            models.Index(fields=["created_by", "-created_at"]),
+            models.Index(fields=["created_by", "type"]),
+        ]
 
     def __str__(self):
         return f"task-{self.title}"
