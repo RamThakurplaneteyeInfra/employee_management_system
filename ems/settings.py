@@ -119,15 +119,19 @@ ASGI_APPLICATION = "ems.asgi.application"
 
 # =============================================================================
 # Channels (WebSockets, real-time)
+# InMemoryChannelLayer is process-local: with multiple workers/instances (e.g. on
+# Render), each process has its own layer, so group_send from one process only
+# reaches WebSockets in that process → some clients get notifications, others don't.
+# Use Redis so all processes share one layer and every client gets notifications.
+# On Render: add the "Redis" add-on and set REDIS_URL in the environment.
 # =============================================================================
+REDIS_URL = os.getenv("REDIS_URL")
 CHANNEL_LAYERS = {
-    "default": {
-        "BACKEND": "channels.layers.InMemoryChannelLayer",
-        # Production: use Redis
-        # "BACKEND": "channels_redis.core.RedisChannelLayer",
-        # "CONFIG": {"hosts": [("127.0.0.1", 6379)]},
-    },
-}
+        "default": {
+            "BACKEND": "channels_redis.core.RedisChannelLayer",
+            "CONFIG": {"hosts": [REDIS_URL]},
+        },
+    }
 # =============================================================================
 # Database – Connection pooling for AWS RDS (max 79 connections)
 # =============================================================================

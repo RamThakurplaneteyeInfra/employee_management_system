@@ -68,6 +68,22 @@ setInterval(() => {
 
 ---
 
+## Production (Render) – Consistent delivery for many clients
+
+On Render (or any multi-process host), the backend used **InMemoryChannelLayer** by default. That layer is **process-local**: each worker has its own memory, so when a notification is sent via `group_send`, only WebSockets on that same process receive it. With 50 clients spread across workers, some get notifications and some don’t.
+
+**Fix:** Use **Redis** as the channel layer so all workers share one layer. In this project, if the environment variable **`REDIS_URL`** is set (e.g. after adding the Redis add-on on Render), the app uses **RedisChannelLayer** and every client gets notifications regardless of which worker they’re on.
+
+- **On Render:** Add the **Redis** add-on to your service; it sets `REDIS_URL`. Redeploy. No code change needed beyond the existing settings.
+- **Connection limit:** There is no fixed “50 WebSocket limit” in the backend; the limit is your Render plan and Redis. Using Redis removes the per-process inconsistency.
+
+**Optional – more persistent connections:** Hosts often close idle WebSockets (e.g. after a few minutes). To reduce drops:
+
+1. **Heartbeat:** Send `{ "type": "ping" }` every 25–30 seconds (the consumer replies with `pong`). The snippet above already does this with `setInterval(..., 30000)`.
+2. **Reconnect on close:** In `ws.onclose`, reconnect after a short delay (e.g. 2–5 seconds) and re-open the socket so the user gets notifications again after a drop.
+
+---
+
 ## Endpoints
 
 | Path                    | Purpose                      |
