@@ -11,6 +11,7 @@ from accounts.filters import (
 )
 from task_management.models import *
 from datetime import date
+from ems.utils import gmt_to_ist_str
 
 # # # # # #  baseurl="http://localhost:8000" # # # # # # # # # # # #
 # https://docs.djangoproject.com/en/stable/ref/models/querysets/
@@ -139,7 +140,7 @@ def _get_tasks_by_type_sync(request: HttpRequest, type: str = "all", self_create
         task_data = [{
             **item,
             "Due_date": item['Due_date'].strftime("%d/%m/%Y"),
-            "Created_at": item['Created_at'].strftime("%d/%m/%Y")}for item in tasks]
+            "Created_at": gmt_to_ist_str(item['Created_at'], "%d/%m/%Y")}for item in tasks]
         
         return task_data
 
@@ -156,7 +157,7 @@ def _get_tasks_by_type_sync(request: HttpRequest, type: str = "all", self_create
         task_data = [{
             **item,
             "Due_date": item['Due_date'].strftime("%d/%m/%Y"),
-            "Created_at": item['Created_at'].strftime("%d/%m/%Y")}for item in tasks]
+            "Created_at": gmt_to_ist_str(item['Created_at'], "%d/%m/%Y")}for item in tasks]
         
         return task_data
 
@@ -170,7 +171,7 @@ def _get_tasks_by_type_sync(request: HttpRequest, type: str = "all", self_create
         task_data = [{
         **item,
         "Due_date": item['Due_date'].strftime("%d/%m/%Y"),
-        "Created_at": item['Created_at'].strftime("%d/%m/%Y")}for item in tasks]
+        "Created_at": gmt_to_ist_str(item['Created_at'], "%d/%m/%Y")}for item in tasks]
             
         return task_data
     
@@ -194,7 +195,7 @@ def _get_tasks_by_type_sync(request: HttpRequest, type: str = "all", self_create
             .values("Task_id", "Title", "Description", "Status", "Created_by", "Report_to", "Due_date", "Created_at", "Task_type")
         )
         task_data = [
-            {**item, "Due_date": item["Due_date"].strftime("%d/%m/%Y"), "Created_at": item["Created_at"].strftime("%d/%m/%Y")}
+            {**item, "Due_date": item["Due_date"].strftime("%d/%m/%Y"), "Created_at": gmt_to_ist_str(item["Created_at"], "%d/%m/%Y")}
             for item in tasks
         ]
         return task_data

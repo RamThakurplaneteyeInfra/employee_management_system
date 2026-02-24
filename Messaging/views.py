@@ -14,7 +14,8 @@ from .filters import (
     get_messages,
     check_group_or_chat,
 )
-from accounts.filters import _get_user_object_sync, _get_users_Name_sync, _get_user_role_sync, get_created_time_format
+from accounts.filters import _get_user_object_sync, _get_users_Name_sync, _get_user_role_sync
+from .utils import gmt_to_ist_str
 
 # # # # # #  baseurl="http://localhost:8000"  # # # # # # # # # # # #
 
@@ -315,8 +316,10 @@ def _load_groups_and_chats_sync(user):
     group_info = []
     for g in groups_qs:
         row = dict(g)
+        if row.get("created_at"):
+            row["created_at"] = gmt_to_ist_str(row["created_at"], "%d/%m/%y %H:%M:%S")
         if row.get("last_message_at"):
-            row["last_message_at"] = row["last_message_at"].isoformat()
+            row["last_message_at"] = gmt_to_ist_str(row["last_message_at"], "%d/%m/%y %H:%M:%S")
         group_info.append(row)
 
     chats = (
@@ -338,7 +341,7 @@ def _load_groups_and_chats_sync(user):
         {
             "chat_id": c.chat_id,
             "with": _get_users_Name_sync(c.get_other_participant(user)),
-            "last_message_at": c.last_message_at.isoformat() if c.last_message_at else None,
+            "last_message_at": gmt_to_ist_str(c.last_message_at, "%d/%m/%y %H:%M:%S") if c.last_message_at else None,
             "unseen_count": unread_map.get(c.chat_id, 0),
         }
         for c in chats
@@ -428,7 +431,7 @@ def _show_created_groups_sync(user):
     """Sync helper: DB query for groups created by user."""
     groups = GroupChats.objects.filter(created_by=user).order_by("-created_at").values()
     return [{"group_id": g.group_id, "total_participant": g.participants, "name": g.group_name,
-        "description": g.description, "created_at": get_created_time_format(g.created_at)} for g in groups]
+        "description": g.description, "created_at": gmt_to_ist_str(g.created_at, "%d/%m/%Y, %H:%M:%S")} for g in groups]
 
 
 @login_required

@@ -23,7 +23,7 @@ class GroupChats(models.Model):
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at=models.DateTimeField(blank=True,null=True)
-    last_message_at=models.DateField(auto_now=True)
+    last_message_at=models.DateTimeField(auto_now=True)
     class Meta:
         db_table='Groups'
         verbose_name="Group"
@@ -63,7 +63,7 @@ class IndividualChats(models.Model):
     participant1=models.ForeignKey(User,to_field="username",verbose_name="participant1",db_column="user1",null=True,on_delete=models.SET_NULL,related_name="as_participant1")
     participant2=models.ForeignKey(User,to_field="username",verbose_name="participant2",db_column="user2",null=True,on_delete=models.SET_NULL,related_name="as_participant2")
     created_at = models.DateTimeField(auto_now_add=True)
-    last_message_at=models.DateField(auto_now=True)
+    last_message_at=models.DateTimeField(auto_now=True)
 
     class Meta:
         db_table='UsersChats'

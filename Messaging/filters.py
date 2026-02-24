@@ -2,6 +2,7 @@ from asgiref.sync import sync_to_async
 from ems.verify_methods import *
 from accounts.filters import _get_users_Name_sync
 from .models import *
+from .utils import gmt_to_ist_date_str, gmt_to_ist_time_str
 
 # # # # # #  baseurl="http://localhost:8000"  # # # # # # # # # # # #
 
@@ -116,8 +117,8 @@ def _get_messages_sync(request: HttpRequest, chat_id: str):
         {
             "sender": _sender_name(m.sender),
             "message": m.content,
-            "date": m.created_at.strftime("%d/%m/%y"),
-            "time": m.created_at.strftime("%H:%M"),
+            "date": gmt_to_ist_date_str(m.created_at),
+            "time": gmt_to_ist_time_str(m.created_at),
         }
         for m in messages
     ]

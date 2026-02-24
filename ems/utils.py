@@ -1,6 +1,37 @@
+from datetime import date, datetime, timezone, timedelta
 from rest_framework.views import exception_handler
 from rest_framework.response import Response
 from rest_framework import status
+
+# Indian Standard Time (UTC+5:30) – for API responses across apps
+IST = timezone(timedelta(hours=5, minutes=30))
+
+
+def gmt_to_ist_str(dt, fmt="%d/%m/%y %H:%M:%S"):
+    """Convert UTC/GMT datetime to IST and return formatted string. Handles date-only (DateField). Returns None if dt is None."""
+    if dt is None:
+        return None
+    if isinstance(dt, date) and not isinstance(dt, datetime):
+        return dt.strftime("%d/%m/%y")
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(IST).strftime(fmt)
+
+
+def gmt_to_ist_date_str(dt):
+    """IST date only: %d/%m/%y."""
+    return gmt_to_ist_str(dt, "%d/%m/%y") if dt else None
+
+
+def gmt_to_ist_time_str(dt):
+    """IST time only: %H:%M."""
+    if dt is None:
+        return None
+    if isinstance(dt, date) and not isinstance(dt, datetime):
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(IST).strftime("%H:%M")
 
 
 def custom_exception_handler(exc, context):

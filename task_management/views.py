@@ -1,5 +1,6 @@
 from asgiref.sync import sync_to_async
 from accounts.filters import _get_user_role_sync, _get_users_Name_sync
+from ems.utils import gmt_to_ist_date_str, gmt_to_ist_time_str
 from .filters import (
     get_task_object,
     _get_taskTypes_object_sync,
@@ -233,8 +234,8 @@ async def get_task_messages(request: HttpRequest, task_id: int):
                     "sender": m.sender.username,
                     "full_name": _name(m.sender),
                     "message": m.message,
-                    "date": m.created_at.strftime("%d/%m/%y"),
-                    "time": m.created_at.strftime("%H:%M"),
+                    "date": gmt_to_ist_date_str(m.created_at),
+                    "time": gmt_to_ist_time_str(m.created_at),
                     "seen": m.seen,
                 }
                 for m in messages

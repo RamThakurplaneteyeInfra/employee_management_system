@@ -1,6 +1,7 @@
 from rest_framework import serializers
 from .models import Notification
 from accounts.filters import _get_users_Name_sync
+from ems.utils import gmt_to_ist_str
 
 
 class NotificationSerializer(serializers.ModelSerializer):
@@ -21,9 +22,7 @@ class NotificationSerializer(serializers.ModelSerializer):
         ]
 
     def get_created_at(self, obj):
-        if obj.created_at is None:
-            return None
-        return obj.created_at.strftime("%d/%m/%y %H:%M:%S")
+        return gmt_to_ist_str(obj.created_at, "%d/%m/%y %H:%M:%S")
 
     def get_from_user(self, obj):
         if obj.from_user_id is None:
