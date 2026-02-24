@@ -40,9 +40,10 @@ class NotificationConsumer(AsyncWebsocketConsumer):
     async def send_notification(self, event):
         """Handler for channel_layer group_send type='send_notification'."""
         payload = {
-            "type": "notification",
-            "title": event.get("title", "Notification"),
+            "category": event.get("category", None),
+            "title": event.get("title", ""),
             "message": event.get("message", ""),
+            "from":event.get("from", None),
             "extra": event.get("extra", {}),
         }
         await self.send(text_data=json.dumps(payload))

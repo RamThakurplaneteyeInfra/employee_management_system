@@ -5,6 +5,7 @@ from django.http import HttpRequest
 from rest_framework import status
 from .models import Notification,notification_type
 from .Serializers import NotificationSerializer
+from datetime import date
 
 
 # ==================== get_notifications ====================
@@ -14,8 +15,10 @@ from .Serializers import NotificationSerializer
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def get_notifications(request):
-    qs = Notification.objects.filter(receipient=request.user).select_related(
-        "type_of_notification", "from_user"
+    qs = Notification.objects.filter(
+        receipient=request.user, created_at__date=date.today()
+    ).select_related(
+        "type_of_notification", "from_user__accounts_profile", "receipient__accounts_profile"
     ).order_by("-created_at")
     data = NotificationSerializer(qs, many=True).data
     return Response(data)
@@ -28,11 +31,10 @@ def get_notifications(request):
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
 def mark_as_read(request, pk):
-    notification = Notification.objects.get(pk=pk, receipient=request.user)
+    notification = Notification.objects.get(pk=pk)
     notification.is_read = True
     notification.save()
     return Response({"status": "read"})
-
 
 # ==================== websocket_info ====================
 # WebSocket connection info for testing.

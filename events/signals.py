@@ -4,6 +4,8 @@ from django.dispatch import receiver
 from channels.layers import get_channel_layer
 from datetime import date
 
+from accounts.filters import _get_users_Name_sync
+
 from .models import Meeting, BookSlot, SlotMembers
 from notifications.models import Notification, notification_type
 
@@ -26,6 +28,7 @@ def _notify_slot_booked_sync(sender, created, instance: SlotMembers, **kwargs):
     slot = instance.slot
     member = instance.member
     creator = slot.created_by
+    creator_name=_get_users_Name_sync(creator)
     if member == creator:
         return
     try:
@@ -42,7 +45,7 @@ def _notify_slot_booked_sync(sender, created, instance: SlotMembers, **kwargs):
     channel_layer = get_channel_layer()
     async_to_sync(channel_layer.group_send)(
         f"user_{member.username}",
-        {"type": "send_notification", "title": "Slot Booked", "message": msg, "extra": {"time": notification_obj.created_at.strftime("%d/%m/%Y, %H:%M:%S")}},
+        {"type": "send_notification", "title": "Slot Booked", "from": creator_name, "message": msg, "extra": {"time": notification_obj.created_at.strftime("%d/%m/%Y, %H:%M:%S")}},
     )
 
 

@@ -73,7 +73,8 @@ def _task_assigned_notification_sync(sender, created, instance: TaskAssignies, *
     assignee = instance.assigned_to
     task = instance.task
     creator = task.created_by
-    msg = f"New task '{task.title}' assigned to you by {_get_users_Name_sync(creator)}"
+    creator_name=_get_users_Name_sync(creator)
+    msg = f"New task '{task.title}' assigned to you"
     try:
         nt = notification_type.objects.get(type_name="Task_Created")
     except notification_type.DoesNotExist:
@@ -87,7 +88,7 @@ def _task_assigned_notification_sync(sender, created, instance: TaskAssignies, *
     channel_layer = get_channel_layer()
     async_to_sync(channel_layer.group_send)(
         f"user_{assignee.username}",
-        {"type": "send_notification", "title": "Task Assigned","category":"Task_Created", "message": msg, "extra": {"time": notification_obj.created_at.strftime("%d/%m/%Y, %H:%M:%S")}},
+        {"type": "send_notification", "title": f"New task Assigned","category":"Task_Created", "message": msg, "extra": {"time": notification_obj.created_at.strftime("%d/%m/%Y, %H:%M:%S")}},
     )
 
 
@@ -102,8 +103,8 @@ def _task_message_notification_sync(sender, created, instance: TaskMessage, **kw
     task = instance.task
     sender_user = instance.sender
     sender_name = _get_users_Name_sync(sender_user)
-    message_preview = (instance.message[:80] + "…") if len(instance.message) > 80 else instance.message
-    msg = f"{sender_name} sent a message on task '{task.title}': {message_preview}"
+    message_preview = (instance.message[:20] + "…") if len(instance.message) > 80 else instance.message
+    msg = message_preview
     try:
         nt = notification_type.objects.get(type_name="Task_Message")
     except notification_type.DoesNotExist:
@@ -124,7 +125,8 @@ def _task_message_notification_sync(sender, created, instance: TaskMessage, **kw
             f"user_{assignee.username}",
             {
                 "type": "send_notification",
-                "title": f"Task Message from {sender_name} for task {task.title}",
+                "title": f"Task Message for the task '{task.title}'",
+                "from":sender_name,
                 "category": "Task_Message",
                 "message": msg,
                 "extra": {"time": notification_obj.created_at.strftime("%d/%m/%Y, %H:%M:%S")},
