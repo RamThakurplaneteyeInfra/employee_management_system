@@ -58,42 +58,33 @@ async def birthdaycounter(request: HttpRequest, username=None):
 # URL: {{baseurl}}/accounts/admin/createEmployeeLogin/
 # Method: POST
 def _create_employee_login_sync(req):
-    """Sync helper: DB operations with transaction.atomic where needed."""
-    fields = ['Employee_id', 'password', 'Name', 'Role', 'Email_id', 'Designation', 'Date_of_join', 'Date_of_birth', 'Branch', 'Photo_link', "Department", "Teamlead", "Function", "Functions"]
-    not_required_field = ["Branch", "Designation", "Department", "Teamlead", "Function", "Functions", "Photo_link"]
+    """Sync helper: DB operations. Expects application/x-www-form-urlencoded or multipart/form-data."""
+    fields = ['Employee_id', 'password', 'Name', 'Role', 'Email_id', 'Designation', 'Date_of_join', 'Date_of_birth', 'Branch', 'Photo_link', "Department", "Teamlead", "Functions"]
+    not_required_field = ["Branch", "Designation", "Department", "Teamlead", "Functions", "Photo_link"]
     login_values = {}
     profile_values = {}
     data, files = req.POST, req.FILES
-    # Parse JSON body for "Functions" list if present (e.g. application/json)
-    try:
-        json_data = load_data(req) if req.content_type and "application/json" in req.content_type else {}
-    except Exception:
-        json_data = {}
+    # print(data)
     for i in fields:
-        if i == "Functions":
-            field_value = data.get("Functions") or json_data.get("Functions")
-            if field_value is not None and not isinstance(field_value, list):
-                field_value = [field_value] if field_value else []
-            elif field_value is None and data.get("Function"):
-                field_value = [data.get("Function")]
-            elif field_value is None and json_data.get("Function"):
-                field_value = [json_data.get("Function")]
-            else:
-                field_value = field_value or []
-        elif i != "Photo_link":
-            field_value = data.get(i) or json_data.get(i)
-        else:
+        if i == "Photo_link":
             field_value = files.get(i)
+        elif i == "Functions":
+            raw = data.getlist("Functions") or data.get("Functions")
+            if raw is None:
+                field_value = []
+            elif isinstance(raw, list):
+                field_value = [v for v in raw if v]
+            else:
+                field_value = [raw] if raw else []
+            profile_values["Functions"] = field_value
+            continue
+        else:
+            field_value = data.get(i)
         if not field_value and i not in not_required_field:
             return {"error": JsonResponse({"messege": f"{i} is required"}, status=status.HTTP_406_NOT_ACCEPTABLE)}
-        elif i == "Teamlead" and field_value:
-            with transaction.atomic():
-                teamlead_user_obj = get_object_or_404(User, username=field_value)
-                profile_values["Teamlead"] = teamlead_user_obj
-        elif i in not_required_field and not field_value:
-            ...
-        elif i == "Functions":
-            profile_values["Functions"] = field_value  # list of function names (or empty)
+        if i == "Teamlead" and field_value:
+            teamlead_user_obj = get_object_or_404(User, username=field_value)
+            profile_values["Teamlead"] = teamlead_user_obj
         elif i == 'Employee_id':
             login_values["username"] = str(field_value)
             profile_values["Employee_id"] = field_value
@@ -102,8 +93,9 @@ def _create_employee_login_sync(req):
         elif i == 'Email_id':
             login_values["email"] = field_value
             profile_values[i] = field_value
-        elif i != "Function":
-            profile_values[i] = field_value
+        elif i not in not_required_field or field_value:
+            if i != "Functions":
+                profile_values[i] = field_value
     with transaction.atomic():
         check_user = _get_user_object_sync(username=login_values["username"])
         if not isinstance(check_user, User):
@@ -113,6 +105,7 @@ def _create_employee_login_sync(req):
         else:
             user = check_user
     profile_values["Employee_id"] = user
+    function_names = profile_values.pop("Functions", [])
     if profile_values["Role"] not in ["MD", "Admin"]:
         with transaction.atomic():
             get_branch = get_object_or_404(Branch, branch_name=profile_values["Branch"])
@@ -121,13 +114,6 @@ def _create_employee_login_sync(req):
         profile_values["Department"] = get_department
         profile_values["Branch"] = get_branch
         profile_values["Designation"] = get_designation
-        function_names = profile_values.pop("Functions", [])
-        if not function_names:
-            function_names = [profile_values.pop("Function")] if profile_values.get("Function") else []
-        profile_values.pop("Function", None)
-    else:
-        profile_values.pop("Functions", None)
-        profile_values.pop("Function", None)
     with transaction.atomic():
         get_role = get_object_or_404(Roles, role_name=profile_values["Role"])
         profile_values["Role"] = get_role
@@ -183,7 +169,7 @@ def _get_all_employees_sync():
                 "Department": department,
                 "Role": role,
                 "Teamleader": lead,
-                "Photo_link": p.Photo_link,
+                "Photo_link": p.Photo_link.url if p.Photo_link else None,
                 "Employee_id": p.Employee_id.username,
                 "Date_of_join": p.Date_of_join,
                 "Date_of_birth": p.Date_of_birth,
@@ -283,7 +269,7 @@ def _employee_dashboard_sync(request: HttpRequest):
             "Date_of_join": p.Date_of_join,
             "branch": p.Branch.branch_name if p.Branch else None,
             "Name": p.Name,
-            "Photo_link": p.Photo_link,
+            "Photo_link": p.Photo_link.url if p.Photo_link else None,
             "role": p.Role.role_name if p.Role else None,
             "department": p.Department.dept_name if p.Department else None,
             "functions": [f.function for f in p.functions.all()],
@@ -328,38 +314,38 @@ async def user_logout(request: HttpRequest):
 # URL: {{baseurl}}/accounts/admin/updateProfile/<username>/
 # Method: POST
 def _update_profile_sync(req, username):
-    """Sync helper: DB operations with transaction.atomic."""
+    """Sync helper: DB operations. Expects application/x-www-form-urlencoded or multipart/form-data."""
     user = get_object_or_404(User, username=username)
-    fields = ['Name', 'Role', 'Email_id', 'Designation', 'Date_of_join', 'Date_of_birth', 'Branch', "Department", "Teamlead", "Function", "Functions"]
-    not_required_fields = ["Designation", "Branch", "Department", "Teamlead", "Function", "Functions"]
+    fields = ['Name', 'Role', 'Email_id', 'Designation', 'Date_of_join', 'Date_of_birth', 'Branch', "Department", "Teamlead", "Functions"]
+    not_required_fields = ["Designation", "Branch", "Department", "Teamlead", "Functions"]
     profile_values = {}
-    data = load_data(request=req)
-    function_names = None  # if provided, set profile.functions to this list
+    data = load_data(req)
+    function_names = None
+    # print(data)
     for i in fields:
-        field_value = data.get(i)
         if i == "Functions":
-            if field_value is not None:
-                function_names = field_value if isinstance(field_value, list) else [field_value]
+            raw = data.get("Functions", [])
+            if raw is not None:
+                function_names = [raw] if not isinstance(raw, list) else [v for v in raw if v]
             continue
+        field_value = data.get(i)
         if not field_value and i not in not_required_fields:
             return {"error": JsonResponse({"messege": f"{i} is empty"}, status=status.HTTP_406_NOT_ACCEPTABLE)}
-        elif i in not_required_fields and not field_value:
-            ...
-        elif i == 'Email_id':
+        if not field_value and i in not_required_fields:
+            continue
+        if i == 'Email_id':
             setattr(user, 'email', field_value)
             user.save()
             profile_values[i] = field_value
-        elif i == "Teamlead" and field_value:
+        elif i == "Teamlead":
             profile_values[i] = get_object_or_404(User, username=field_value)
-        elif i == "Branch" and field_value:
+        elif i == "Branch":
             profile_values[i] = get_object_or_404(Branch, branch_name=field_value)
-        elif i == "Department" and field_value:
+        elif i == "Department":
             profile_values[i] = get_object_or_404(Departments, dept_name=field_value)
-        elif i == "Designation" and field_value:
+        elif i == "Designation":
             profile_values[i] = get_object_or_404(Designation, designation=field_value)
-        elif i == "Function" and field_value:
-            function_names = [field_value]
-        elif i == "Role" and field_value:
+        elif i == "Role":
             profile_values[i] = get_object_or_404(Roles, role_name=field_value)
         else:
             profile_values[i] = field_value
@@ -440,7 +426,7 @@ def _view_employee_sync(username):
             "Date_of_join": profile.Date_of_join,
             "Branch": profile.Branch.branch_name if profile.Branch else None,
             "Name": profile.Name,
-            "Photo_link": profile.Photo_link,
+            "Photo_link": profile.Photo_link if profile.Photo_link else None,
             "Role": profile.Role.role_name if profile.Role else None,
             "Functions": functions,
         }]
