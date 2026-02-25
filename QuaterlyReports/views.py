@@ -1,4 +1,5 @@
 from asgiref.sync import sync_to_async
+from django.db.models import Q
 from ems.verify_methods import *
 from rest_framework.response import Response
 from accounts.filters import _get_department_obj_sync
@@ -269,32 +270,40 @@ async def get_functions_and_actionable_goals(request: HttpRequest):
 # URL: {{baseurl}}/ActionableEntries/
 # Method: GET (list) | POST (create)
 
-def _get_entries(request:HttpRequest):
-                current_date = date.today()
-                current_month = current_date.month
-                req_data=request.GET
-                username, month = req_data.get("username"), req_data.get("month")
-                permissible = username and request.user.is_superuser
-                user_obj = get_object_or_404(User, username=username) if permissible else None
-                if not username and not month:
-                    entries = FunctionsEntries.objects.filter(Creator=request.user, date__month=current_month)
-                elif not username and month:
-                    entries = FunctionsEntries.objects.filter(Creator=request.user, date__month=month)
-                elif permissible and month:
-                    entries = FunctionsEntries.objects.filter(Creator=user_obj, date__month=month)
-                elif permissible:
-                    entries = FunctionsEntries.objects.filter(Creator=user_obj, date__month=current_month)
-                else:
-                    raise PermissionDenied("You are not authorised to do this action")
-                serializer = FunctionsEntriesSerializer(entries, many=True)
-                return JsonResponse(serializer.data,safe=False)
+def _get_entries(request: HttpRequest):
+    """List actionable entries. Visibility: creator sees own; co_author sees where they are co_author; share_with sees where approved_by_coauthor=True."""
+    current_date = date.today()
+    current_month = current_date.month
+    req_data = request.GET
+    username, month = req_data.get("username"), req_data.get("month")
+    user = request.user
+    permissible = username and user.is_superuser
+    user_obj = get_object_or_404(User, username=username) if permissible else None
+    if permissible and user_obj:
+        visible = Q(Creator=user_obj) | Q(co_author=user_obj) | Q(share_with=user_obj, approved_by_coauthor=True)
+        base = FunctionsEntries.objects.filter(visible)
+        month_val = month or current_month
+        entries = base.filter(date__month=month_val)
+    else:
+        visible = Q(Creator=user) | Q(co_author=user) | Q(share_with=user, approved_by_coauthor=True)
+        base = FunctionsEntries.objects.filter(visible)
+        if not username and not month:
+            entries = base.filter(Creator=user, date__month=current_month)
+        elif not username and month:
+            entries = base.filter(Creator=user, date__month=month)
+        else:
+            raise PermissionDenied("You are not authorised to do this action")
+    serializer = FunctionsEntriesSerializer(entries, many=True)
+    return JsonResponse(serializer.data, safe=False)
             
 def _create_entry(request: HttpRequest):
-                serializer = FunctionsEntriesSerializer(data=request.data)
-                if serializer.is_valid():
-                    serializer.save(Creator=request.user)
-                    return JsonResponse(serializer.data, safe=False,status=status.HTTP_201_CREATED)
-                return JsonResponse({"messge":"error occured"}, status=status.HTTP_400_BAD_REQUEST)
+    serializer = FunctionsEntriesSerializer(
+        data=request.data, context={"request": request}
+    )
+    if serializer.is_valid():
+        serializer.save(Creator=request.user)
+        return JsonResponse(serializer.data, safe=False, status=status.HTTP_201_CREATED)
+    return JsonResponse(serializer.errors or {"message": "error occurred"}, status=status.HTTP_400_BAD_REQUEST)
             
 @api_view(['GET', 'POST'])
 @permission_classes([IsAuthenticated, EntryPermission])
@@ -314,21 +323,38 @@ def entry_list_create(request: HttpRequest):
     except Exception as e:
         return Response({"message": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
+def _entry_visible_to_user(entry, user):
+    """True if user may see this entry (creator, co_author, or share_with and approved)."""
+    if entry.Creator_id == user.username:
+        return True
+    if entry.co_author_id and entry.co_author_id == user.username:
+        return True
+    if entry.share_with_id and entry.share_with_id == user.username and entry.approved_by_coauthor:
+        return True
+    return False
+
+
 # ==================== entry_detail_update_delete ====================
 # Get, update, or delete a single actionable entry.
 # URL: {{baseurl}}/ActionableEntriesByID/<id>/
 # Method: GET | PUT | PATCH | DELETE
 def _entry_detail_ops(request, id):
     entry = FunctionsEntries.objects.get(pk=id)
-    if request.method == 'GET':
+    if not _entry_visible_to_user(entry, request.user):
+        return Response({"error": "Entry not found or not visible"}, status=status.HTTP_404_NOT_FOUND)
+    if request.method == "GET":
         return Response(FunctionsEntriesSerializer(entry).data)
     elif request.method in ["PUT", "PATCH"]:
-        serializer = FunctionsEntriesSerializer(entry, data=request.data, partial=True)
+        serializer = FunctionsEntriesSerializer(
+            entry, data=request.data, partial=True, context={"request": request}
+        )
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-    elif request.method == 'DELETE':
+    elif request.method == "DELETE":
+        if entry.Creator_id != request.user.username:
+            return Response({"error": "Only creator can delete this entry"}, status=status.HTTP_403_FORBIDDEN)
         entry.delete()
         return Response({"message": "entry deleted successfully"}, status=status.HTTP_202_ACCEPTED)
 

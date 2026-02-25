@@ -77,16 +77,51 @@ class ActionableGoals(models.Model):
         ordering=["FunctionGoal"]
 
 class FunctionsEntries(models.Model):
-    goal=models.ForeignKey(ActionableGoals,on_delete=models.CASCADE,db_column="sub_goal_id",null=True)
-    Creator=models.ForeignKey(User,on_delete=models.CASCADE,to_field="username",db_column="Employee_id",null=False)
-    date=models.DateField(auto_now=False,auto_now_add=False)
-    time=models.TimeField(auto_now_add=True)
-    status=models.ForeignKey(TaskStatus,on_delete=models.CASCADE,editable=True,null=False)
-    note=models.TextField()
-    
+    goal = models.ForeignKey(ActionableGoals, on_delete=models.CASCADE, db_column="sub_goal_id", null=True)
+    Creator = models.ForeignKey(User, on_delete=models.CASCADE, to_field="username", db_column="Employee_id", null=False)
+    co_author = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        to_field="username",
+        db_column="co_author",
+        null=True,
+        blank=True,
+        related_name="co_authored_entries",
+    )
+    share_with = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        to_field="username",
+        db_column="share_with",
+        null=True,
+        blank=True,
+        related_name="shared_entries",
+    )
+    approved_by_coauthor = models.BooleanField(default=False, db_column="approved_by_coauthor")
+    date = models.DateField(auto_now=False, auto_now_add=False)
+    time = models.TimeField(auto_now_add=True)
+    status = models.ForeignKey(
+        TaskStatus,
+        on_delete=models.CASCADE,
+        editable=True,
+        null=True,
+        blank=True,
+        related_name="functions_entries_initial",
+        db_column="status",
+    )
+    final_Status = models.ForeignKey(
+        TaskStatus,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="functions_entries_final",
+        db_column="final_status",
+    )
+    note = models.TextField()
+
     class Meta:
-        db_table= 'quatery_reports"."FunctionsEntries'
-        ordering=["-date","-time"]
+        db_table = 'quatery_reports"."FunctionsEntries'
+        ordering = ["-date", "-time"]
 
 class PlannedActions(models.Model):
     # grp=models.ForeignKey(GRPS,on_delete=models.CASCADE,db_column="grp",null=False,verbose_name="grp")

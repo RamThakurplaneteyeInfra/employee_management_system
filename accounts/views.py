@@ -59,14 +59,29 @@ async def birthdaycounter(request: HttpRequest, username=None):
 # Method: POST
 def _create_employee_login_sync(req):
     """Sync helper: DB operations with transaction.atomic where needed."""
-    fields = ['Employee_id', 'password', 'Name', 'Role', 'Email_id', 'Designation', 'Date_of_join', 'Date_of_birth', 'Branch', 'Photo_link', "Department", "Teamlead", "Function"]
-    not_required_field = ["Branch", "Designation", "Department", "Teamlead", "Function", "Photo_link"]
+    fields = ['Employee_id', 'password', 'Name', 'Role', 'Email_id', 'Designation', 'Date_of_join', 'Date_of_birth', 'Branch', 'Photo_link', "Department", "Teamlead", "Function", "Functions"]
+    not_required_field = ["Branch", "Designation", "Department", "Teamlead", "Function", "Functions", "Photo_link"]
     login_values = {}
     profile_values = {}
     data, files = req.POST, req.FILES
+    # Parse JSON body for "Functions" list if present (e.g. application/json)
+    try:
+        json_data = load_data(req) if req.content_type and "application/json" in req.content_type else {}
+    except Exception:
+        json_data = {}
     for i in fields:
-        if i != "Photo_link":
-            field_value = data.get(i)
+        if i == "Functions":
+            field_value = data.get("Functions") or json_data.get("Functions")
+            if field_value is not None and not isinstance(field_value, list):
+                field_value = [field_value] if field_value else []
+            elif field_value is None and data.get("Function"):
+                field_value = [data.get("Function")]
+            elif field_value is None and json_data.get("Function"):
+                field_value = [json_data.get("Function")]
+            else:
+                field_value = field_value or []
+        elif i != "Photo_link":
+            field_value = data.get(i) or json_data.get(i)
         else:
             field_value = files.get(i)
         if not field_value and i not in not_required_field:
@@ -77,6 +92,8 @@ def _create_employee_login_sync(req):
                 profile_values["Teamlead"] = teamlead_user_obj
         elif i in not_required_field and not field_value:
             ...
+        elif i == "Functions":
+            profile_values["Functions"] = field_value  # list of function names (or empty)
         elif i == 'Employee_id':
             login_values["username"] = str(field_value)
             profile_values["Employee_id"] = field_value
@@ -85,7 +102,7 @@ def _create_employee_login_sync(req):
         elif i == 'Email_id':
             login_values["email"] = field_value
             profile_values[i] = field_value
-        else:
+        elif i != "Function":
             profile_values[i] = field_value
     with transaction.atomic():
         check_user = _get_user_object_sync(username=login_values["username"])
@@ -101,15 +118,23 @@ def _create_employee_login_sync(req):
             get_branch = get_object_or_404(Branch, branch_name=profile_values["Branch"])
             get_designation = get_object_or_404(Designation, designation=profile_values["Designation"])
             get_department = get_object_or_404(Departments, dept_name=profile_values["Department"])
-            get_function = get_object_or_404(Functions, function=profile_values["Function"])
         profile_values["Department"] = get_department
         profile_values["Branch"] = get_branch
         profile_values["Designation"] = get_designation
-        profile_values["Function"] = get_function
+        function_names = profile_values.pop("Functions", [])
+        if not function_names:
+            function_names = [profile_values.pop("Function")] if profile_values.get("Function") else []
+        profile_values.pop("Function", None)
+    else:
+        profile_values.pop("Functions", None)
+        profile_values.pop("Function", None)
     with transaction.atomic():
         get_role = get_object_or_404(Roles, role_name=profile_values["Role"])
         profile_values["Role"] = get_role
-        Profile.objects.create(**profile_values)
+        profile = Profile.objects.create(**profile_values)
+        if function_names:
+            function_objs = list(Functions.objects.filter(function__in=function_names))
+            profile.functions.set(function_objs)
     return {"ok": True}
 
 
@@ -139,16 +164,33 @@ async def create_employee_login(request: HttpRequest):
 def _get_all_employees_sync():
     """Sync helper: DB operations with transaction.atomic."""
     with transaction.atomic():
-        users_data = Profile.objects.all().select_related("Role", "Designation", "Branch", "Department", "Function",
-            "Employee_id", "Teamlead").annotate(branch=F("Branch__branch_name"), emp_id=F("Employee_id__username"),
-            designation=F("Designation__designation"), role=F("Role__role_name"), department=F("Department__dept_name"),
-            function=F("Function__function"), lead=F("Teamlead__accounts_profile__Name")).values("branch", "Date_of_birth",
-            "lead", "Date_of_join", "Name", "emp_id", "designation", "function", "role", "department", "Photo_link", "Email_id")
-        return [{"Name": i["Name"], "Branch": i["branch"], "Designation": i["designation"], "Function": i["function"],
-            "Department": i["department"], "Role": i["role"], "Teamleader": i["lead"], "Photo_link": i["Photo_link"],
-            "Employee_id": i["emp_id"], "Date_of_join": i["Date_of_join"], "Date_of_birth": i["Date_of_birth"],
-            "Email_id": i["Email_id"], "Number_of_days_from_joining": completed_years_and_days(start_date=i["Date_of_join"])}
-            for i in users_data]
+        profiles = Profile.objects.all().select_related(
+            "Role", "Designation", "Branch", "Department", "Employee_id", "Teamlead"
+        ).prefetch_related("functions").order_by("Name")
+        result = []
+        for p in profiles:
+            branch = p.Branch.branch_name if p.Branch else None
+            designation = p.Designation.designation if p.Designation else None
+            role = p.Role.role_name if p.Role else None
+            department = p.Department.dept_name if p.Department else None
+            lead = p.Teamlead.accounts_profile.Name if (p.Teamlead and hasattr(p.Teamlead, "accounts_profile")) else None
+            functions = [f.function for f in p.functions.all()]
+            result.append({
+                "Name": p.Name,
+                "Branch": branch,
+                "Designation": designation,
+                "Functions": functions,
+                "Department": department,
+                "Role": role,
+                "Teamleader": lead,
+                "Photo_link": p.Photo_link,
+                "Employee_id": p.Employee_id.username,
+                "Date_of_join": p.Date_of_join,
+                "Date_of_birth": p.Date_of_birth,
+                "Email_id": p.Email_id,
+                "Number_of_days_from_joining": completed_years_and_days(start_date=p.Date_of_join),
+            })
+        return result
 
 
 @login_required
@@ -221,14 +263,31 @@ def _employee_dashboard_sync(request: HttpRequest):
     user_role = _get_user_role_sync(user=user)
     if user.is_superuser and user_role and user_role == "Admin":
         profile = Profile.objects.select_related("Role").filter(Employee_id=user).annotate(role=F("Role__role_name")).values("Employee_id", "Email_id", "Date_of_birth", "Date_of_join", "Name", "Photo_link", "role")
+        data = list(profile)
+        for row in data:
+            row["functions"] = []
+        return data
     elif user.is_superuser and user_role and user_role == "MD":
         profile = Profile.objects.select_related("Role").filter(Employee_id=user).annotate(role=F("Role__role_name")).values("Employee_id", "Email_id", "Date_of_birth", "Date_of_join", "Name", "Photo_link", "role")
+        data = list(profile)
+        for row in data:
+            row["functions"] = []
+        return data
     else:
-        profile = Profile.objects.select_related("Department", "Branch", "Designation", "Role", "Function").filter(Employee_id=user).annotate(department=F("Department__dept_name"),
-            role=F("Role__role_name"), designation=F("Designation__designation"), branch=F("Branch__branch_name"), function_name=F("Function__function")).values("Employee_id",
-            "Email_id", "designation", "Date_of_birth", "Date_of_join", "branch", "Name", "Photo_link", "role", "department", "function_name")
-        # print("employee dashboard not from cache")
-    return list(profile)
+        profiles = Profile.objects.select_related("Department", "Branch", "Designation", "Role").prefetch_related("functions").filter(Employee_id=user)
+        return [{
+            "Employee_id": p.Employee_id_id,
+            "Email_id": p.Email_id,
+            "designation": p.Designation.designation if p.Designation else None,
+            "Date_of_birth": p.Date_of_birth,
+            "Date_of_join": p.Date_of_join,
+            "branch": p.Branch.branch_name if p.Branch else None,
+            "Name": p.Name,
+            "Photo_link": p.Photo_link,
+            "role": p.Role.role_name if p.Role else None,
+            "department": p.Department.dept_name if p.Department else None,
+            "functions": [f.function for f in p.functions.all()],
+        } for p in profiles]
 
 
 @login_required
@@ -271,12 +330,17 @@ async def user_logout(request: HttpRequest):
 def _update_profile_sync(req, username):
     """Sync helper: DB operations with transaction.atomic."""
     user = get_object_or_404(User, username=username)
-    fields = ['Name', 'Role', 'Email_id', 'Designation', 'Date_of_join', 'Date_of_birth', 'Branch', "Department", "Teamlead", "Function"]
-    not_required_fields = ["Designation", "Branch", "Department", "Teamlead", "Function"]
+    fields = ['Name', 'Role', 'Email_id', 'Designation', 'Date_of_join', 'Date_of_birth', 'Branch', "Department", "Teamlead", "Function", "Functions"]
+    not_required_fields = ["Designation", "Branch", "Department", "Teamlead", "Function", "Functions"]
     profile_values = {}
     data = load_data(request=req)
+    function_names = None  # if provided, set profile.functions to this list
     for i in fields:
         field_value = data.get(i)
+        if i == "Functions":
+            if field_value is not None:
+                function_names = field_value if isinstance(field_value, list) else [field_value]
+            continue
         if not field_value and i not in not_required_fields:
             return {"error": JsonResponse({"messege": f"{i} is empty"}, status=status.HTTP_406_NOT_ACCEPTABLE)}
         elif i in not_required_fields and not field_value:
@@ -294,13 +358,17 @@ def _update_profile_sync(req, username):
         elif i == "Designation" and field_value:
             profile_values[i] = get_object_or_404(Designation, designation=field_value)
         elif i == "Function" and field_value:
-            profile_values[i] = get_object_or_404(Functions, function=field_value)
+            function_names = [field_value]
         elif i == "Role" and field_value:
             profile_values[i] = get_object_or_404(Roles, role_name=field_value)
         else:
             profile_values[i] = field_value
     with transaction.atomic():
         Profile.objects.filter(Employee_id=user).update(**profile_values)
+        if function_names is not None:
+            profile = Profile.objects.get(Employee_id=user)
+            function_objs = list(Functions.objects.filter(function__in=function_names))
+            profile.functions.set(function_objs)
     return {"ok": True}
 
 
@@ -360,11 +428,22 @@ async def changePassword(request: HttpRequest, u):
 def _view_employee_sync(username):
     """Sync helper: DB operations with transaction.atomic."""
     user = get_object_or_404(User, username=username)
-    profile = Profile.objects.filter(Employee_id=user)
+    profile = Profile.objects.prefetch_related("functions").filter(Employee_id=user).first()
     if profile:
         with transaction.atomic():
-            profile_data = profile.values("Employee_id", "Email_id", "Designation", "Date_of_birth", "Date_of_join", "Branch", "Name", "Photo_link", "Role")
-        return list(profile_data)
+            functions = [f.function for f in profile.functions.all()]
+        return [{
+            "Employee_id": profile.Employee_id_id,
+            "Email_id": profile.Email_id,
+            "Designation": profile.Designation.designation if profile.Designation else None,
+            "Date_of_birth": profile.Date_of_birth,
+            "Date_of_join": profile.Date_of_join,
+            "Branch": profile.Branch.branch_name if profile.Branch else None,
+            "Name": profile.Name,
+            "Photo_link": profile.Photo_link,
+            "Role": profile.Role.role_name if profile.Role else None,
+            "Functions": functions,
+        }]
     return [{}]
 
 

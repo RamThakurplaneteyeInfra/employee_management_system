@@ -29,6 +29,29 @@ class Designation(models.Model):
         verbose_name="designation"
         verbose_name_plural="designations"
 
+# Through table for Profile <-> Functions (many-to-many). Stored in login_details schema.
+class ProfileFunction(models.Model):
+    profile = models.ForeignKey(
+        "Profile",
+        on_delete=models.CASCADE,
+        db_column="employee_id",
+        to_field="Employee_id",
+        related_name="profile_functions",
+    )
+    function = models.ForeignKey(
+        "Functions",
+        on_delete=models.CASCADE,
+        db_column="function_id",
+        related_name="profile_functions",
+    )
+
+    class Meta:
+        db_table = 'login_details"."profile_functions'
+        unique_together = ("profile", "function")
+        verbose_name = "Profile function"
+        verbose_name_plural = "Profile functions"
+
+
 # A model for "Profiles" table
 class Profile(models.Model):
 
@@ -43,7 +66,13 @@ class Profile(models.Model):
     Date_of_join=models.DateField(verbose_name="date_of_joining",auto_now=False, auto_now_add=False,null=True)
     Department=models.ForeignKey("Departments",verbose_name="department",db_column="department",on_delete=models.CASCADE,related_name="department",null=True)
     Teamlead=models.ForeignKey(User,on_delete=models.CASCADE,related_name="teamlead",null=True,verbose_name="teamlead",default=None,db_column="teamlead")
-    Function=models.ForeignKey("Functions",on_delete=models.CASCADE,null=True,verbose_name="function",default=None,db_column="function")
+    functions = models.ManyToManyField(
+        "Functions",
+        through="ProfileFunction",
+        related_name="profiles",
+        blank=True,
+        verbose_name="functions",
+    )
     birthday_counter=models.SmallIntegerField(default=0)
     class Meta:
         verbose_name = "Employee Profile"

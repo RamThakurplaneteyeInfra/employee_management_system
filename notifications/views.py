@@ -15,6 +15,7 @@ from datetime import date
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def get_notifications(request):
+    print("get notifications not from cache")
     qs = Notification.objects.filter(receipient=request.user, created_at__date=date.today(),is_read=False).select_related("type_of_notification", "from_user__accounts_profile", "receipient__accounts_profile").order_by("-created_at")
     data = NotificationSerializer(qs, many=True).data
     return Response(data)
@@ -27,6 +28,7 @@ def get_notifications(request):
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
 def mark_as_read(request, pk):
+    print("mark as read not from cache")
     notification = Notification.objects.get(pk=pk)
     notification.is_read = True
     notification.save()
