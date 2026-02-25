@@ -38,7 +38,7 @@ class Task(models.Model):
         db_table='task_management"."tasks'
         verbose_name="task"
         verbose_name_plural = "tasks"
-        ordering=["-created_by"]
+        ordering=["-created_by","-created_at","due_date"]
         indexes = [
             models.Index(fields=["created_by", "-created_at"]),
             models.Index(fields=["created_by", "type"]),

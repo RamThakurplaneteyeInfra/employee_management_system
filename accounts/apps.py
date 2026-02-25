@@ -6,3 +6,5 @@ class AccountsConfig(AppConfig):
     name = 'accounts'
     def ready(self):
         import accounts.signals
+        from ems.cache_invalidation import connect_cache_invalidation
+        connect_cache_invalidation()

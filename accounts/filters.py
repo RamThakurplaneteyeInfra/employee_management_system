@@ -163,6 +163,7 @@ def _get_roles_sync():
 
 
 async def get_roles(request: HttpRequest):
+    print("get roles not from cache")
     data = await sync_to_async(_get_roles_sync)()
     return JsonResponse(data, safe=False, status=status.HTTP_200_OK)
 
@@ -179,6 +180,7 @@ def _get_branches_sync(role: str):
 
 
 async def get_branches(request: HttpRequest):
+    print("get branches not from cache")
     role = request.GET.get("Role")
     data = await sync_to_async(_get_branches_sync)(role)
     return JsonResponse(data, safe=False)
@@ -201,6 +203,7 @@ def _get_departments_and_functions_sync(role: str):
 
 async def get_departments_and_functions(request: HttpRequest):
     role = request.GET.get("Role")
+    print("get departments and functions not from cache")
     data = await sync_to_async(_get_departments_and_functions_sync)(role)
     if isinstance(data, JsonResponse):
         return data

@@ -136,7 +136,7 @@ def _get_tasks_by_type_sync(request: HttpRequest, type: str = "all", self_create
                                     Description=F('description'),Status=F('status__status_name'),
                                     Created_by=F('created_by__accounts_profile__Name'),Report_to=F("created_by__accounts_profile__Name"),Assigned_to=ArrayAgg("assignees__accounts_profile__Name", distinct=True),
                                     Due_date=F('due_date'),Created_at=F('created_at'),
-                                    Task_type=F('type__type_name')).values('Task_id', 'Title', 'Description', 'Status','Created_by', 'Report_to', 'Due_date', 'Created_at', 'Task_type',"Assigned_to")
+                                    Task_type=F('type__type_name')).order_by("-created_at", "due_date").values('Task_id', 'Title', 'Description', 'Status','Created_by', 'Report_to', 'Due_date', 'Created_at', 'Task_type',"Assigned_to")
         task_data = [{
             **item,
             "Due_date": item['Due_date'].strftime("%d/%m/%Y"),
@@ -152,7 +152,7 @@ def _get_tasks_by_type_sync(request: HttpRequest, type: str = "all", self_create
                                     Description=F('description'),Status=F('status__status_name'),
                                     Created_by=F('created_by__accounts_profile__Name'),Report_to=F("created_by__accounts_profile__Name"),Assigned_to=ArrayAgg("assignees__accounts_profile__Name", distinct=True),
                                     Due_date=F('due_date'),Created_at=F('created_at'),
-                                    Task_type=F('type__type_name')).values('Task_id', 'Title', 'Description', 'Status','Created_by', 'Report_to', 'Due_date', 'Created_at', 'Task_type',"Assigned_to")
+                                    Task_type=F('type__type_name')).order_by("-created_at", "due_date").values('Task_id', 'Title', 'Description', 'Status','Created_by', 'Report_to', 'Due_date', 'Created_at', 'Task_type',"Assigned_to")
         
         task_data = [{
             **item,
@@ -166,7 +166,7 @@ def _get_tasks_by_type_sync(request: HttpRequest, type: str = "all", self_create
                                     Description=F('task__description'),Status=F('task__status__status_name'),
                                     Created_by=F('task__created_by__accounts_profile__Name'),Report_to=F("task__created_by__accounts_profile__Name"),
                                     Due_date=F('task__due_date'),Created_at=F('task__created_at'),
-                                    Task_type=F('task__type__type_name')).values('Task_id', 'Title', 'Description', 'Status','Created_by', 'Report_to', 'Due_date', 'Created_at', 'Task_type')
+                                    Task_type=F('task__type__type_name')).order_by("-task__created_at", "task__due_date").values('Task_id', 'Title', 'Description', 'Status','Created_by', 'Report_to', 'Due_date', 'Created_at', 'Task_type')
         
         task_data = [{
         **item,
@@ -192,6 +192,7 @@ def _get_tasks_by_type_sync(request: HttpRequest, type: str = "all", self_create
                 Created_at=F("task__created_at"),
                 Task_type=F("task__type__type_name"),
             )
+            .order_by("-task__created_at", "task__due_date")
             .values("Task_id", "Title", "Description", "Status", "Created_by", "Report_to", "Due_date", "Created_at", "Task_type")
         )
         task_data = [

@@ -86,6 +86,7 @@ MIDDLEWARE = [
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "ems.middleware.CacheGetMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
@@ -126,12 +127,34 @@ ASGI_APPLICATION = "ems.asgi.application"
 # On Render: add the "Redis" add-on and set REDIS_URL in the environment.
 # =============================================================================
 REDIS_URL = os.getenv("REDIS_URL")
-CHANNEL_LAYERS = {
+if REDIS_URL:
+    CHANNEL_LAYERS = {
         "default": {
             "BACKEND": "channels_redis.core.RedisChannelLayer",
             "CONFIG": {"hosts": [REDIS_URL]},
         },
     }
+else:
+    CHANNEL_LAYERS = {
+        "default": {"BACKEND": "channels.layers.InMemoryChannelLayer"},
+    }
+
+# =============================================================================
+# Cache – Redis (same instance as Channels). GET API responses cached; invalidated on create/update.
+# =============================================================================
+CACHE_GET_TIMEOUT = int(os.getenv("CACHE_GET_TIMEOUT", "300"))  # 5 min default
+CACHES = {
+        "default": {
+            "BACKEND": "django_redis.cache.RedisCache",
+            "LOCATION": REDIS_URL,
+            "OPTIONS": {
+                "CLIENT_CLASS": "django_redis.client.DefaultClient",
+                "KEY_PREFIX": "ems",
+                "IGNORE_EXCEPTIONS": True,
+            },
+        }
+    }
+
 # =============================================================================
 # Database – Connection pooling for AWS RDS (max 79 connections)
 # =============================================================================

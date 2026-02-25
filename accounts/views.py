@@ -155,6 +155,7 @@ def _get_all_employees_sync():
 async def get_all_employees(request: HttpRequest):
     try:
         data_list = await sync_to_async(_get_all_employees_sync)()
+        # print("get all employees not from cache")
         return JsonResponse(data_list, safe=False, status=status.HTTP_200_OK)
     except DatabaseError as e:
         return JsonResponse({"message": f"{e}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -178,6 +179,7 @@ async def get_session_data(request: HttpRequest):
         session_data["accessed"] = request.session.accessed
         session_data["is_empty"] = request.session.is_empty()
         return JsonResponse(session_data)
+        # print("session data not from cache")
     except DatabaseError as e:
         return JsonResponse({"message": f"{e}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
@@ -225,6 +227,7 @@ def _employee_dashboard_sync(request: HttpRequest):
         profile = Profile.objects.select_related("Department", "Branch", "Designation", "Role", "Function").filter(Employee_id=user).annotate(department=F("Department__dept_name"),
             role=F("Role__role_name"), designation=F("Designation__designation"), branch=F("Branch__branch_name"), function_name=F("Function__function")).values("Employee_id",
             "Email_id", "designation", "Date_of_birth", "Date_of_join", "branch", "Name", "Photo_link", "role", "department", "function_name")
+        # print("employee dashboard not from cache")
     return list(profile)
 
 
@@ -368,6 +371,7 @@ def _view_employee_sync(username):
 @admin_required
 async def view_employee(request: HttpRequest, u):
     try:
+        # print("view employee not from cache")
         profile_data = await sync_to_async(_view_employee_sync)(u)
         return JsonResponse(profile_data, safe=False)
     except Http404:
@@ -416,6 +420,7 @@ async def get_teamLeads(request: HttpRequest):
     if verify_method:
         return verify_method
     try:
+        # print("get team leads not from cache")
         query_role = request.GET.get("Role")
         data = await sync_to_async(_get_teamleads_sync)(query_role)
         return JsonResponse(list(data), safe=False, status=status.HTTP_200_OK)
@@ -455,7 +460,7 @@ def _update_photo_sync(request: HttpRequest, username: str):
 @csrf_exempt
 @admin_required
 async def update_photo(request: HttpRequest, username: str):
-    print("hello world")
+    # print("hello world")
     return await sync_to_async(_update_photo_sync)(request, username)
 
 

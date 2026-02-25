@@ -15,11 +15,7 @@ from datetime import date
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def get_notifications(request):
-    qs = Notification.objects.filter(
-        receipient=request.user, created_at__date=date.today()
-    ).select_related(
-        "type_of_notification", "from_user__accounts_profile", "receipient__accounts_profile"
-    ).order_by("-created_at")
+    qs = Notification.objects.filter(receipient=request.user, created_at__date=date.today(),is_read=False).select_related("type_of_notification", "from_user__accounts_profile", "receipient__accounts_profile").order_by("-created_at")
     data = NotificationSerializer(qs, many=True).data
     return Response(data)
 
