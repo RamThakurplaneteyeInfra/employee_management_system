@@ -1,21 +1,11 @@
-from django.http import JsonResponse
-from django.views.decorators.http import require_GET
-from django.views.decorators.csrf import csrf_exempt
-from django.db.models import Prefetch
-from rest_framework.decorators import api_view, permission_classes
+from ems.RequiredImports import *
+from accounts.models import Profile
 from ems.auth_utils import CsrfExemptSessionAuthentication
-from rest_framework.viewsets import ModelViewSet
 from .permissions import *
-from rest_framework.decorators import action, api_view
-from rest_framework.response import Response
-
 from events.permissions import IsAdminOrMD
 
 # # # # # #  baseurl="http://localhost:8000"  # # # # # # # # # # # #
 # Base path: {{baseurl}}/eventsapi/
-from rest_framework.permissions import IsAuthenticated, AllowAny
-from datetime import date
-from django.contrib.auth import get_user_model
 from .models import (
     BookSlot,
     SlotMembers,
@@ -94,11 +84,6 @@ class BookSlotViewSet(ModelViewSet):
         serializer = BookSlotSerializer(qs, many=True, context={"request": request})
         return Response(serializer.data)
 
-    # def perform_update(self, serializer):
-    #     # This will override/ensure the created_by field is the logged-in user
-    #     serializer.save(created_by=self.request.user)
-
-
 # ==================== RoomViewSet ====================
 # URL: {{baseurl}}/eventsapi/rooms/  | CRUD
 class RoomViewSet(ModelViewSet):
@@ -143,33 +128,6 @@ class HolidayViewSet(ModelViewSet):
     serializer_class = HolidaySerializer
     # authentication_classes = [CsrfExemptSessionAuthentication]
     permission_classes=[AllowAny]
-    # def get_authenticators(self):
-    #     """Skip auth for list/retrieve to avoid ASGI + SessionAuth hang (sync DB in async context)."""
-    #     if self.action in ["list", "retrieve"]:
-    #         return []
-    #     return super().get_authenticators()
-
-    # def get_permissions(self):
-    #     if self.action in ["list", "retrieve"]:
-    #         return [AllowAny()]
-    #     elif self.action in ["create", "update", "partial_update", "destroy"]:
-    #         return [IsAuthenticated(), IsAdminOrMD()]
-    #     return [AllowAny()]
-
-    # # ✅ /api/holidays/
-    # @action(detail=False, methods=["get"], url_path="fixed")
-    # def fixed_holidays(self, request):
-    #     qs = self.queryset.filter(holiday_type="fixed")
-    #     serializer = self.get_serializer(qs, many=True)
-    #     return Response(serializer.data)
-
-    # # ✅ /api/holidays/unfixed/
-    # @action(detail=False, methods=["get"], url_path="unfixed")
-    # def unfixed_holidays(self, request):
-    #     qs = self.queryset.filter(holiday_type="unfixed")
-    #     serializer = self.get_serializer(qs, many=True)
-    #     return Response(serializer.data)
-
 
 # ==================== EventViewSet ====================
 # URL: {{baseurl}}/eventsapi/events/  | CRUD
@@ -206,6 +164,32 @@ class MeetingViewSet(ModelViewSet):
         else:
             return [AllowAny()]
         
+# ==================== birthdaycounter ====================
+# Increment or fetch birthday counter for a user.
+# URL: {{baseurl}}/accounts/birthdaycounter/<username>/  (or as configured)
+# Method: GET (fetch) | POST (increment)
+def _birthdaycounter_sync(username, method):
+    """Sync helper: DB operations with transaction.atomic."""
+    user_obj = get_object_or_404(User, username=username)
+    user_profile = Profile.objects.select_related("Employee_id").filter(Employee_id=user_obj).first()
+    if method == "POST":
+        with transaction.atomic():
+            user_profile.birthday_counter += 1
+            user_profile.save()
+    return {"birthday_counter": user_profile.birthday_counter}
+
+@csrf_exempt
+async def birthdaycounter(request: HttpRequest, username=None):
+    try:
+        result = await sync_to_async(_birthdaycounter_sync)(username, request.method)
+        print("count not from cache")
+        return JsonResponse(result, status=status.HTTP_200_OK)
+    except Http404:
+        return JsonResponse({"message": "user not found"}, status=status.HTTP_400_BAD_REQUEST)
+    except DatabaseError as e:
+        return JsonResponse({"message": f"{e}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
+# ******************************************************************** UNUSED APIS*****************************************************
 # @api_view(["GET"])
 # def rooms_dropdown(request):
 #     rooms = Room.objects.filter(is_active=True)
@@ -257,3 +241,35 @@ class MeetingViewSet(ModelViewSet):
 #         "status": "success",
 #         "data": results
 #     })
+
+# class HolidayViewSet(ModelViewSet):
+    # queryset = Holiday.objects.all().order_by("date")
+    # serializer_class = HolidaySerializer
+    # authentication_classes = [CsrfExemptSessionAuthentication]
+    # permission_classes=[AllowAny]
+    # def get_authenticators(self):
+    #     """Skip auth for list/retrieve to avoid ASGI + SessionAuth hang (sync DB in async context)."""
+    #     if self.action in ["list", "retrieve"]:
+    #         return []
+    #     return super().get_authenticators()
+
+    # def get_permissions(self):
+    #     if self.action in ["list", "retrieve"]:
+    #         return [AllowAny()]
+    #     elif self.action in ["create", "update", "partial_update", "destroy"]:
+    #         return [IsAuthenticated(), IsAdminOrMD()]
+    #     return [AllowAny()]
+
+    # # ✅ /api/holidays/
+    # @action(detail=False, methods=["get"], url_path="fixed")
+    # def fixed_holidays(self, request):
+    #     qs = self.queryset.filter(holiday_type="fixed")
+    #     serializer = self.get_serializer(qs, many=True)
+    #     return Response(serializer.data)
+
+    # # ✅ /api/holidays/unfixed/
+    # @action(detail=False, methods=["get"], url_path="unfixed")
+    # def unfixed_holidays(self, request):
+    #     qs = self.queryset.filter(holiday_type="unfixed")
+    #     serializer = self.get_serializer(qs, many=True)
+    #     return Response(serializer.data)

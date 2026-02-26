@@ -11,6 +11,7 @@ from .views import (
     BookingStatusViewset,
     MeetingViewSet,
     holidays_ping,
+    birthdaycounter,
 )
 
 router = DefaultRouter()
@@ -26,4 +27,5 @@ urlpatterns = [
     # path("holidays-ping", holidays_ping),
     # path("holidays-ping/", holidays_ping),
     path("", include(router.urls)),
+    path('events/birthdaycounter/<str:username>/', birthdaycounter, name='birthday'),
 ]

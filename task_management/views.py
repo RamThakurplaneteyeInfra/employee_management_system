@@ -1,4 +1,4 @@
-from asgiref.sync import sync_to_async
+from ems.RequiredImports import sync_to_async
 from accounts.filters import _get_user_role_sync, _get_users_Name_sync
 from ems.utils import gmt_to_ist_date_str, gmt_to_ist_time_str
 from .filters import (

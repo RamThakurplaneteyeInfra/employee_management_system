@@ -1,7 +1,17 @@
-from asgiref.sync import sync_to_async
-from django.db.models import Q
+from ems.RequiredImports import (
+    sync_to_async,
+    Q,
+    Response,
+    status,
+    api_view,
+    permission_classes,
+    date,
+    IsAuthenticated,
+    JsonResponse,
+    get_object_or_404,
+    PermissionDenied,
+)
 from ems.verify_methods import *
-from rest_framework.response import Response
 from accounts.filters import _get_department_obj_sync
 from .models import *
 from task_management.filters import _get_taskStatus_object_sync
@@ -12,11 +22,7 @@ from .filters import (
     _get_quater_object_sync,
     get_addeded_entries,
 )
-from rest_framework import status
 from .serializers import FunctionsEntriesSerializer
-from rest_framework.decorators import api_view, permission_classes
-from datetime import date
-from rest_framework.permissions import IsAuthenticated
 from .permissions import EntryPermission
 
 # # # # # #  baseurl="http://localhost:8000"  # # # # # # # # # # # #
@@ -174,9 +180,10 @@ async def delete_entry(request: HttpRequest, user_entry_id: int):
 # Fetch meeting head and subhead for a user by quarter/month.
 # URL: {{baseurl}}/getMonthlySchedule/<user_id>/
 # Method: GET
-def _get_meeting_head_sync(user_id, get_data):
+def _get_meeting_head_sync(request:HttpRequest,user_id:str):
     user = get_object_or_404(User, username=user_id)
     user_profile = get_object_or_404(Profile, Employee_id=user)
+    get_data=request.GET
     if user_profile.Role.role_name in ["MD", "Admin"]:
         return []
     if not get_data:
@@ -187,16 +194,20 @@ def _get_meeting_head_sync(user_id, get_data):
         quater = get_quater_data.get("quarter")
     else:
         month = get_data.get("month")
-        actual_month = month
+        # actual_month = month
+        # print(get_data)
+        # print(type(month))
         financial_year = get_current_financial_year()
         quater = get_data.get("quater")
+        # print(type(quater))
         reverse_month = reversed_quater_month[quater][month]
-    quarter_obj = _get_quater_object_sync(quater=quater)
+        # print(reverse_month)
+    # quarter_obj = _get_quater_object_sync(quater=quater)
     department_obj = user_profile.Department
     get_monthly_schedule_set = Monthly_department_head_and_subhead.objects.filter(
-        month_of_the_quater=reverse_month, quater=quarter_obj, department=department_obj)
-    return [{"id": obj.id, "quater": obj.quater.quater, "financial_year": financial_year,
-        "month": reverse_month, "actual_month": actual_month, "Meeting-head": obj.Meeting_head,
+        month_of_the_quater=reverse_month, department=department_obj)
+    return [{"id": obj.id, "quater": quater, "financial_year": financial_year,
+        "month": reverse_month, "actual_month": month, "Meeting-head": obj.Meeting_head,
         "Sub-Meeting-head": obj.meeting_sub_head, "sub-head-D1": obj.Sub_Head_D1,
         "sub-head-D2": obj.Sub_Head_D2, "sub-head-D3": obj.Sub_Head_D3}
         for obj in get_monthly_schedule_set]
@@ -205,12 +216,12 @@ def _get_meeting_head_sync(user_id, get_data):
 @login_required
 async def get_meeting_head_and_subhead(request: HttpRequest, user_id: str):
     try:
-        values = await sync_to_async(_get_meeting_head_sync)(user_id, dict(request.GET) if request.GET else None)
+        values = await sync_to_async(_get_meeting_head_sync)(request,user_id)
         return JsonResponse(values, safe=False)
     except Http404:
-        return JsonResponse({"Message": "http 404 error occured"})
+        return JsonResponse({"Message": "http 404 error occured"},status=status.HTTP_404_NOT_FOUND)
     except Exception as e:
-        return JsonResponse({"Message": f"{e}"})
+        return JsonResponse({"Message": f"{e}"},status=status.HTTP_501_NOT_IMPLEMENTED)
 
 
 # ==================== add_meeting_head_subhead ====================
@@ -219,9 +230,9 @@ async def get_meeting_head_and_subhead(request: HttpRequest, user_id: str):
 # Method: POST
 def _add_meeting_head_sync(data):
     department = _get_department_obj_sync(dept=data["dept"])
-    quater_object = Quaters.objects.get(quater=data["quater"])
+    # quater_object = Quaters.objects.get(quater=data["quater"])
     Monthly_department_head_and_subhead.create_head_and_subhead_for_each_dept(
-        dept=department, quater=quater_object, month_of_the_quater=data["month"],
+        dept=department,month_of_the_quater=data["month"],
         Meeting_head=data["head"], meeting_sub_head=data["sub_head"],
         Sub_Head_D1=data["sub_d1"], Sub_Head_D2=data["sub_d2"], Sub_Head_D3=data["sub_d3"])
 
@@ -233,7 +244,8 @@ async def add_meeting_head_subhead(request: HttpRequest):
         data = {k: v.strip() for k, v in data.items() if isinstance(v, str)}
         await sync_to_async(_add_meeting_head_sync)(data)
         return JsonResponse({"Message": "added successfully"})
-    except Exception:
+    except Exception as e:
+        print(e)
         return JsonResponse({"Message": "Error occured"})
 
 

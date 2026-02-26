@@ -1,11 +1,15 @@
-from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import IsAuthenticated, AllowAny
-from rest_framework.response import Response
-from django.http import HttpRequest
-from rest_framework import status
-from .models import Notification,notification_type
+from ems.RequiredImports import (
+    api_view,
+    permission_classes,
+    IsAuthenticated,
+    AllowAny,
+    Response,
+    HttpRequest,
+    status,
+    date,
+)
+from .models import Notification, notification_type
 from .Serializers import NotificationSerializer
-from datetime import date
 
 
 # ==================== get_notifications ====================

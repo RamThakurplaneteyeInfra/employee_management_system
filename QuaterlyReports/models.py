@@ -22,21 +22,21 @@ class Quaters(models.Model):
     
 class Monthly_department_head_and_subhead(models.Model):
     department=models.ForeignKey(Departments,on_delete=models.CASCADE,null=False,related_name="dapartment",db_column="department")
-    quater=models.ForeignKey(Quaters,on_delete=models.CASCADE,null=False,related_name="meeting_head_quater")
+    # quater=models.ForeignKey(Quaters,on_delete=models.CASCADE,null=True,related_name="meeting_head_quater")
     month_of_the_quater=models.SmallIntegerField(validators=[MinValueValidator(1), MaxValueValidator(3)])
-    Meeting_head=models.CharField(max_length=100,null=False)
-    meeting_sub_head=models.CharField(max_length=100,null=True)
-    Sub_Head_D1=models.CharField(max_length=100,null=True)
-    Sub_Head_D2=models.CharField(max_length=100,null=True)
-    Sub_Head_D3=models.CharField(max_length=100,null=True)
+    Meeting_head=models.CharField(max_length=200,null=False)
+    meeting_sub_head=models.CharField(max_length=200,null=True,blank=True)
+    Sub_Head_D1=models.CharField(max_length=200,null=True)
+    Sub_Head_D2=models.CharField(max_length=200,null=True)
+    Sub_Head_D3=models.CharField(max_length=200,null=True)
     
     
     @classmethod
-    def create_head_and_subhead_for_each_dept(cls,quater:Quaters,dept:Departments,month_of_the_quater:int,
+    def create_head_and_subhead_for_each_dept(cls,dept:Departments,month_of_the_quater:int,
                                             Meeting_head:str,meeting_sub_head:str,Sub_Head_D1:str,
                                             Sub_Head_D2:str,Sub_Head_D3:str):
         
-        obj=cls.objects.create(quater=quater,department=dept,month_of_the_quater=month_of_the_quater,
+        obj=cls.objects.create(department=dept,month_of_the_quater=month_of_the_quater,
                             Meeting_head=Meeting_head,Sub_Head_D1=Sub_Head_D1,Sub_Head_D2=Sub_Head_D2,
                             Sub_Head_D3=Sub_Head_D3,meeting_sub_head=meeting_sub_head)
         return obj

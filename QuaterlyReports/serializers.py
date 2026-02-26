@@ -1,4 +1,4 @@
-from rest_framework import serializers
+from ems.RequiredImports import serializers
 from .models import Functions, FunctionsGoals, ActionableGoals, FunctionsEntries
 from task_management.models import TaskStatus
 

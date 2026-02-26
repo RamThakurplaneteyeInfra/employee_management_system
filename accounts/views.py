@@ -1,7 +1,16 @@
-import asyncio
-import mimetypes
-from asgiref.sync import sync_to_async
-from django.http import FileResponse
+from ems.RequiredImports import (
+    asyncio,
+    mimetypes,
+    sync_to_async,
+    FileResponse,
+    JsonResponse,
+    status,
+    get_object_or_404,
+    Http404,
+    DatabaseError,
+    transaction,
+    F,
+)
 from ems.verify_methods import *
 from .models import *
 from .snippet import admin_required
@@ -27,31 +36,6 @@ from .filters import (
 # Method: GET
 async def home(request: HttpRequest):
     return HttpResponse(status=204)
-
-
-# ==================== birthdaycounter ====================
-# Increment or fetch birthday counter for a user.
-# URL: {{baseurl}}/accounts/birthdaycounter/<username>/  (or as configured)
-# Method: GET (fetch) | POST (increment)
-def _birthdaycounter_sync(username, method):
-    """Sync helper: DB operations with transaction.atomic."""
-    user_obj = get_object_or_404(User, username=username)
-    user_profile = Profile.objects.select_related("Employee_id").filter(Employee_id=user_obj).first()
-    if method == "POST":
-        with transaction.atomic():
-            user_profile.birthday_counter += 1
-            user_profile.save()
-    return {"birthday_counter": user_profile.birthday_counter}
-
-
-async def birthdaycounter(request: HttpRequest, username=None):
-    try:
-        result = await sync_to_async(_birthdaycounter_sync)(username, request.method)
-        return JsonResponse(result, status=status.HTTP_200_OK)
-    except Http404:
-        return JsonResponse({"message": "user not found"}, status=status.HTTP_400_BAD_REQUEST)
-    except DatabaseError as e:
-        return JsonResponse({"message": f"{e}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 # ==================== create_employee_login ====================
 # Create new employee login and profile (Admin only).

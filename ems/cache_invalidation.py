@@ -1,13 +1,14 @@
 """
-Connect post_save signals to invalidate GET cache when data is created/updated.
-Call connect_cache_invalidation() from an AppConfig.ready() (e.g. accounts).
+Connect post_save and post_delete signals to invalidate GET cache when data changes.
+Uses model-specific path prefixes so only affected GET endpoints are invalidated
+(e.g. Task create invalidates viewTasks + viewAssignedTasks + Taskcount, not all /tasks/).
 """
-from django.db.models.signals import post_save
+from django.db.models.signals import post_save, post_delete
 from django.dispatch import receiver
 
 from .cache_utils import invalidate_get_cache_for_prefix
 
-# Path prefixes to invalidate per app (request.path starts with these)
+# Fallback: path prefixes to invalidate per app when a model has no specific mapping
 PREFIXES_BY_APP = {
     "events": ["eventsapi"],
     "Messaging": ["messaging"],
@@ -18,10 +19,68 @@ PREFIXES_BY_APP = {
     "QuaterlyReports": ["getMonthlySchedule", "getUserEntries", "get_functions", "ActionableEntries"],
 }
 
+# Model-specific GET path prefixes (path_safe format: colons, e.g. "tasks:viewTasks").
+# Only these endpoints are invalidated when this model is saved/deleted.
+AFFECTED_GET_PREFIXES_BY_MODEL = {
+    # task_management: task list and assignment views + task count
+    "task_management.Task": [
+        "tasks:viewTasks",
+        "tasks:viewAssignedTasks",
+        "tasks:Taskcount",
+    ],
+    "task_management.TaskAssignies": [
+        "tasks:viewTasks",
+        "tasks:viewAssignedTasks",
+        "tasks:Taskcount",
+    ],
+    "task_management.TaskMessage": [
+        "tasks:getMessage",
+    ],
+    "task_management.TaskTypes": [
+        "tasks:getTaskTypes",
+    ],
+    "task_management.TaskStatus": [
+        "tasks:getTaskStatuses",
+    ],
+    # accounts: employee list, dashboard, and birthday counter (under eventsapi)
+    "accounts.Profile": [
+        "accounts:employees",
+        "accounts:employee",
+        "accounts:admin",
+        "eventsapi:events:birthdaycounter",
+    ],
+    # notifications
+    "notifications.Notification": [
+        "notifications:today",
+        "notifications:types",
+    ],
+    "notifications.notification_type": [
+        "notifications:types",
+    ],
+    # QuaterlyReports: only endpoints that show entries/goals
+    "QuaterlyReports.UsersEntries": [
+        "getUserEntries",
+    ],
+    "QuaterlyReports.FunctionsEntries": [
+        "ActionableEntries",
+    ],
+    "QuaterlyReports.Monthly_department_head_and_subhead": [
+        "getMonthlySchedule",
+    ],
+    "QuaterlyReports.FunctionsGoals": [
+        "get_functions",
+    ],
+    "QuaterlyReports.ActionableGoals": [
+        "get_functions",
+    ],
+}
+
 
 def _invalidate_for_sender(sender, **kwargs):
-    app = sender._meta.app_label
-    prefixes = PREFIXES_BY_APP.get(app, [])
+    model_key = f"{sender._meta.app_label}.{sender._meta.model_name}"
+    prefixes = AFFECTED_GET_PREFIXES_BY_MODEL.get(model_key)
+    if prefixes is None:
+        prefixes = PREFIXES_BY_APP.get(sender._meta.app_label, [])
     for prefix in prefixes:
         invalidate_get_cache_for_prefix(prefix)
 
@@ -65,3 +124,4 @@ def connect_cache_invalidation():
     ]
     for model in models_to_watch:
         post_save.connect(_invalidate_for_sender, sender=model)
+        post_delete.connect(_invalidate_for_sender, sender=model)
