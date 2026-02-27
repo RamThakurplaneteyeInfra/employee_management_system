@@ -39,13 +39,13 @@ class FunctionDetailSerializer(serializers.ModelSerializer):
 
 
 class FunctionsEntriesSerializer(serializers.ModelSerializer):
-    status = serializers.SlugRelatedField(
+    final_Status = serializers.SlugRelatedField(
         slug_field="status_name",
         queryset=TaskStatus.objects.all(),
         required=False,
         allow_null=True,
     )
-    final_Status = serializers.SlugRelatedField(
+    shared_Status = serializers.SlugRelatedField(
         slug_field="status_name",
         queryset=TaskStatus.objects.all(),
         required=False,
@@ -56,13 +56,18 @@ class FunctionsEntriesSerializer(serializers.ModelSerializer):
         model = FunctionsEntries
         fields = [
             "id", "goal", "Creator", "co_author", "share_with", "approved_by_coauthor",
-            "date", "time", "status", "final_Status", "note",
+            "date", "time", "final_Status", "shared_Status", "note",
         ]
         read_only_fields = ["time", "Creator"]
 
     def create(self, validated_data):
-        if validated_data.get("status") is None:
-            validated_data["status"] = _get_pending_status()
+        final_Status=validated_data.get("final_Status")
+        shared_status=validated_data.get("shared_status")
+        if not final_Status:
+            validated_data["final_Status"] = _get_pending_status()
+        if not self.shared_Status:
+            validated_data["shared_Status"] = _get_pending_status()
+        
         return super().create(validated_data)
 
     def update(self, instance, validated_data):
@@ -75,21 +80,21 @@ class FunctionsEntriesSerializer(serializers.ModelSerializer):
             elif validated_data.get("approved_by_coauthor") is True:
                 inprogress = _get_inprogress_status()
                 if inprogress:
-                    validated_data["status"] = inprogress
-        # Only share_with can change final_Status
-        if "final_Status" in validated_data and str(instance.share_with_id or "") != str(username or ""):
-            validated_data.pop("final_Status", None)
-        # Only creator can change status; creator may set status to Completed only after final_Status is Completed
-        if "status" in validated_data:
+                    validated_data["final_Status"] = inprogress
+        # Only share_with can change shared_Status
+        if "shared_Status" in validated_data and str(instance.share_with_id or "") != str(username or ""):
+            validated_data.pop("shared_Status", None)
+        # Only creator can change final_Status; creator may set final_Status to Completed only after shared_Status is Completed
+        if "final_Status" in validated_data:
             creator_id = instance.Creator_id
             if str(creator_id) != str(username or ""):
-                validated_data.pop("status", None)
+                validated_data.pop("final_Status", None)
             else:
-                new_status = validated_data.get("status")
+                new_status = validated_data.get("final_Status")
                 if new_status and getattr(new_status, "status_name", None) == "COMPLETED":
-                    final = instance.final_Status
-                    if not final or getattr(final, "status_name", None) != "COMPLETED":
-                        validated_data.pop("status", None)
+                    shared = instance.shared_Status
+                    if not shared or getattr(shared, "status_name", None) != "COMPLETED":
+                        validated_data.pop("final_Status", None)
         return super().update(instance, validated_data)
         # notes = validated_data.pop('note')
         # # creator = validated_data.get('Creator')

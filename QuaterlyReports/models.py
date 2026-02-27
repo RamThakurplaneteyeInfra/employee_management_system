@@ -100,21 +100,21 @@ class FunctionsEntries(models.Model):
     approved_by_coauthor = models.BooleanField(default=False, db_column="approved_by_coauthor")
     date = models.DateField(auto_now=False, auto_now_add=False)
     time = models.TimeField(auto_now_add=True)
-    status = models.ForeignKey(
+    final_Status = models.ForeignKey(
         TaskStatus,
         on_delete=models.CASCADE,
         editable=True,
         null=True,
         blank=True,
-        related_name="functions_entries_initial",
+        related_name="functions_entries_final",
         db_column="status",
     )
-    final_Status = models.ForeignKey(
+    shared_Status = models.ForeignKey(
         TaskStatus,
         on_delete=models.CASCADE,
         null=True,
         blank=True,
-        related_name="functions_entries_final",
+        related_name="functions_entries_shared",
         db_column="final_status",
     )
     note = models.TextField()

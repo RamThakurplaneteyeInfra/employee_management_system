@@ -32,7 +32,7 @@ def get_cached_response(request):
     data = cache.get(key)
     if data is None:
         return None
-    print("returning the cached response")
+    # print("returning the cached response")
     return HttpResponse(
         content=data.get("content", b""),
         content_type=data.get("content_type", "application/json"),

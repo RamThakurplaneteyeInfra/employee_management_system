@@ -570,7 +570,7 @@ async def updateUsername(request: HttpRequest, username: str):
         await sync_to_async(_update_username_sync)(username, new_u)
         return HttpResponse("username updated")
     except Exception as e:
-        return HttpResponse("Error occured")
+        return HttpResponse(f"Error occured {str(e)}")
 
 
 # Filter-based views (get_branches, get_roles, get_designations, get_departments_and_functions)

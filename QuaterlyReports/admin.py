@@ -14,4 +14,4 @@ class UsersEntriesAdmin(admin.ModelAdmin):
 
 @admin.register(FunctionsEntries)
 class FunctionsEntriesAdmin(admin.ModelAdmin):
-    list_display = ("Creator", "date", "status")
+    list_display = ("Creator", "date", "final_Status")

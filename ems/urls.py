@@ -28,7 +28,7 @@ urlpatterns = [
     path("", include("QuaterlyReports.urls"), name="QuaterlyReports"),
     path("notifications/", include("notifications.urls"), name="notifications"),
     path('adminapi/', include('adminpanel.urls'),name="adminpanelapi"),
-    path('eventsapi/', include('events.urls'),name="eventsapi")
+    path('eventsapi/', include('events.urls'),name="eventsapi"),
 ]
 
 if True:

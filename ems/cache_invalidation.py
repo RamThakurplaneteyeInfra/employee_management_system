@@ -64,6 +64,15 @@ AFFECTED_GET_PREFIXES_BY_MODEL = {
     "QuaterlyReports.FunctionsEntries": [
         "ActionableEntries",
     ],
+    # Calling (under /messaging/): call lists and callable users
+    "Calling.Call": [
+        "messaging:callableUsers",
+        "messaging:activeCalls",
+        "messaging:pendingCalls",
+    ],
+    "Calling.GroupCall": [
+        "messaging:activeGroupCalls",
+    ],
     "QuaterlyReports.Monthly_department_head_and_subhead": [
         "getMonthlySchedule",
     ],
@@ -93,6 +102,7 @@ def connect_cache_invalidation():
     from notifications.models import Notification, notification_type
     from adminpanel.models import Asset, Bill, ExpenseTracker, Vendor, AssetType, BillCategory
     from accounts.models import Profile
+    from Calling.models import Call, GroupCall, GroupCallParticipant
     from QuaterlyReports.models import (
         Quaters,
         Monthly_department_head_and_subhead,
@@ -121,6 +131,9 @@ def connect_cache_invalidation():
         FunctionsEntries,
         PlannedActions,
         SalesStatistics,
+        Call,
+        GroupCall,
+        GroupCallParticipant,
     ]
     for model in models_to_watch:
         post_save.connect(_invalidate_for_sender, sender=model)

@@ -1,18 +1,35 @@
 .env
 db.sqlite3
-accounts/__pycache__
-events/__pycache__
-Messaging/__pycache__
-adminpanel/__pycache__
-ems/__pycache__
-maintenance/__pycache__
-QuaterlyReports/__pycache__
-task_management/__pycache__
-adminpanel/__pycache__
-events/__pycache__
-notifications/__pycache__
+# accounts/__pycache__
+# events/__pycache__
+# Messaging/__pycache__
+# adminpanel/__pycache__
+# ems/__pycache__
+# maintenance/__pycache__
+# QuaterlyReports/__pycache__
+# task_management/__pycache__
+# adminpanel/__pycache__
+# events/__pycache__
+# notifications/__pycache__
 ActionableGoals.csv
 FunctionGoals.csv
 development.env
 Procfile
 .venv
+# Python compiled files (all apps, all folders)
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Static and media (generated, not source)
+staticfiles/
+media/
+cloudflared
+
+# Logs
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db

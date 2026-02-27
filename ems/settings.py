@@ -58,6 +58,7 @@ SIMPLE_JWT = {
 # =============================================================================
 INSTALLED_APPS = [
     "daphne",
+    "django_extensions",
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
@@ -71,6 +72,7 @@ INSTALLED_APPS = [
     "accounts",
     "task_management",
     "Messaging",
+    "Calling",
     "events",
     "project",
     "QuaterlyReports",
@@ -166,22 +168,22 @@ CACHES = {
 # DB_RECYCLE_SECONDS = int(os.getenv("DB_RECYCLE_SECONDS", "3600"))
 # DB_POOL_TIMEOUT = int(os.getenv("DB_POOL_TIMEOUT", "60"))
 
-# Schema-based apps: set on every new DB connection (Neon pooler does not allow startup "search_path").
-# Used by ems.db to run SET search_path when connection is created.
+# Schema-based apps: set on every cursor via ems.backends.postgresql (pool-safe).
+# List the schema that contains auth_user (and django_session) first, then other app schemas. No public.
 DB_SEARCH_PATH = os.getenv(
     "DB_SEARCH_PATH",
-    "events,task_management,notifications,project,quatery_reports,login_details,messaging,team_farm,team_infra,team_interns,team_management,public",
+    "login_details,events,task_management,notifications,project,quatery_reports,messaging,team_farm,team_infra,team_interns,team_management",
 )
 
 DATABASES = {
     "default": {
-        "ENGINE": "dj_db_conn_pool.backends.postgresql",
+        "ENGINE": "ems.backends.postgresql",
         "NAME": os.getenv("POSTGRES_DB"),
         "USER": os.getenv("POSTGRES_USER"),
         "PASSWORD": os.getenv("POSTGRES_PASSWORD"),
         "HOST": os.getenv("POSTGRES_HOST"),
         "PORT": os.getenv("POSTGRES_PORT"),
-        # Neon pooler does not allow startup "search_path". It is set in code per connection via ems.db (DB_SEARCH_PATH).
+        # search_path is set on every cursor by ems.backends.postgresql (Neon pooler compatible).
         "OPTIONS": {
             "connect_timeout": 10,
             "sslmode": "require",
@@ -282,6 +284,8 @@ if os.getenv("is_developement") == "True":
     SESSION_COOKIE_SAMESITE = None
     CSRF_COOKIE_SAMESITE = None
     SESSION_COOKIE_HTTPONLY=False
+    # SESSION_COOKIE_SECURE = True
+    # CSRF_COOKIE_SECURE = True
     # For cross-origin WS in dev: use SESSION_COOKIE_SAMESITE = "None" and HTTPS.
 else:
     DEBUG = True
@@ -291,6 +295,11 @@ else:
     CSRF_COOKIE_SAMESITE = os.getenv("CSRF_COOKIE_SAMESITE", "None")
     SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
     SESSION_COOKIE_HTTPONLY=False
+    
+# Add Cloudflare Tunnel HTTPS URL when using cloudflared (set in .env: CLOUDFLARE_TUNNEL_ORIGIN=https://xxx.trycloudflare.com)
+_cloudflare_origin = os.getenv("CLOUDFLARE_TUNNEL_ORIGIN", "").strip().rstrip("/")
+if _cloudflare_origin:
+    CSRF_TRUSTED_ORIGINS.append(_cloudflare_origin)
 
 # =============================================================================
 # Logging (request logging for debugging)
@@ -306,5 +315,5 @@ LOGGING = {
     },
 }
 
-# Register DB connection hook so search_path is set on every new connection (Neon pooler compatible).
+# Optional: also set search_path on new connections (redundant with ems.backends.postgresql which sets it on every cursor).
 import ems.db  # noqa: E402

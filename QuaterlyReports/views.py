@@ -24,6 +24,8 @@ from .filters import (
 )
 from .serializers import FunctionsEntriesSerializer
 from .permissions import EntryPermission
+import logging
+from django.utils import timezone
 
 # # # # # #  baseurl="http://localhost:8000"  # # # # # # # # # # # #
 
@@ -346,6 +348,47 @@ def _entry_visible_to_user(entry, user):
     return False
 
 
+# ==================== co_author_approve_entry ====================
+# Co-author approves an actionable entry (no payload). Sets approved_by_coauthor=True and final_Status=In-progress.
+# URL: {{baseurl}}/ActionableEntriesByID/<id>/co-author-approve/
+# Method: POST
+def _co_author_approve_sync(entry_id, user):
+    entry = FunctionsEntries.objects.get(pk=entry_id)
+    if not entry.co_author_id:
+        return {"error": "Entry has no co-author assigned", "status_code": status.HTTP_400_BAD_REQUEST}
+    if str(entry.co_author_id) != str(user.username):
+        return {"error": "Only the co-author can approve this entry", "status_code": status.HTTP_403_FORBIDDEN}
+    if entry.approved_by_coauthor:
+        return {"already_approved": True, "entry": entry, "status_code": status.HTTP_200_OK}
+    inprogress = _get_taskStatus_object_sync(status_name="INPROCESS")
+    if not inprogress:
+        return {"error": "In-progress status not found", "status_code": status.HTTP_500_INTERNAL_SERVER_ERROR}
+    entry.approved_by_coauthor = True
+    entry.final_Status = inprogress
+    entry.save()
+    return {"entry": entry, "status_code": status.HTTP_200_OK}
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated, EntryPermission])
+def co_author_approve_entry(request, id):
+    """Co-author approves an actionable entry. No payload required. Only the assigned co_author can call this."""
+    try:
+        result = _co_author_approve_sync(id, request.user)
+        status_code = result["status_code"]
+        if "error" in result:
+            return Response({"error": result["error"]}, status=status_code)
+        entry = result["entry"]
+        data = FunctionsEntriesSerializer(entry).data
+        if result.get("already_approved"):
+            return Response({"message": "Entry already approved", "entry": data}, status=status_code)
+        return Response({"message": "Entry approved by co-author", "entry": data}, status=status_code)
+    except FunctionsEntries.DoesNotExist:
+        return Response({"error": "Entry not found"}, status=status.HTTP_404_NOT_FOUND)
+    except DatabaseError as e:
+        return JsonResponse({"message": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
 # ==================== entry_detail_update_delete ====================
 # Get, update, or delete a single actionable entry.
 # URL: {{baseurl}}/ActionableEntriesByID/<id>/
@@ -381,3 +424,92 @@ def entry_detail_update_delete(request, id):
         return Response({'error': 'Entry not found'}, status=status.HTTP_404_NOT_FOUND)
     except DatabaseError as e:
         return JsonResponse({"message": f"{e}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# ==================== Co-author entries (list + detail) ====================
+# Entries where the current user is co_author. Same fields as ActionableEntries.
+# URL: {{baseurl}}/ActionableEntriesCoAuthor/  |  {{baseurl}}/ActionableEntriesCoAuthor/<id>/
+@api_view(["GET"])
+@permission_classes([IsAuthenticated, EntryPermission])
+def co_author_entries_list(request):
+    """List actionable entries where the current user is co_author. Optional ?month= (1-12)."""
+    month = request.GET.get("month")
+    current_month = date.today().month
+    try:
+        month_val = int(month) if month is not None else current_month
+        if month_val < 1 or month_val > 12:
+            month_val = current_month
+    except (TypeError, ValueError):
+        month_val = current_month
+    entries = FunctionsEntries.objects.filter(co_author=request.user, date__month=month_val).order_by("-date", "-time")
+    serializer = FunctionsEntriesSerializer(entries, many=True)
+    return Response(serializer.data)
+
+
+@api_view(["GET", "PATCH"])
+@permission_classes([IsAuthenticated, EntryPermission])
+def co_author_entry_detail(request, id):
+    """Get or update one actionable entry. Allowed only if current user is co_author. Same fields as ActionableEntries."""
+    try:
+        entry = FunctionsEntries.objects.get(pk=id)
+        if str(entry.co_author_id or "") != str(request.user.username):
+            return Response({"error": "Entry not found or you are not the co-author"}, status=status.HTTP_404_NOT_FOUND)
+        if request.method == "GET":
+            return Response(FunctionsEntriesSerializer(entry).data)
+        serializer = FunctionsEntriesSerializer(entry, data=request.data, partial=True, context={"request": request})
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    except FunctionsEntries.DoesNotExist:
+        return Response({"error": "Entry not found"}, status=status.HTTP_404_NOT_FOUND)
+    except DatabaseError as e:
+        return JsonResponse({"message": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# ==================== Shared-with entries (list + detail) ====================
+# Entries where the current user is share_with (and approved). Same fields as ActionableEntries.
+# URL: {{baseurl}}/ActionableEntriesSharedWith/  |  {{baseurl}}/ActionableEntriesSharedWith/<id>/
+@api_view(["GET"])
+@permission_classes([IsAuthenticated, EntryPermission])
+def shared_with_entries_list(request):
+    """List actionable entries where the current user is share_with and entry is approved by co-author. Optional ?month= (1-12)."""
+    month = request.GET.get("month")
+    current_month = date.today().month
+    try:
+        month_val = int(month) if month is not None else current_month
+        if month_val < 1 or month_val > 12:
+            month_val = current_month
+    except (TypeError, ValueError):
+        month_val = current_month
+    entries = FunctionsEntries.objects.filter(
+        share_with=request.user, approved_by_coauthor=True, date__month=month_val
+    ).order_by("-date", "-time")
+    serializer = FunctionsEntriesSerializer(entries, many=True)
+    return Response(serializer.data)
+
+
+@api_view(["GET", "PATCH"])
+@permission_classes([IsAuthenticated, EntryPermission])
+def shared_with_entry_detail(request, id):
+    """Get or update one actionable entry. Allowed only if current user is share_with and entry is approved. Same fields; share_with can update shared_Status."""
+    try:
+        entry = FunctionsEntries.objects.get(pk=id)
+        if str(entry.share_with_id or "") != str(request.user.username):
+            return Response({"error": "Entry not found or you are not the share_with user"}, status=status.HTTP_404_NOT_FOUND)
+        if not entry.approved_by_coauthor:
+            return Response({"error": "Entry not visible until co-author approves"}, status=status.HTTP_403_FORBIDDEN)
+        if request.method == "GET":
+            return Response(FunctionsEntriesSerializer(entry).data)
+        serializer = FunctionsEntriesSerializer(entry, data=request.data, partial=True, context={"request": request})
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    except FunctionsEntries.DoesNotExist:
+        return Response({"error": "Entry not found"}, status=status.HTTP_404_NOT_FOUND)
+    except DatabaseError as e:
+        return JsonResponse({"message": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# ************************************************ Calling APIS ************************************************* 
