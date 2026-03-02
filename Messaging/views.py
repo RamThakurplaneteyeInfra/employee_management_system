@@ -1,3 +1,4 @@
+import json
 from asgiref.sync import sync_to_async
 from django.db.models import F, Count
 from accounts.models import Profile
@@ -16,6 +17,8 @@ from .filters import (
 )
 from accounts.filters import _get_user_object_sync, _get_users_Name_sync, _get_user_role_sync
 from .utils import gmt_to_ist_str
+from .s3_utils import upload_file as s3_upload_file, get_file_url as s3_get_file_url
+from ems.s3_utils import delete_file_from_files as s3_delete_file
 
 # # # # # #  baseurl="http://localhost:8000"  # # # # # # # # # # # #
 
@@ -241,28 +244,141 @@ async def delete_group(request: HttpRequest, group_id: str):
 # Post a message in a group or individual chat.
 # URL: {{baseurl}}/messaging/postMessages/<chat_id>/
 # Method: POST
+def _parse_attachment_ids(value):
+    """Parse attachment_ids from JSON string or return list."""
+    if not value:
+        return []
+    if isinstance(value, list):
+        return value
+    if isinstance(value, str) and value.strip():
+        try:
+            return json.loads(value)
+        except (json.JSONDecodeError, TypeError):
+            return []
+    return []
+
+
+def _attachment_is_linked(att):
+    """True if attachment is already used (linked to a message or standalone in group/chat)."""
+    return bool(
+        att.group_message_id or att.individual_message_id or att.group_id or att.chat_id
+    )
+
+
+def _get_unlinked_attachments_queryset(user, attachment_ids):
+    """
+    Return attachments that: belong to user, are in attachment_ids,
+    and are not yet linked (no group_message, individual_message, group, or chat set).
+    """
+    if not attachment_ids:
+        return MessageAttachment.objects.none()
+    return MessageAttachment.objects.filter(
+        id__in=attachment_ids,
+        uploaded_by=user,
+        group_message__isnull=True,
+        individual_message__isnull=True,
+        group__isnull=True,
+        chat__isnull=True,
+    )
+
+
 def _post_message_sync(req, chat_id):
-    """Sync helper: DB operations to create message in group or individual chat."""
+    """
+    Post a message and/or attachments to a group or individual chat.
+
+    Logic:
+    1) Standalone: user uploads file and posts with empty content → add group_id/chat_id to
+       MessageAttachment only (no message row). Attachment appears as standalone in the conversation.
+    2) Message with attachment: user sends non-empty message along with attachment → create message
+       row, then add group_message_id/individual_message_id to MessageAttachment for the first attachment.
+    3) Message only: create GroupMessages/IndividualMessages with content, no attachment.
+    """
     verify_method = verifyPost(req)
     if verify_method:
         return verify_method
+
     data = load_data(req)
-    message = data.get("Message")
-    if not message:
-        return JsonResponse({"message": "Message is empty"}, status=status.HTTP_204_NO_CONTENT)
+    message_text = (data.get("Message") or "").strip()
+    attachment_ids = _parse_attachment_ids(data.get("attachment_ids"))
+    has_text = bool(message_text)
+    has_attachments = bool(attachment_ids)
+
+    if not (has_text or has_attachments):
+        return JsonResponse({"message": "Message or attachments required"}, status=status.HTTP_204_NO_CONTENT)
+
     is_group = check_group_or_chat(id=chat_id)
+
     if is_group:
-        chat_obj = _get_group_object_sync(group_id=chat_id)
-        if not isinstance(chat_obj, GroupChats):
+        conv = _get_group_object_sync(group_id=chat_id)
+        if not isinstance(conv, GroupChats):
             raise Http404("Invalid Group_id")
-        GroupMessages.objects.create(group=chat_obj, sender=req.user, content=message).save()
-        chat_obj.save()
+        _post_to_group(req, conv, message_text, attachment_ids, has_text, has_attachments)
+        conv.save(update_fields=["last_message_at"])
     else:
-        chat_obj = _get_individual_chat_object_sync(chat_id)
-        if not isinstance(chat_obj, IndividualChats):
+        conv = _get_individual_chat_object_sync(chat_id)
+        if not isinstance(conv, IndividualChats):
             raise Http404("Invalid chat_id")
-        IndividualMessages.objects.create(chat=chat_obj, sender=req.user, content=message)
-        chat_obj.save()
+        _post_to_chat(req, conv, message_text, attachment_ids, has_text, has_attachments)
+        conv.save(update_fields=["last_message_at"])
+
+
+def _post_to_group(req, group_obj, message_text, attachment_ids, has_text, has_attachments):
+    """
+    Handle post_message for a group.
+    - Empty content + attachments → standalone: set group_id on MessageAttachment.
+    - Non-empty content + attachments → create message, set group_message_id on MessageAttachment.
+    - Message only → create GroupMessages with content.
+    """
+    if has_text and has_attachments:
+        # Message with attachment: create message, then link first attachment via group_message_id
+        msg = GroupMessages.objects.create(
+            group=group_obj,
+            sender=req.user,
+            content=message_text,
+        )
+        unlinked = _get_unlinked_attachments_queryset(req.user, attachment_ids)
+        unlinked.update(group_message=msg, group=None, chat=None)
+        
+    elif has_text:
+        # Message only
+        GroupMessages.objects.create(
+            group=group_obj,
+            sender=req.user,
+            content=message_text,
+        )
+    else:
+        # Standalone: empty content + attachments → add group_id to MessageAttachment
+        unlinked = _get_unlinked_attachments_queryset(req.user, attachment_ids)
+        unlinked.update(group=group_obj)
+
+
+def _post_to_chat(req, chat_obj, message_text, attachment_ids, has_text, has_attachments):
+    """
+    Handle post_message for an individual chat.
+    - Empty content + attachments → standalone: set chat_id on MessageAttachment.
+    - Non-empty content + attachments → create message, set individual_message_id on MessageAttachment.
+    - Message only → create IndividualMessages with content.
+    """
+    if has_text and has_attachments:
+        # Message with attachment: create message, then link first attachment via individual_message_id
+        msg = IndividualMessages.objects.create(
+            chat=chat_obj,
+            sender=req.user,
+            content=message_text,
+        )
+        unlinked = _get_unlinked_attachments_queryset(req.user, attachment_ids)
+        unlinked.update(individual_message=msg, group=None, chat=None)
+    elif has_text:
+        # Message only
+        IndividualMessages.objects.create(
+            chat=chat_obj,
+            sender=req.user,
+            content=message_text,
+        )
+    else:
+        # Standalone: empty content + attachments → add chat_id to MessageAttachment
+        unlinked = _get_unlinked_attachments_queryset(req.user, attachment_ids)
+        unlinked.update(chat=chat_obj)
 
 
 @csrf_exempt
@@ -273,6 +389,179 @@ async def post_message(request: HttpRequest, chat_id: str):
         return JsonResponse({"message": "Message sent successfully"}, status=status.HTTP_201_CREATED)
     except Http404:
         return JsonResponse({"message": "Invalid chat/group id"}, status=status.HTTP_400_BAD_REQUEST)
+
+
+# ==================== upload_message_file ====================
+# Upload a file to S3 and create a MessageAttachment record (unlinked). Client sends attachment_ids in post_message to link.
+# URL: {{baseurl}}/messaging/uploadFile/
+# Method: POST (multipart/form-data), field name: file
+def _upload_message_file_sync(req):
+    """Sync helper: upload file to S3 and create MessageAttachment."""
+    if req.method != "POST":
+        return {"error": JsonResponse({"error": "Method not allowed"}, status=status.HTTP_400_BAD_REQUEST)}
+    file_obj = req.FILES.get("file")
+    if not file_obj:
+        return {"error": JsonResponse({"error": "No file provided"}, status=status.HTTP_400_BAD_REQUEST)}
+    try:
+        s3_key = s3_upload_file(file_obj)
+    except Exception as e:
+        return {"error": JsonResponse({"error": f"Upload failed: {e}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)}
+    file_name = getattr(file_obj, "name", "file") or "file"
+    content_type = getattr(file_obj, "content_type", "") or ""
+    file_size = getattr(file_obj, "size", None)
+    att = MessageAttachment.objects.create(
+        s3_key=s3_key,
+        file_name=file_name,
+        content_type=content_type or None,
+        file_size=file_size,
+        uploaded_by=req.user,
+    )
+    url = s3_get_file_url(s3_key)
+    return {
+        "data": {
+            "id": att.id,
+            "s3_key": s3_key,
+            "file_name": file_name,
+            "content_type": content_type,
+            "file_size": file_size,
+            "url": url,
+        }
+    }
+
+@csrf_exempt
+@login_required
+async def upload_message_file(request: HttpRequest):
+    verify_method = verifyPost(request)
+    if verify_method:
+        return verify_method
+    result = await sync_to_async(_upload_message_file_sync)(request)
+    if "error" in result:
+        return result["error"]
+    return JsonResponse(result["data"], status=status.HTTP_201_CREATED)
+
+
+# ==================== add_link ====================
+# Add a link attachment (unlinked). Client sends attachment_ids in postMessages to link to a message.
+# URL: {{baseurl}}/messaging/addLink/
+# Method: POST (JSON), body: { "url": "https://...", "title": "optional" }
+def _add_link_sync(req):
+    """Sync helper: create MessageAttachment for a shared link."""
+    if req.method != "POST":
+        return {"error": JsonResponse({"error": "Method not allowed"}, status=status.HTTP_400_BAD_REQUEST)}
+    data = load_data(req)
+    url = (data.get("url") or "").strip()
+    if not url:
+        return {"error": JsonResponse({"error": "url is required"}, status=status.HTTP_400_BAD_REQUEST)}
+    title = (data.get("title") or data.get("link_title") or "").strip() or None
+    att = MessageAttachment.objects.create(
+        link_url=url,
+        link_title=title,
+        uploaded_by=req.user,
+    )
+    return {
+        "data": {
+            "id": att.id,
+            "url": att.link_url,
+            "title": att.link_title,
+        }
+    }
+
+
+@csrf_exempt
+@login_required
+async def add_link(request: HttpRequest):
+    verify_method = verifyPost(request)
+    if verify_method:
+        return verify_method
+    result = await sync_to_async(_add_link_sync)(request)
+    if "error" in result:
+        return result["error"]
+    return JsonResponse(result["data"], status=status.HTTP_201_CREATED)
+
+
+# ==================== delete_attachment ====================
+# Delete an uploaded file or link that is not yet sent. Only uploader can delete; only unlinked attachments.
+# URL: {{baseurl}}/messaging/attachments/<attachment_id>/
+# Method: DELETE
+def _delete_attachment_sync(req, attachment_id):
+    """Sync helper: delete attachment if uploader and not linked to a message; remove file from S3 if file."""
+    try:
+        att = MessageAttachment.objects.get(id=attachment_id)
+    except MessageAttachment.DoesNotExist:
+        return {"error": JsonResponse({"error": "Attachment not found"}, status=status.HTTP_404_NOT_FOUND)}
+    if att.uploaded_by != req.user:
+        return {"error": JsonResponse({"error": "Not allowed"}, status=status.HTTP_403_FORBIDDEN)}
+    if _attachment_is_linked(att):
+        return {"error": JsonResponse({"error": "Cannot delete attachment that is already sent"}, status=status.HTTP_400_BAD_REQUEST)}
+    if att.s3_key:
+        s3_delete_file(att.s3_key)
+    att.delete()
+    return {"ok": True}
+
+
+@csrf_exempt
+@login_required
+async def delete_attachment(request: HttpRequest, attachment_id: int):
+    verify_method = verifyDelete(request)
+    if verify_method:
+        return verify_method
+    result = await sync_to_async(_delete_attachment_sync)(request, attachment_id)
+    if "error" in result:
+        return result["error"]
+    return JsonResponse({"message": "Attachment deleted"}, status=status.HTTP_200_OK)
+
+
+# ==================== get_attachment_url ====================
+# Get a presigned URL for an attachment (for display/download). User must have access via message membership.
+# URL: {{baseurl}}/messaging/files/<attachment_id>/url/
+# Method: GET
+def _get_attachment_url_sync(req, attachment_id):
+    """Sync helper: return presigned URL if user can access (linked to message in group/chat, standalone in group/chat, or own unlinked upload)."""
+    try:
+        att = MessageAttachment.objects.select_related(
+            "group_message__group", "individual_message__chat", "group", "chat"
+        ).get(id=attachment_id)
+    except MessageAttachment.DoesNotExist:
+        return {"error": JsonResponse({"error": "Attachment not found"}, status=status.HTTP_404_NOT_FOUND)}
+    # Access: attachment references the message (or is standalone)
+    if att.group_message_id:
+        if not GroupMembers.objects.filter(groupchat=att.group_message.group, participant=req.user).exists():
+            return {"error": JsonResponse({"error": "Not allowed"}, status=status.HTTP_403_FORBIDDEN)}
+        if att.link_url:
+            return {"data": {"url": att.link_url, "file_name": att.link_title, "type": "link"}}
+        return {"data": {"url": s3_get_file_url(att.s3_key), "file_name": att.file_name, "type": "file"}}
+    if att.individual_message_id:
+        chat = att.individual_message.chat
+        if req.user != chat.participant1 and req.user != chat.participant2:
+            return {"error": JsonResponse({"error": "Not allowed"}, status=status.HTTP_403_FORBIDDEN)}
+        if att.link_url:
+            return {"data": {"url": att.link_url, "file_name": att.link_title, "type": "link"}}
+        return {"data": {"url": s3_get_file_url(att.s3_key), "file_name": att.file_name, "type": "file"}}
+    # Standalone in group or chat
+    if att.group_id:
+        if not GroupMembers.objects.filter(groupchat=att.group, participant=req.user).exists():
+            return {"error": JsonResponse({"error": "Not allowed"}, status=status.HTTP_403_FORBIDDEN)}
+    elif att.chat_id:
+        chat = att.chat
+        if req.user != chat.participant1 and req.user != chat.participant2:
+            return {"error": JsonResponse({"error": "Not allowed"}, status=status.HTTP_403_FORBIDDEN)}
+    else:
+        if att.uploaded_by != req.user:
+            return {"error": JsonResponse({"error": "Not allowed"}, status=status.HTTP_403_FORBIDDEN)}
+    if att.link_url:
+        return {"data": {"url": att.link_url, "file_name": att.link_title, "type": "link"}}
+    return {"data": {"url": s3_get_file_url(att.s3_key), "file_name": att.file_name, "type": "file"}}
+
+
+@login_required
+async def get_attachment_url(request: HttpRequest, attachment_id: int):
+    verify_method = verifyGet(request)
+    if verify_method:
+        return verify_method
+    result = await sync_to_async(_get_attachment_url_sync)(request, attachment_id)
+    if "error" in result:
+        return result["error"]
+    return JsonResponse(result["data"])
 
 
 # ==================== get_chats ====================
@@ -293,40 +582,45 @@ async def get_chats(request: HttpRequest, chat_id: str):
 # URL: {{baseurl}}/messaging/loadChats/
 # Method: GET
 def _load_groups_and_chats_sync(user):
-    """Sync helper: DB operations to fetch user's groups and individual chats ordered by last_message_at with unseen counts."""
-    groups_qs = (
-        GroupMembers.objects.select_related("groupchat")
+    """Sync helper: DB operations to fetch user's groups and individual chats ordered by last_message_at with unseen counts. Optimized to minimize queries and avoid N+1."""
+    # Groups: avoid cross-schema JOIN for creator name – fetch members+group then creator names in one extra query
+    members_qs = (
+        GroupMembers.objects.select_related("groupchat","groupchat__created_by__accounts_profile")
         .filter(participant=user)
         .order_by("-groupchat__last_message_at")
-        .annotate(
-            group_id=F("groupchat__group_id"),
-            group_name=F("groupchat__group_name"),
-            description=F("groupchat__description"),
-            created_by=F("groupchat__created_by__accounts_profile__Name"),
-            total_participant=F("groupchat__participants"),
-            created_at=F("groupchat__created_at"),
-            last_message_at=F("groupchat__last_message_at"),
-            unseen_count=F("unseenmessages"),
-        )
-        .values(
-            "group_id", "group_name", "total_participant", "created_by",
-            "description", "created_at", "last_message_at", "unseen_count",
-        )
     )
     group_info = []
-    for g in groups_qs:
-        row = dict(g)
-        if row.get("created_at"):
-            row["created_at"] = gmt_to_ist_str(row["created_at"], "%d/%m/%y %H:%M:%S")
-        if row.get("last_message_at"):
-            row["last_message_at"] = gmt_to_ist_str(row["last_message_at"], "%d/%m/%y %H:%M:%S")
-        group_info.append(row)
+    # creator_usernames = set()
+    for gm in members_qs:
+        g = gm.groupchat
+        creator_profile=getattr(g.created_by,"accounts_profile",None)
+        # creator_usernames.add(g.created_by_id)
+        group_info.append({
+            "group_id": g.group_id,
+            "group_name": g.group_name,
+            "description": g.description,
+            "total_participant": g.participants,
+            # "created_at": gmt_to_ist_str(g.created_at, "%d/%m/%y %H:%M:%S") if g.created_at else None,
+            "last_message_at": gmt_to_ist_str(g.last_message_at, "%d/%m/%y %H:%M:%S") if g.last_message_at else None,
+            "unseen_count": gm.unseenmessages,
+            "_created_by_id":creator_profile.Name if creator_profile else None
+        })
+    # creator_names = {}
+    # if creator_usernames:
+    #     creator_names = dict(
+    #         Profile.objects.filter(Employee_id__in=creator_usernames).values_list("Employee_id", "Name")
+    #     )
+    # for row in group_info:
+    #     row["created_by"] = creator_names.get(row.pop("_created_by_id", None), None)
 
-    chats = (
+    # Chats: one query with select_related to avoid N+1 on participant and profile
+    chats_qs = (
         IndividualChats.objects.filter(Q(participant1=user) | Q(participant2=user))
+        .select_related("participant1__accounts_profile", "participant2__accounts_profile")
         .order_by("-last_message_at")
     )
-    chat_ids = [c.chat_id for c in chats]
+    chats_list = list(chats_qs)
+    chat_ids = [c.chat_id for c in chats_list]
     unread_map = {}
     if chat_ids:
         unread_qs = (
@@ -337,14 +631,21 @@ def _load_groups_and_chats_sync(user):
         )
         unread_map = {r["chat_id"]: r["unread"] for r in unread_qs}
 
+    def _other_name(c):
+        other = c.get_other_participant(user)
+        if other:
+            profile = getattr(other, "accounts_profile", None)
+            return profile.Name if profile else None
+        return None
+
     chats_info = [
         {
             "chat_id": c.chat_id,
-            "with": _get_users_Name_sync(c.get_other_participant(user)),
+            "with": _other_name(c),
             "last_message_at": gmt_to_ist_str(c.last_message_at, "%d/%m/%y %H:%M:%S") if c.last_message_at else None,
             "unseen_count": unread_map.get(c.chat_id, 0),
         }
-        for c in chats
+        for c in chats_list
     ]
 
     return {"Group_info": group_info, "chats_info": chats_info}
@@ -356,7 +657,7 @@ async def load_groups_and_chats(request: HttpRequest):
     if verify_method:
         return verify_method
     response = await sync_to_async(_load_groups_and_chats_sync)(request.user)
-    return JsonResponse(response, safe=False)
+    return JsonResponse(response, safe=False,status=status.HTTP_200_OK)
 
 
 # ==================== search_or_find_conversation ====================

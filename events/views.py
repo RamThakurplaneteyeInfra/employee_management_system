@@ -2,7 +2,7 @@ from ems.RequiredImports import *
 from accounts.models import Profile
 from ems.auth_utils import CsrfExemptSessionAuthentication
 from .permissions import *
-from events.permissions import IsAdminOrMD
+from events.permissions import IsAdminOrMD, IsAdminOrMDOrHR
 
 # # # # # #  baseurl="http://localhost:8000"  # # # # # # # # # # # #
 # Base path: {{baseurl}}/eventsapi/
@@ -159,8 +159,8 @@ class MeetingViewSet(ModelViewSet):
             return [IsAuthenticated()]
         
         elif self.action in ['create', 'update', 'partial_update', 'destroy']:
-            # Restrict to Superusers only
-            return [IsAuthenticated(),IsAdminOrMD()]
+            # Restrict to Admin, MD, or HR
+            return [IsAuthenticated(), IsAdminOrMDOrHR()]
         else:
             return [AllowAny()]
         

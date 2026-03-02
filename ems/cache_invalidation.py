@@ -97,7 +97,7 @@ def _invalidate_for_sender(sender, **kwargs):
 def connect_cache_invalidation():
     """Call once at startup (e.g. from accounts.apps.ready()). Connects post_save to invalidate cache."""
     from events.models import BookSlot, Tour, Holiday, Event, Meeting, Room, BookingStatus, SlotMembers, tourmembers
-    from Messaging.models import GroupChats, GroupMembers, IndividualChats, GroupMessages, IndividualMessages
+    from Messaging.models import GroupChats, GroupMembers, IndividualChats, GroupMessages, IndividualMessages, MessageAttachment
     from task_management.models import Task, TaskAssignies, TaskMessage, TaskTypes, TaskStatus
     from notifications.models import Notification, notification_type
     from adminpanel.models import Asset, Bill, ExpenseTracker, Vendor, AssetType, BillCategory
@@ -117,7 +117,7 @@ def connect_cache_invalidation():
 
     models_to_watch = [
         BookSlot, Tour, Holiday, Event, Meeting, Room, BookingStatus, SlotMembers, tourmembers,
-        GroupChats, GroupMembers, IndividualChats, GroupMessages, IndividualMessages,
+        GroupChats, GroupMembers, IndividualChats, GroupMessages, IndividualMessages, MessageAttachment,
         Task, TaskAssignies, TaskMessage, TaskTypes, TaskStatus,
         Notification, notification_type,
         Asset, Bill, ExpenseTracker, Vendor, AssetType, BillCategory,

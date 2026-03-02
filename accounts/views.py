@@ -1,3 +1,5 @@
+import logging
+
 from ems.RequiredImports import (
     asyncio,
     mimetypes,
@@ -26,6 +28,8 @@ from .filters import (
     get_photo_url,
     completed_years_and_days,
 )
+
+logger = logging.getLogger(__name__)
 
 # # # # # #  baseurl="http://localhost:8000"  # # # # # # # # # # # #
 
@@ -519,21 +523,33 @@ async def update_photo(request: HttpRequest, username: str):
 # URL: {{baseurl}}/accounts/admin/FetchPhoto/<username>/
 # Method: GET
 def _fetch_image_sync(username: str):
-    """Return (path, content_type) if image exists in media folder, else None. Raises Http404 if user missing."""
+    """Return (bytes, content_type) if image exists (local or S3), else None. Raises Http404 if user missing."""
     user = get_object_or_404(User, username=username)
     profile = _get_user_profile_object_sync(user)
     if not profile or not profile.Photo_link:
+        logger.debug("FetchImage: no profile or Photo_link for username=%s", username)
         return None
-    if not profile.Photo_link.storage.exists(profile.Photo_link.name):
+    # Use the field's storage (same backend used on save). Normalize key for S3 (no leading slash, forward slashes).
+    name = (profile.Photo_link.name or "").strip().lstrip("/").replace("\\", "/")
+    if not name:
+        logger.debug("FetchImage: empty name for username=%s", username)
         return None
-    path = profile.Photo_link.path
-    content_type = mimetypes.guess_type(path)[0] or "image/jpeg"
-    return (path, content_type)
+    storage = profile.Photo_link.storage
+    # Avoid relying on exists() - django-storages 1.14.4+ can return False for valid S3 keys due to path validation.
+    try:
+        with storage.open(name, "rb") as f:
+            data = f.read()
+    except Exception as e:
+        logger.warning("FetchImage: open failed for username=%s name=%r: %s", username, name, e)
+        return None
+    content_type = getattr(profile.Photo_link, "content_type", None) or mimetypes.guess_type(name)[0] or "image/jpeg"
+    return (data, content_type)
 
 
-def _open_image_response_sync(path: str, content_type: str):
-    """Open image file and return FileResponse so the image is in the response body."""
-    return FileResponse(open(path, "rb"), content_type=content_type)
+def _open_image_response_sync(payload, content_type: str):
+    """Return HttpResponse with image bytes and content_type."""
+    from django.http import HttpResponse
+    return HttpResponse(payload, content_type=content_type)
 
 
 @admin_required
@@ -545,8 +561,8 @@ async def FetchImage(request: HttpRequest, username: str):
         result = await sync_to_async(_fetch_image_sync)(username)
         if result is None:
             return JsonResponse({"image": None})
-        path, content_type = result
-        return await sync_to_async(_open_image_response_sync)(path, content_type)
+        payload, content_type = result
+        return await sync_to_async(_open_image_response_sync)(payload, content_type)
     except Http404:
         return JsonResponse({"message": "User not found"}, status=status.HTTP_404_NOT_FOUND)
 

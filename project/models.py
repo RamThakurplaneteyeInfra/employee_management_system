@@ -4,6 +4,7 @@ from task_management.models import TaskStatus
 
 # Create your models here.
 class Project(models.Model):
+    """Project: name, description, initiator, participants (M2M), status, deadline, and timestamps."""
     # Project status choices
     name = models.CharField(max_length=255,unique=True)
     description = models.TextField(null=True)
@@ -27,6 +28,7 @@ class Project(models.Model):
         return self.name
     
 class ProjectParticipant(models.Model):
+    """Through model: user participating in a project; joined_at timestamp."""
     project = models.ForeignKey(Project, on_delete=models.CASCADE)
     user = models.ForeignKey(User, on_delete=models.CASCADE)
     joined_at = models.DateTimeField(auto_now_add=True)

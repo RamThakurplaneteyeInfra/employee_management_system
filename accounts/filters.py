@@ -218,9 +218,14 @@ async def get_departments_and_functions(request: HttpRequest):
 
 # ==================== Pure helpers (no DB) ====================
 def get_photo_url(user_profile: Profile):
-    if user_profile.Photo_link:
-        return user_profile.Photo_link.url
-    return None
+    if not user_profile.Photo_link:
+        return None
+    from django.conf import settings
+    from django.core.files.storage import default_storage
+    if "s3" in (getattr(settings, "DEFAULT_FILE_STORAGE", "") or "").lower():
+        from ems.s3_utils import get_presigned_url
+        return get_presigned_url(user_profile.Photo_link.name)
+    return user_profile.Photo_link.url
 
 
 def completed_years_and_days(start_date: date) -> str:

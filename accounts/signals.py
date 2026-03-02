@@ -7,8 +7,17 @@ from .filters import _get_role_object_sync
 
 
 def _delete_profile_photo_sync(sender, instance: Profile, **kwargs):
-    if instance.Photo_link:
-        if os.path.isfile(instance.Photo_link.path):
+    if not instance.Photo_link:
+        return
+    from django.core.files.storage import default_storage
+    name = instance.Photo_link.name
+    if not name:
+        return
+    try:
+        if default_storage.exists(name):
+            default_storage.delete(name)
+    except Exception:
+        if hasattr(instance.Photo_link, "path") and os.path.isfile(instance.Photo_link.path):
             os.remove(instance.Photo_link.path)
 
 

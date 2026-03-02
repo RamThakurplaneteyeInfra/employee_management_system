@@ -3,6 +3,7 @@ from ems.verify_methods import *
 from accounts.filters import _get_users_Name_sync
 from .models import *
 from .utils import gmt_to_ist_date_str, gmt_to_ist_time_str
+from .s3_utils import get_file_url as s3_get_file_url
 
 # # # # # #  baseurl="http://localhost:8000"  # # # # # # # # # # # #
 
@@ -80,9 +81,30 @@ async def get_group_members(group_id: str):
     return await sync_to_async(_get_group_members_sync)(group_id)
 
 
+def _attachment_payload(a):
+    """Build attachment dict for API: link or file."""
+    if a.link_url:
+        return {"id": a.id, "type": "link", "url": a.link_url, "title": a.link_title or a.link_url}
+    return {"id": a.id, "type": "file", "file_name": a.file_name, "url": s3_get_file_url(a.s3_key)}
+
+
+def _message_content_for_response(content):
+    """
+    Return message text for the 'message' field. If content is a file placeholder
+    (e.g. client-sent '[FILE:...]'), return empty string so attachment data
+    is only exposed via the 'attachments' attribute.
+    """
+    if not content or not isinstance(content, str):
+        return ""
+    s = content.strip()
+    if s.startswith("[FILE:") and "]" in s:
+        return ""
+    return content
+
+
 # ==================== get_messages ====================
 def _get_messages_sync(request: HttpRequest, chat_id: str):
-    """Sync helper: DB operations for group or individual messages."""
+    """Unified timeline: message (with optional attachment), or attachment-only (standalone MessageAttachment in group/chat)."""
     try:
         is_group = True
         group_obj = get_object_or_404(GroupChats, group_id=chat_id)
@@ -90,39 +112,77 @@ def _get_messages_sync(request: HttpRequest, chat_id: str):
         is_group = False
         group_obj = None
 
+    def _sender_name(sender):
+        if sender is None:
+            return None
+        profile = getattr(sender, "accounts_profile", None)
+        return getattr(profile, "Name", None) if profile else _get_users_Name_sync(sender)
+
     if is_group and group_obj:
         participants = GroupMembers.objects.filter(groupchat=group_obj).select_related("participant")
         flag = any(request.user == i.participant for i in participants)
         if not flag:
             return JsonResponse({"message": "you are not authorised to accessed this conversation"}, status=status.HTTP_403_FORBIDDEN)
-        messages = GroupMessages.objects.filter(group=group_obj).select_related("sender__accounts_profile").order_by("-created_at")
-        # Mark as seen and reset unseen count when user fetches messages
+        messages = (
+            GroupMessages.objects.filter(group=group_obj)
+            .select_related("sender__accounts_profile")
+            .prefetch_related("attachments")
+            .order_by("-created_at")
+        )
+        standalone = list(
+            MessageAttachment.objects.filter(group=group_obj)
+            .select_related("uploaded_by__accounts_profile")
+            .order_by("-created_at")
+        )
         GroupMembers.objects.filter(groupchat=group_obj, participant=request.user).update(seen=True, unseenmessages=0)
     else:
         try:
             chat_obj = get_object_or_404(IndividualChats, chat_id=chat_id)
         except Http404 as e:
             return JsonResponse({"message": f"{e}"}, status=status.HTTP_403_FORBIDDEN)
-        messages = IndividualMessages.objects.filter(chat=chat_obj).select_related("sender__accounts_profile").order_by("-created_at")
-        # Mark messages from the other participant as seen when user fetches chat
+        messages = (
+            IndividualMessages.objects.filter(chat=chat_obj)
+            .select_related("sender__accounts_profile")
+            .prefetch_related("attachments")
+            .order_by("-created_at")
+        )
+        standalone = list(
+            MessageAttachment.objects.filter(chat=chat_obj)
+            .select_related("uploaded_by__accounts_profile")
+            .order_by("-created_at")
+        )
         other = chat_obj.get_other_participant(request.user)
         if other:
             IndividualMessages.objects.filter(chat=chat_obj, sender=other, seen=False).update(seen=True)
 
-    def _sender_name(sender):
-        profile = getattr(sender, "accounts_profile", None)
-        return getattr(profile, "Name", None) if profile else _get_users_Name_sync(sender)
-
-    data = [
-        {
+    items = []
+    for m in messages:
+        attachments = [_attachment_payload(a) for a in m.attachments.all()]
+        items.append({
+            "id": m.id,
             "sender": _sender_name(m.sender),
-            "message": m.content,
+            "message": _message_content_for_response(m.content),
             "date": gmt_to_ist_date_str(m.created_at),
             "time": gmt_to_ist_time_str(m.created_at),
-        }
-        for m in messages
-    ]
-    return JsonResponse(data, safe=False)
+            "attachments": attachments,
+            "_sort_at": m.created_at,
+        })
+    for a in standalone:
+        items.append({
+            "id": None,
+            "sender": _sender_name(a.uploaded_by),
+            "message": "",
+            "date": gmt_to_ist_date_str(a.created_at),
+            "time": gmt_to_ist_time_str(a.created_at),
+            "attachments": [_attachment_payload(a)],
+            "_sort_at": a.created_at,
+        })
+
+    items.sort(key=lambda x: x["_sort_at"], reverse=True)
+    for it in items:
+        del it["_sort_at"]
+
+    return JsonResponse(items, safe=False)
 
 
 async def get_messages(request: HttpRequest, chat_id: str):

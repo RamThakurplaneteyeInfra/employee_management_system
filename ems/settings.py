@@ -28,8 +28,8 @@ ALLOWED_HOSTS = [
     "*",
     "employee-management-system-tmrl.onrender.com",
     "https://employee-management-system-1-jwyn.onrender.com",
-    # "http://192.168.41.55:3000",
-    # "http://192.168.41.55:3000/",
+    "http://192.168.41.76:3000",
+    "http://192.168.41.76:3000/",
     "http://192.168.42.107:3000/",
     "http://192.168.42.107:3000",
 ]
@@ -59,6 +59,7 @@ SIMPLE_JWT = {
 INSTALLED_APPS = [
     "daphne",
     "django_extensions",
+    "storages",
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
@@ -226,6 +227,27 @@ MEDIA_URL = "/media/"
 MEDIA_ROOT = os.path.join(BASE_DIR, "media")
 
 # =============================================================================
+# AWS S3 storage
+# =============================================================================
+# Employee_Photo/ = profile photos (accounts). files/ = all other uploads (messaging, etc.).
+AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID", "")
+AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY", "")
+AWS_STORAGE_BUCKET_NAME = os.getenv("AWS_STORAGE_BUCKET_NAME", "")
+AWS_S3_REGION_NAME = os.getenv("AWS_S3_REGION_NAME", "ap-south-1")
+AWS_S3_EMPLOYEE_PHOTO_PREFIX = os.getenv("AWS_S3_EMPLOYEE_PHOTO_PREFIX", "Employee_Photo/")
+AWS_S3_FILES_PREFIX = os.getenv("AWS_S3_FILES_PREFIX", "files/")
+AWS_S3_PRESIGNED_EXPIRY = int(os.getenv("AWS_S3_PRESIGNED_EXPIRY", "3600"))
+
+# Default file storage: S3. Profile Photo_link uses upload_to="Employee_Photo/" so no extra AWS_LOCATION.
+if AWS_STORAGE_BUCKET_NAME and AWS_ACCESS_KEY_ID:
+    DEFAULT_FILE_STORAGE = "storages.backends.s3boto3.S3Boto3Storage"
+    AWS_S3_OBJECT_PARAMETERS = {"CacheControl": "max-age=86400"}
+    AWS_DEFAULT_ACL = None
+    AWS_LOCATION = ""  # Path comes from model upload_to (Employee_Photo/)
+else:
+    DEFAULT_FILE_STORAGE = "django.core.files.storage.FileSystemStorage"
+
+# =============================================================================
 # Misc
 # =============================================================================
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
@@ -242,6 +264,7 @@ CORS_ALLOWED_ORIGINS = [
     "https://employee-management-system-1-jwyn.onrender.com",
     "http://localhost:3000",
     "http://127.0.0.1:8000",
+    "http://192.168.41.76:3000",
     # "http://192.168.41.55:3000",
     "http://192.168.42.107:3000",
 ]
@@ -262,6 +285,7 @@ CSRF_TRUSTED_ORIGINS = [
     "https://employee-management-system-1-jwyn.onrender.com",
     "https://planeteye-employee-portal.onrender.com",
     # "http://192.168.41.55:3000",
+    "http://192.168.41.76:3000",
     # "http://localhost:3000/",
     # "http://localhost:8000/",
     # "http://127.0.0.1:8000/",

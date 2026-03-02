@@ -7,7 +7,8 @@ from accounts.models import User
 # ========================
 
 class Room(models.Model):
-    name= models.CharField(max_length=100, unique=True)
+    """Meeting room (name and active flag) for slot bookings."""
+    name = models.CharField(max_length=100, unique=True)
     is_active = models.BooleanField(default=True)
     
     class Meta:
@@ -18,6 +19,7 @@ class Room(models.Model):
     def __str__(self):
         return self.name
 class BookingStatus(models.Model):
+    """Status of a booking (e.g. confirmed, cancelled)."""
     status_name = models.CharField(max_length=20, unique=True)
     is_active = models.BooleanField(default=True)
     
@@ -28,6 +30,7 @@ class BookingStatus(models.Model):
     def __str__(self):
         return self.status_name
 class BookSlot(models.Model):
+    """Booked slot: meeting title, date, time range, room, creator, and members (M2M)."""
     MEETING_TYPE_CHOICES = [("individual", "Individual"),("group", "Group Meeting"),]
     
     meeting_title = models.CharField(max_length=255)
@@ -52,8 +55,9 @@ class BookSlot(models.Model):
     def __str__(self):
         return self.meeting_title
 class SlotMembers(models.Model):
-    slot=models.ForeignKey(BookSlot,on_delete=models.CASCADE,related_name="slotmembers")
-    member=models.ForeignKey(User,on_delete=models.CASCADE,related_name="inslots")
+    """Through model: user participating in a booked slot."""
+    slot = models.ForeignKey(BookSlot, on_delete=models.CASCADE, related_name="slotmembers")
+    member = models.ForeignKey(User, on_delete=models.CASCADE, related_name="inslots")
     
     class Meta:
         db_table='events"."SlotMember'
@@ -61,6 +65,7 @@ class SlotMembers(models.Model):
         unique_together = ("slot", "member")
         ordering=["slot"]
 class Tour(models.Model):
+    """Tour event: name, location, duration, dates, creator, and members (M2M)."""
     tour_name = models.CharField(max_length=255)
     location = models.CharField(max_length=255)
     duration_days = models.PositiveIntegerField()
@@ -79,8 +84,9 @@ class Tour(models.Model):
     def __str__(self):
         return self.tour_name
 class tourmembers(models.Model):
-    tour=models.ForeignKey(Tour,on_delete=models.CASCADE,related_name="tourmembers")
-    member=models.ForeignKey(User,on_delete=models.CASCADE,null=True,blank=True,related_name="intour")
+    """Through model: user participating in a tour."""
+    tour = models.ForeignKey(Tour, on_delete=models.CASCADE, related_name="tourmembers")
+    member = models.ForeignKey(User, on_delete=models.CASCADE, null=True, blank=True, related_name="intour")
     class Meta:
         db_table='events"."tourmembers'
         verbose_name="tourmember"
@@ -88,6 +94,7 @@ class tourmembers(models.Model):
         ordering=["tour"]
 
 class Holiday(models.Model):
+    """Company holiday: date, name, and fixed vs unfixed type."""
     FIXED = "fixed"
     UNFIXED = "unfixed"
 
@@ -113,7 +120,8 @@ class Holiday(models.Model):
 
     def __str__(self):
         return f"{self.name}-{self.date}"
-class Event(models.Model):              
+class Event(models.Model):
+    """Generic event: title, motive, date, and time."""
     title = models.CharField(max_length=255, default="Untitled Event")
     motive = models.TextField(null=True)
     date = models.DateField()

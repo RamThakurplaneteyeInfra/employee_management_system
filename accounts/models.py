@@ -3,6 +3,7 @@ from django.contrib.auth.models import User
 from django.core.validators import validate_email
 # A model for "Roles" table
 class Roles(models.Model):
+    """User role (e.g. Admin, MD); used for permissions and counts."""
     role_id=models.AutoField(primary_key=True,auto_created=True)
     role_name=models.CharField(max_length=20,unique=True,null=True)
     total_count=models.IntegerField(default=0,null=False,verbose_name="count")
@@ -13,6 +14,7 @@ class Roles(models.Model):
         
 # A model for "Branches" table
 class Branch(models.Model):
+    """Office/branch location."""
     branch_id=models.SmallAutoField(primary_key=True,auto_created=True,verbose_name="id",editable=False)
     branch_name=models.CharField(max_length=25,unique=True,null=True,verbose_name="branch")
     class Meta:
@@ -22,6 +24,7 @@ class Branch(models.Model):
         
 # # A model for "Designations" table
 class Designation(models.Model):
+    """Job designation/title; used in profiles and counts."""
     designation=models.CharField(max_length=50,unique=True,null=True)
     total_count=models.IntegerField(default=0,null=False,verbose_name="count")
     class Meta:
@@ -54,6 +57,7 @@ class ProfileFunction(models.Model):
 
 # A model for "Profiles" table
 class Profile(models.Model):
+    """Employee profile: name, role, branch, department, team lead, and optional functions (M2M)."""
 
     Employee_id= models.OneToOneField(User,verbose_name="employee_id", on_delete=models.CASCADE,primary_key=True,db_column="Employee_id",to_field="username",related_name="accounts_profile",db_index=True)
     Role= models.ForeignKey(Roles,verbose_name="role",on_delete=models.CASCADE,db_column="Role",related_name="Employee_roles",null=True)
@@ -62,7 +66,7 @@ class Profile(models.Model):
     Name=models.CharField(verbose_name="full_name",max_length=50,null=True,unique=True)
     Email_id=models.EmailField(verbose_name="email_id",max_length=254,unique=True,validators=[validate_email])
     Date_of_birth=models.DateField(verbose_name="date_of_birth",auto_now=False, auto_now_add=False,null=True)
-    Photo_link=models.ImageField(verbose_name="image_link", upload_to="profile_images/", height_field=None, width_field=None, max_length=None,null=True,blank=True)
+    Photo_link=models.ImageField(verbose_name="image_link", upload_to="Employee_Photo/", height_field=None, width_field=None, max_length=None,null=True,blank=True)
     Date_of_join=models.DateField(verbose_name="date_of_joining",auto_now=False, auto_now_add=False,null=True)
     Department=models.ForeignKey("Departments",verbose_name="department",db_column="department",on_delete=models.CASCADE,related_name="department",null=True)
     Teamlead=models.ForeignKey(User,on_delete=models.CASCADE,related_name="teamlead",null=True,verbose_name="teamlead",default=None,db_column="teamlead")
@@ -85,12 +89,13 @@ class Profile(models.Model):
     
 # A model for "Management_Profiles" table
 class management_Profile(models.Model):
+    """Management-specific profile subset (role, name, email, DOB, join date, photo)."""
     Employee=models.OneToOneField(User,on_delete=models.CASCADE,to_field="username",null=False,related_name="management")
     Role= models.ForeignKey(Roles,verbose_name="role",on_delete=models.CASCADE,db_column="Role",related_name="management_roles",null=True)
     Name=models.CharField(verbose_name="full_name",max_length=50,null=True)
     Email_id=models.EmailField(verbose_name="email_id",max_length=254,unique=True,validators=[validate_email])
     Date_of_birth=models.DateField(verbose_name="date_of_birth",auto_now=False, auto_now_add=False,null=True)
-    Photo_link=models.ImageField(verbose_name="image_link", upload_to="profile_images/", height_field=None, width_field=None, max_length=None,null=True,blank=True)
+    Photo_link=models.ImageField(verbose_name="image_link", upload_to="Employee_Photo/", height_field=None, width_field=None, max_length=None,null=True,blank=True)
     Date_of_join=models.DateField(verbose_name="date_of_joining",auto_now=False, auto_now_add=False,null=True)
 
     class Meta:
@@ -101,6 +106,7 @@ class management_Profile(models.Model):
         return f"{self.Role.role_name}-{self.Name}"
     
 class Departments(models.Model):
+    """Department name and member count."""
     dept_name=models.CharField(max_length=50,unique=True,null=False)
     count=models.SmallIntegerField(default=0)
     
@@ -116,6 +122,7 @@ class Departments(models.Model):
     ...
 
 class Functions(models.Model):
+    """Employee function (e.g. role type); can be many per profile via ProfileFunction."""
     function=models.CharField(max_length=10,unique=True,null=False,verbose_name="employee-function")
     class Meta:
         db_table= 'team_management"."Functions'

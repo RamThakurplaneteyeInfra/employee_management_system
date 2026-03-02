@@ -6,6 +6,7 @@ from task_management.filters import get_taskStatus_object
 from django.core.validators import MinValueValidator,MaxValueValidator
 
 class Quaters(models.Model):
+    """Quarter definition: label and start/end month range."""
     quater=models.CharField(max_length=20,null=False,primary_key=True)
     start_month=models.IntegerField(null=True)
     end_month=models.IntegerField(null=True)
@@ -21,6 +22,7 @@ class Quaters(models.Model):
         ordering=["quater"]
     
 class Monthly_department_head_and_subhead(models.Model):
+    """Monthly department meeting head/subhead and sub-heads D1–D3 per department."""
     department=models.ForeignKey(Departments,on_delete=models.CASCADE,null=False,related_name="dapartment",db_column="department")
     # quater=models.ForeignKey(Quaters,on_delete=models.CASCADE,null=True,related_name="meeting_head_quater")
     month_of_the_quater=models.SmallIntegerField(validators=[MinValueValidator(1), MaxValueValidator(3)])
@@ -46,11 +48,13 @@ class Monthly_department_head_and_subhead(models.Model):
         ...
 
 class GRPS(models.Model):
+    """Group code/label used in reports and sales stats."""
     grp=models.CharField(max_length=10)
     class Meta:
         db_table= 'quatery_reports"."GRP'
         ordering=["grp"]
 class UsersEntries(models.Model):
+    """User entry for a month/quarter: date, status, and note."""
     month_and_quater_id=models.ForeignKey(Monthly_department_head_and_subhead,on_delete=models.CASCADE,db_column="month_quater",null=False)
     user=models.ForeignKey(User,on_delete=models.CASCADE,to_field="username",db_column="Employee_id",null=False)
     date=models.DateField(auto_now=False,auto_now_add=False)
@@ -61,6 +65,7 @@ class UsersEntries(models.Model):
         db_table= 'team_management"."UserEntries'
 
 class FunctionsGoals(models.Model):
+    """Goal linked to a function (main goal text)."""
     Function=models.ForeignKey(Functions,on_delete=models.CASCADE,db_column="function_id",verbose_name="function_id")
     Maingoal=models.CharField(max_length=100,null=False)
     
@@ -69,6 +74,7 @@ class FunctionsGoals(models.Model):
         ordering=["Function"]
 
 class ActionableGoals(models.Model):
+    """Actionable sub-goal under a function goal: purpose and optional GRP."""
     FunctionGoal=models.ForeignKey(FunctionsGoals,on_delete=models.CASCADE,db_column="goal_id")
     purpose=models.CharField(max_length=255,null=False)
     grp=models.ForeignKey(GRPS,on_delete=models.CASCADE,null=True)
@@ -77,6 +83,7 @@ class ActionableGoals(models.Model):
         ordering=["FunctionGoal"]
 
 class FunctionsEntries(models.Model):
+    """Actionable entry: creator, co_author, share_with, approval and status workflow (final_Status, shared_Status)."""
     goal = models.ForeignKey(ActionableGoals, on_delete=models.CASCADE, db_column="sub_goal_id", null=True)
     Creator = models.ForeignKey(User, on_delete=models.CASCADE, to_field="username", db_column="Employee_id", null=False)
     co_author = models.ForeignKey(
@@ -124,6 +131,7 @@ class FunctionsEntries(models.Model):
         ordering = ["-date", "-time"]
 
 class PlannedActions(models.Model):
+    """Placeholder / planned actions (fields commented out)."""
     # grp=models.ForeignKey(GRPS,on_delete=models.CASCADE,db_column="grp",null=False,verbose_name="grp")
     # action=models.TextField(null=False)
     # deadline=models.DateField(auto_now_add=False,auto_now=False)
@@ -135,24 +143,25 @@ class PlannedActions(models.Model):
     #     ordering=["grp","-deadline"]
     ...
 class SalesStatistics(models.Model):
-        grp=models.ForeignKey(GRPS,on_delete=models.CASCADE,db_column="grp",null=False,verbose_name="grp")
-        Sale=models.IntegerField(null=True)
-        Calls=models.IntegerField(null=True)
-        Trial=models.IntegerField(null=True)
-        Demand=models.IntegerField(null=True)
-        Old_tgt=models.IntegerField(null=True)
-        New_acq=models.IntegerField(null=True)
-        Pitch=models.IntegerField(null=True)
-        CP_ratio=models.CharField(null=True)
-        Lead=models.IntegerField(null=True)
-        Qual=models.IntegerField(null=True)
-        Demo=models.IntegerField(null=True)
-        Quote=models.IntegerField(null=True)
-        Close=models.IntegerField(null=True)
-        Conversion_percent=models.DecimalField(decimal_places=2,null=False,max_digits=6)
-        status=models.ForeignKey(TaskStatus,on_delete=models.CASCADE,db_column="status",null=False,verbose_name="status",)
-        
-        class Meta:
-            db_table= 'quatery_reports"."SalesStatistics'
-            ordering=["grp"]
+    """Sales stats per GRP: sale, calls, trial, demand, conversion, etc."""
+    grp=models.ForeignKey(GRPS,on_delete=models.CASCADE,db_column="grp",null=False,verbose_name="grp")
+    Sale=models.IntegerField(null=True)
+    Calls=models.IntegerField(null=True)
+    Trial=models.IntegerField(null=True)
+    Demand=models.IntegerField(null=True)
+    Old_tgt=models.IntegerField(null=True)
+    New_acq=models.IntegerField(null=True)
+    Pitch=models.IntegerField(null=True)
+    CP_ratio=models.CharField(null=True)
+    Lead=models.IntegerField(null=True)
+    Qual=models.IntegerField(null=True)
+    Demo=models.IntegerField(null=True)
+    Quote=models.IntegerField(null=True)
+    Close=models.IntegerField(null=True)
+    Conversion_percent=models.DecimalField(decimal_places=2,null=False,max_digits=6)
+    status=models.ForeignKey(TaskStatus,on_delete=models.CASCADE,db_column="status",null=False,verbose_name="status",)
+
+    class Meta:
+        db_table= 'quatery_reports"."SalesStatistics'
+        ordering=["grp"]
 # Create your models here.

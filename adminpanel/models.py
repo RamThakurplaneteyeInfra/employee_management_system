@@ -4,6 +4,7 @@ from task_management.models import TaskStatus
 
 # 1️⃣ AssetType table (Hardware, Software)
 class AssetType(models.Model):
+    """Asset category (e.g. Hardware, Software)."""
     name = models.CharField(max_length=100,unique=True)
     created_at = models.DateTimeField(auto_now_add=True)
     
@@ -16,6 +17,7 @@ class AssetType(models.Model):
 
 # 2️⃣ Asset table
 class Asset(models.Model):
+    """Asset record: type, name, author, code, and status (FK to TaskStatus)."""
     status = models.ForeignKey(TaskStatus,db_column="current_status",null=True,on_delete=models.CASCADE,serialize=True)
     asset_type = models.ForeignKey(AssetType, on_delete=models.CASCADE)
     asset_name = models.CharField(max_length=200)
@@ -35,6 +37,7 @@ class Asset(models.Model):
 #  Bill Category (Dropdown)
 # This class represents a bill category in a Python Django model.
 class BillCategory(models.Model):
+    """Bill category for grouping bills."""
     name = models.CharField(max_length=100, unique=True)
     created_at = models.DateTimeField(auto_now_add=True)
     
@@ -48,6 +51,7 @@ class BillCategory(models.Model):
 
 # Bills
 class Bill(models.Model):
+    """Bill: category, amount, date, recipient, and status."""
     status = models.ForeignKey(TaskStatus,db_column="current_status",null=True,on_delete=models.CASCADE,serialize=True)
     category = models.ForeignKey(BillCategory, on_delete=models.CASCADE)
     amount = models.DecimalField(max_digits=10, decimal_places=2)
@@ -66,6 +70,7 @@ class Bill(models.Model):
     
 # ExpenseTracker
 class ExpenseTracker(models.Model):
+    """Expense record: title, amount, note, paid date, and status."""
     title = models.CharField(max_length=200)
     amount = models.DecimalField(max_digits=10, decimal_places=2)
     note = models.TextField(blank=True)
@@ -84,6 +89,7 @@ class ExpenseTracker(models.Model):
     
 # Vendor
 class Vendor(models.Model):
+    """Vendor: business name, GST, address, email, and phone numbers."""
     business_name = models.CharField(max_length=200)
     gst_number = models.CharField(max_length=50, unique=True)
     office_address = models.TextField()

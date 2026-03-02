@@ -2,6 +2,7 @@ from accounts.models import User,Profile
 from django.db import models
 from datetime import datetime
 class TaskTypes(models.Model):
+    """Task type (e.g. SOS, 1 Day, 10 Day, Monthly, Quaterly)."""
     type_id=models.AutoField(primary_key=True,editable=False)
     type_name=models.CharField(unique=True,null=False,max_length=50)
     class Meta:
@@ -10,6 +11,7 @@ class TaskTypes(models.Model):
         verbose_name_plural = "task_types"
 
 class TaskStatus(models.Model):
+    """Task status (e.g. PENDING, COMPLETED, INPROCESS)."""
     status_id=models.AutoField(primary_key=True,editable=False,auto_created=False,serialize=True)
     status_name=models.CharField(("task_status"), max_length=50,unique=True,default=None,null=False,editable=True)
     class Meta:
@@ -18,6 +20,7 @@ class TaskStatus(models.Model):
         verbose_name_plural = "task_statuses"
 
 class Task(models.Model):
+    """Task: title, description, creator, assignees (M2M), due date, type, and status."""
     task_id=models.BigAutoField(primary_key=True,verbose_name="task_id",auto_created=True,db_index=True)
     title = models.CharField(max_length=200,null=False)
     description = models.TextField(max_length=500,verbose_name="task_description",default=None,null=True)
@@ -48,6 +51,7 @@ class Task(models.Model):
         return f"task-{self.title}"
     
 class TaskAssignies(models.Model):
+    """Through model: links a task to an assigned user."""
     task=models.ForeignKey(Task,db_column="task_id",null=False,on_delete=models.CASCADE,related_name="tasks")
     assigned_to=models.ForeignKey(User,db_column="assigned_to",null=False,on_delete=models.CASCADE,to_field="username",related_name="Tasks_assigned",db_index=True)
     class Meta:
@@ -64,6 +68,7 @@ class TaskAssignies(models.Model):
         # return "None"
     
 class TaskCreateAndEditLogs(models.Model):
+    """Log of when a task was created and last edited."""
     task=models.OneToOneField(Task, verbose_name=("task_id"), on_delete=models.CASCADE,db_column="task_id",primary_key=True,related_name="task_edit_logs")
     created_at=models.DateTimeField(auto_now_add=True,db_index=True)
     last_edit=models.DateTimeField(auto_now=True)
@@ -74,6 +79,7 @@ class TaskCreateAndEditLogs(models.Model):
     ...
     
 class TaskStatusChangeLogs(models.Model):
+    """Log of task status changes (what status was set and when)."""
     task=models.OneToOneField(Task, verbose_name=("task_id"), on_delete=models.CASCADE,db_column="task_id",primary_key=True,related_name="status_change_logs")
     created_at=models.DateTimeField(auto_now_add=True,db_index=True)
     last_edit=models.DateTimeField(auto_now=True)
@@ -85,6 +91,7 @@ class TaskStatusChangeLogs(models.Model):
     ...
     
 class AssingnedTasksCount(models.Model):
+    """Cached counts of assigned tasks per user, by task type (SOS, 1 Day, etc.)."""
     assignee=models.OneToOneField(User,primary_key=True,db_column="employee_id",to_field="username",on_delete=models.CASCADE)
     count_SOS=models.IntegerField(db_column="total_SOS",default=0,)
     count_1_Day=models.IntegerField(db_column="total_1_Day",default=0)
@@ -97,6 +104,7 @@ class AssingnedTasksCount(models.Model):
         ordering=["-count_SOS","-count_1_Day"]
         
 class CreatedTasksCount(models.Model):
+    """Cached counts of created tasks per user, by task type."""
     creator=models.OneToOneField(User,primary_key=True,db_column="employee_id",to_field="username",on_delete=models.CASCADE)
     count_SOS=models.IntegerField(db_column="total_SOS",default=0,)
     count_1_Day=models.IntegerField(db_column="total_1_Day",default=0)
@@ -109,6 +117,7 @@ class CreatedTasksCount(models.Model):
         ordering=["-count_SOS","-count_1_Day"]
         
 class TaskMessage(models.Model):
+    """Comment/message on a task; sender, text, and seen flag."""
     task = models.ForeignKey(
         Task, on_delete=models.CASCADE, related_name="messages"
     )
