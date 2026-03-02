@@ -247,6 +247,19 @@ if AWS_STORAGE_BUCKET_NAME and AWS_ACCESS_KEY_ID:
 else:
     DEFAULT_FILE_STORAGE = "django.core.files.storage.FileSystemStorage"
 
+# S3 bucket CORS: use this when configuring the bucket (AWS Console or boto3 put_bucket_cors).
+# ExposeHeaders allow the client to read Content-Disposition for download filenames.
+AWS_S3_CORS_RULES = [
+    {
+        "AllowedHeaders": ["*"],
+        "AllowedMethods": ["GET"],
+        "AllowedOrigins": [
+            os.getenv("AWS_S3_CORS_ORIGIN", "https://planeteye-employee-portal.onrender.com"),
+        ],
+        "ExposeHeaders": ["Content-Disposition", "Content-Type"],
+    }
+]
+
 # =============================================================================
 # Misc
 # =============================================================================

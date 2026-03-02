@@ -126,8 +126,21 @@ class TourViewSet(ModelViewSet):
 class HolidayViewSet(ModelViewSet):
     queryset = Holiday.objects.all().order_by("date")
     serializer_class = HolidaySerializer
-    # authentication_classes = [CsrfExemptSessionAuthentication]
-    permission_classes=[AllowAny]
+    authentication_classes = [CsrfExemptSessionAuthentication]
+    
+    def get_permissions(self):
+        """
+        Assigns permissions based on the HTTP action.
+        """
+        if self.action in ['list', 'retrieve']:
+            # Open to everyone
+            return [IsAuthenticated()]
+        
+        elif self.action in ['create', 'update', 'partial_update', 'destroy']:
+            # Restrict to Admin, MD, or HR
+            return [IsAuthenticated(), IsAdminOrMDOrHR()]
+        else:
+            return [AllowAny()]
 
 # ==================== EventViewSet ====================
 # URL: {{baseurl}}/eventsapi/events/  | CRUD
@@ -135,6 +148,20 @@ class EventViewSet(ModelViewSet):
     queryset = Event.objects.all()
     serializer_class = EventSerializer
     authentication_classes = [CsrfExemptSessionAuthentication]
+    
+    def get_permissions(self):
+        """
+        Assigns permissions based on the HTTP action.
+        """
+        if self.action in ['list', 'retrieve']:
+            # Open to everyone
+            return [IsAuthenticated()]
+        
+        elif self.action in ['create', 'update', 'partial_update', 'destroy']:
+            # Restrict to Admin, MD, or HR
+            return [IsAuthenticated(), IsAdminOrMDOrHR()]
+        else:
+            return [AllowAny()]
 
 
 # ==================== MeetingViewSet ====================
