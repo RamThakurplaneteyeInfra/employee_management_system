@@ -10,15 +10,15 @@ from .models import Meeting, BookSlot, SlotMembers
 from notifications.models import Notification, notification_type
 
 
-def _cleanup_old_meetings_sync(sender, instance: Meeting, **kwargs):
-    to_delete = Meeting.objects.all().exclude(created_at__date=date.today())
-    if to_delete.exists():
-        to_delete.delete()
+# def _cleanup_old_meetings_sync(sender, instance: Meeting, **kwargs):
+#     to_delete = Meeting.objects.all().exclude(created_at__date=date.today())
+#     if to_delete.exists():
+#         to_delete.delete()
 
 
-@receiver(pre_save, sender=Meeting)
-def cleanup_old_meetings(sender, instance: Meeting, **kwargs):
-    _cleanup_old_meetings_sync(sender, instance, **kwargs)
+# @receiver(pre_save, sender=Meeting)
+# def cleanup_old_meetings(sender, instance: Meeting, **kwargs):
+#     _cleanup_old_meetings_sync(sender, instance, **kwargs)
 
 
 def _notify_slot_booked_sync(sender, created, instance: SlotMembers, **kwargs):

@@ -1,3 +1,7 @@
+from django.utils import timezone
+from django.utils.crypto import constant_time_compare
+from django.conf import settings
+
 from ems.RequiredImports import *
 from accounts.models import Profile
 from ems.auth_utils import CsrfExemptSessionAuthentication
@@ -165,7 +169,8 @@ class EventViewSet(ModelViewSet):
 
 
 # ==================== MeetingViewSet ====================
-# URL: {{baseurl}}/eventsapi/meetings/  | CRUD
+# URL: {{baseurl}}/eventsapi/meetingpush/  | CRUD
+# Cron: {{baseurl}}/eventsapi/meetingpush/cron/delete-previous-days/  | GET (permissionless)
 class MeetingViewSet(ModelViewSet):
     # Prefetch users with profile so serializer does not N+1 on get_user_details.
     User = get_user_model()
@@ -176,20 +181,33 @@ class MeetingViewSet(ModelViewSet):
     )
     serializer_class = MeetingSerializer
     authentication_classes = [CsrfExemptSessionAuthentication]
-    
+
     def get_permissions(self):
         """
         Assigns permissions based on the HTTP action.
         """
-        if self.action in ['list', 'retrieve']:
-            # Open to everyone
-            return [IsAuthenticated()]
-        
-        elif self.action in ['create', 'update', 'partial_update', 'destroy']:
-            # Restrict to Admin, MD, or HR
-            return [IsAuthenticated(), IsAdminOrMDOrHR()]
-        else:
+        if self.action in ["cron_delete_previous_days"]:
             return [AllowAny()]
+        if self.action in ["list", "retrieve"]:
+            return [IsAuthenticated()]
+        if self.action in ["create", "update", "partial_update", "destroy"]:
+            return [IsAuthenticated(), IsAdminOrMDOrHR()]
+        return [AllowAny()]
+
+    @action(detail=False, methods=["get"], url_path="cron/delete-previous-days")
+    def cron_delete_previous_days(self, request):
+        """
+        Delete meetings created on previous days (created_at date before today).
+        Intended for cron; requires X-CRON-KEY header.
+        """
+        key = (request.META.get("X_CRON_KEY") or "").strip()
+        expected = getattr(settings, "X_CRON_KEY", "")
+        if not expected or not constant_time_compare(key, expected):
+            return Response({"error": "Forbidden"}, status=status.HTTP_403_FORBIDDEN)
+        today = timezone.now().date()
+        qs = Meeting.objects.filter(created_at__date__lt=today)
+        count, _ = qs.delete()
+        return Response({"deleted": count})
         
 # ==================== birthdaycounter ====================
 # Increment or fetch birthday counter for a user.

@@ -101,8 +101,7 @@ class IndividualChats(models.Model):
             chat_id=generate_chat_id()
             already_created=False
             obj=cls.objects.create(chat_id=chat_id,participant1=user1,participant2=user2)
-        finally:
-            return obj,already_created
+        return obj,already_created
         
 class GroupMessages(models.Model):
     """Single message in a group chat: sender, content, optional tag; attachments reference this via MessageAttachment.group_message."""
@@ -129,7 +128,6 @@ class GroupMessages(models.Model):
 
     def can_edit_message(self, user):
         return user == self.sender
-
 
 class IndividualMessages(models.Model):
     """Single message in a one-to-one chat; attachments reference this via MessageAttachment.individual_message."""

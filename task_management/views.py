@@ -222,7 +222,7 @@ async def get_task_messages(request: HttpRequest, task_id: int):
             task = get_object_or_404(Task, task_id=task_id)
             assignees = TaskAssignies.objects.filter(task=task_id)
             for i in assignees:
-                if not (user != task.created_by and user != i.assigned_to):
+                if not (user != task.created_by or user != i.assigned_to):
                     raise PermissionDenied("Not allowed")
             messages = TaskMessage.objects.filter(task=task).select_related("sender__accounts_profile", "task").order_by("-created_at")
             messages.update(seen=True)
@@ -236,7 +236,7 @@ async def get_task_messages(request: HttpRequest, task_id: int):
                     "message": m.message,
                     "date": gmt_to_ist_date_str(m.created_at),
                     "time": gmt_to_ist_time_str(m.created_at),
-                    "seen": m.seen,
+                    # "seen": m.seen,
                 }
                 for m in messages
             ]

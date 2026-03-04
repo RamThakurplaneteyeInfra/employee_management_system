@@ -1,3 +1,9 @@
+from datetime import timedelta
+
+from django.utils import timezone
+from django.utils.crypto import constant_time_compare
+from django.conf import settings
+
 from ems.RequiredImports import (
     api_view,
     permission_classes,
@@ -20,7 +26,7 @@ from .Serializers import NotificationSerializer
 @permission_classes([IsAuthenticated])
 def get_notifications(request):
     # print("get notifications not from cache")
-    qs = Notification.objects.filter(receipient=request.user, created_at__date=date.today(),is_read=False).select_related("type_of_notification", "from_user__accounts_profile", "receipient__accounts_profile").order_by("-created_at")
+    qs = Notification.objects.filter(receipient=request.user).select_related("type_of_notification", "from_user__accounts_profile", "receipient__accounts_profile").order_by("-created_at")
     data = NotificationSerializer(qs, many=True).data
     return Response(data)
 
@@ -75,3 +81,44 @@ def get_notification_types(request):
         return Response(types)
     except Exception as e:
         return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# ==================== cron: delete old seen notifications ====================
+# Delete all seen (is_read=True) notifications created more than 1 day ago.
+# Intended for cron; permissionless (AllowAny).
+# URL: {{baseurl}}/notifications/cron/delete-seen-older-than-day/
+# Method: GET
+def _cron_key_valid(request):
+    """Return True if request has valid X-CRON-KEY header."""
+    key = (request.META.get("HTTP_X_CRON_KEY") or "").strip()
+    expected = getattr(settings, "X_CRON_KEY", "") or ""
+    return bool(expected) and constant_time_compare(key, expected)
+
+
+@api_view(["GET"])
+@permission_classes([AllowAny])
+def cron_delete_seen_older_than_day(request):
+    """Delete seen notifications older than 1 day. Returns count deleted. Requires X-CRON-KEY header."""
+    if not _cron_key_valid(request):
+        return Response({"error": "Forbidden"}, status=status.HTTP_403_FORBIDDEN)
+    cutoff = timezone.now() - timedelta(days=1)
+    qs = Notification.objects.filter(is_read=True, created_at__lt=cutoff)
+    count, _ = qs.delete()
+    return Response({"deleted": count})
+
+
+# ==================== cron: delete old unseen notifications ====================
+# Delete all unseen (is_read=False) notifications created more than 1 week ago.
+# Intended for cron; permissionless (AllowAny).
+# URL: {{baseurl}}/notifications/cron/delete-unseen-older-than-week/
+# Method: GET
+@api_view(["GET"])
+@permission_classes([AllowAny])
+def cron_delete_unseen_older_than_week(request):
+    """Delete unseen notifications older than 7 days. Returns count deleted. Requires X-CRON-KEY header."""
+    if not _cron_key_valid(request):
+        return Response({"error": "Forbidden"}, status=status.HTTP_403_FORBIDDEN)
+    cutoff = timezone.now() - timedelta(days=7)
+    qs = Notification.objects.filter(is_read=False, created_at__lt=cutoff)
+    count, _ = qs.delete()
+    return Response({"deleted": count})
