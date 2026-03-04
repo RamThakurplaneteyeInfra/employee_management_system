@@ -130,4 +130,148 @@ class Functions(models.Model):
     ...
 
 
+# =============================================================================
+# Leave management (tables in team_management schema)
+# =============================================================================
+
+class LeaveTypes(models.Model):
+    """Leave type: full_day or half_day; referenced by leave applications."""
+    id = models.AutoField(primary_key=True, auto_created=True)
+    name = models.CharField(max_length=20, unique=True, null=False)
+
+    class Meta:
+        db_table = 'team_management"."leave_types'
+        verbose_name = "leave type"
+        verbose_name_plural = "leave types"
+
+    def __str__(self):
+        return self.name
+
+
+class LeaveSummary(models.Model):
+    """Per-user leave summary: total, used, and computed remaining leaves (total - used)."""
+    user = models.OneToOneField(
+        User,
+        on_delete=models.CASCADE,
+        related_name="leave_summary",
+        primary_key=True,
+        db_column="user_id",
+        to_field="username",
+    )
+    total_leaves = models.PositiveIntegerField(default=0)
+    used_leaves = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        db_table = 'team_management"."leave_summary'
+        verbose_name = "leave summary"
+        verbose_name_plural = "leave summaries"
+
+    @property
+    def remaining_leaves(self):
+        """Calculated as (total_leaves - used_leaves)."""
+        return max(0, self.total_leaves - self.used_leaves)
+
+    def __str__(self):
+        return f"{self.user.username} (remaining: {self.remaining_leaves})"
+
+
+class LeaveStatus(models.Model):
+    """Status of a leave application: Approved, Pending, or Rejected."""
+    id = models.AutoField(primary_key=True, auto_created=True)
+    name = models.CharField(max_length=20, unique=True, null=False)
+
+    class Meta:
+        db_table = 'team_management"."leave_status'
+        verbose_name = "leave status"
+        verbose_name_plural = "leave statuses"
+
+    def __str__(self):
+        return self.name
+
+
+def _get_pending_leave_status_id():
+    """Return the pk of the 'Pending' LeaveStatus (used as default for MD_approval)."""
+    return LeaveStatus.objects.get(name="Pending").pk
+
+
+class LeaveApplicationData(models.Model):
+    """Single leave application with dates, type, reason, and approval chain (team lead, HR, MD, admin)."""
+    class HalfDaySlot(models.TextChoices):
+        FIRST_HALF = "First_Half", "First_Half"
+        SECOND_HALF = "Second_Half", "Second_Half"
+
+    applicant = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="leave_applications",
+        db_column="applicant_id",
+    )
+    team_lead = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="leave_applications_as_teamlead",
+        db_column="team_lead_id",
+    )
+    start_date = models.DateField()
+    duration_of_days = models.SmallIntegerField()
+    live_subject = models.CharField(max_length=255)
+    reason = models.TextField()
+    leave_type = models.ForeignKey(
+        LeaveTypes,
+        on_delete=models.PROTECT,
+        related_name="leave_applications",
+        db_column="leave_type_id",
+    )
+    half_day_slots = models.CharField(
+        max_length=20,
+        choices=HalfDaySlot.choices,
+        null=True,
+        blank=True,
+    )
+    team_lead_approval = models.ForeignKey(
+        LeaveStatus,
+        on_delete=models.PROTECT,
+        related_name="+",
+        null=True,
+        blank=True,
+        db_column="team_lead_approval_id",
+    )
+    HR_approval = models.ForeignKey(
+        LeaveStatus,
+        on_delete=models.PROTECT,
+        related_name="+",
+        null=True,
+        blank=True,
+        db_column="hr_approval_id",
+    )
+    MD_approval = models.ForeignKey(
+        LeaveStatus,
+        on_delete=models.PROTECT,
+        related_name="+",
+        default=_get_pending_leave_status_id,
+        db_column="md_approval_id",
+    )
+    admin_approval = models.ForeignKey(
+        LeaveStatus,
+        on_delete=models.PROTECT,
+        related_name="+",
+        null=True,
+        blank=True,
+        db_column="admin_approval_id",
+    )
+    is_emergency = models.BooleanField(default=False)
+    application_date = models.DateField(auto_now_add=True)
+    approved_by_MD_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = 'team_management"."leave_application_data'
+        verbose_name = "leave application"
+        verbose_name_plural = "leave applications"
+
+    def __str__(self):
+        return f"{self.applicant.username} from {self.start_date} ({self.leave_type.name})"
+
+
 

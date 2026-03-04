@@ -89,8 +89,8 @@ def get_notification_types(request):
 # URL: {{baseurl}}/notifications/cron/delete-seen-older-than-day/
 # Method: GET
 def _cron_key_valid(request):
-    """Return True if request has valid X-CRON-KEY header."""
-    key = (request.META.get("X_CRON_KEY") or "").strip()
+    """Return True if request has valid X-CRON-KEY header (env: X_CRON_KEY)."""
+    key = (request.META.get("HTTP_X_CRON_KEY") or "").strip()
     expected = getattr(settings, "X_CRON_KEY", "") or ""
     return bool(expected) and constant_time_compare(key, expected)
 

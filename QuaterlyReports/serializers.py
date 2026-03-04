@@ -1,5 +1,5 @@
 from ems.RequiredImports import serializers
-from .models import Functions, FunctionsGoals, ActionableGoals, FunctionsEntries
+from .models import Functions, FunctionsGoals, ActionableGoals, FunctionsEntries, FunctionsEntriesShare
 from task_management.models import TaskStatus
 
 
@@ -15,6 +15,29 @@ def _get_inprogress_status():
         return TaskStatus.objects.get(status_name="INPROCESS")
     except TaskStatus.DoesNotExist:
         return None
+
+
+def _get_completed_status():
+    try:
+        return TaskStatus.objects.get(status_name="COMPLETED")
+    except TaskStatus.DoesNotExist:
+        return None
+
+
+class FunctionsEntriesShareSerializer(serializers.ModelSerializer):
+    """One share in the chain: shared_with username, note, shared_time, individual_status."""
+    shared_with_username = serializers.CharField(source="shared_with.username", read_only=True)
+    individual_status_name = serializers.CharField(
+        source="individual_status.status_name", read_only=True, allow_null=True
+    )
+
+    class Meta:
+        model = FunctionsEntriesShare
+        fields = [
+            "id", "actionable_entry", "shared_with", "shared_with_username",
+            "note", "shared_time", "individual_status", "individual_status_name",
+        ]
+        read_only_fields = ["shared_time", "actionable_entry"]
 
 
 class ActionableGoalSerializer(serializers.ModelSerializer):
@@ -45,35 +68,42 @@ class FunctionsEntriesSerializer(serializers.ModelSerializer):
         required=False,
         allow_null=True,
     )
-    shared_Status = serializers.SlugRelatedField(
-        slug_field="status_name",
-        queryset=TaskStatus.objects.all(),
-        required=False,
-        allow_null=True,
-    )
+    share_chain = FunctionsEntriesShareSerializer(many=True, read_only=True)
+    share_with = serializers.CharField(write_only=True, required=False, allow_blank=True)
 
     class Meta:
         model = FunctionsEntries
         fields = [
             "id", "goal", "Creator", "co_author", "share_with", "approved_by_coauthor",
-            "date", "time", "final_Status", "shared_Status", "note",
+            "date", "time", "final_Status", "note", "share_chain",
         ]
         read_only_fields = ["time", "Creator"]
 
     def create(self, validated_data):
-        final_Status=validated_data.get("final_Status")
-        shared_status=validated_data.get("shared_status")
-        if not final_Status:
+        first_share_username = validated_data.pop("share_with", "").strip() or None
+        if not validated_data.get("final_Status"):
             validated_data["final_Status"] = _get_pending_status()
-        if not self.shared_Status:
-            validated_data["shared_Status"] = _get_pending_status()
-        
-        return super().create(validated_data)
+        instance = super().create(validated_data)
+        if first_share_username:
+            try:
+                from django.contrib.auth import get_user_model
+                User = get_user_model()
+                user = User.objects.get(username=first_share_username)
+                FunctionsEntriesShare.objects.create(
+                    actionable_entry=instance,
+                    shared_with=user,
+                    note="",
+                    individual_status=_get_pending_status(),
+                )
+            except Exception:
+                pass
+        return instance
 
     def update(self, instance, validated_data):
         request = self.context.get("request")
         username = getattr(request.user, "username", None) if request and request.user else None
-        # Only co_author can change approved_by_coauthor
+        validated_data.pop("share_with", None)
+        # Only co_author can set approved_by_coauthor; when True, set final_Status to Inprogress
         if "approved_by_coauthor" in validated_data:
             if str(instance.co_author_id or "") != str(username or ""):
                 validated_data.pop("approved_by_coauthor", None)
@@ -81,32 +111,8 @@ class FunctionsEntriesSerializer(serializers.ModelSerializer):
                 inprogress = _get_inprogress_status()
                 if inprogress:
                     validated_data["final_Status"] = inprogress
-        # Only share_with can change shared_Status
-        if "shared_Status" in validated_data and str(instance.share_with_id or "") != str(username or ""):
-            validated_data.pop("shared_Status", None)
-        # Only creator can change final_Status; creator may set final_Status to Completed only after shared_Status is Completed
+        # Only creator can change final_Status; creator can set Completed only when they choose (final status)
         if "final_Status" in validated_data:
-            creator_id = instance.Creator_id
-            if str(creator_id) != str(username or ""):
+            if str(instance.Creator_id or "") != str(username or ""):
                 validated_data.pop("final_Status", None)
-            else:
-                new_status = validated_data.get("final_Status")
-                if new_status and getattr(new_status, "status_name", None) == "COMPLETED":
-                    shared = instance.shared_Status
-                    if not shared or getattr(shared, "status_name", None) != "COMPLETED":
-                        validated_data.pop("final_Status", None)
         return super().update(instance, validated_data)
-        # notes = validated_data.pop('note')
-        # # creator = validated_data.get('Creator')
-        
-        # # If 'note' is a list, create multiple entries
-        # if isinstance(notes, list):
-        #     entries = [
-        #         FunctionsEntries(**validated_data, note=n) 
-        #         for n in notes
-        #     ]
-        #     # bulk_create is highly optimized for performance
-        #     return FunctionsEntries.objects.bulk_create(entries)
-        
-        # # If 'note' is a single string, create normally
-        # return FunctionsEntries.objects.create(note=notes, **validated_data)

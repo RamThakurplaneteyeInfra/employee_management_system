@@ -200,7 +200,7 @@ class MeetingViewSet(ModelViewSet):
         Delete meetings created on previous days (created_at date before today).
         Intended for cron; requires X-CRON-KEY header.
         """
-        key = (request.META.get("X_CRON_KEY") or "").strip()
+        key = (request.META.get("HTTP_X_CRON_KEY") or "").strip()
         expected = getattr(settings, "X_CRON_KEY", "")
         if not expected or not constant_time_compare(key, expected):
             return Response({"error": "Forbidden"}, status=status.HTTP_403_FORBIDDEN)

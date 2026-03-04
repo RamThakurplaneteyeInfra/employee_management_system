@@ -83,7 +83,7 @@ class ActionableGoals(models.Model):
         ordering=["FunctionGoal"]
 
 class FunctionsEntries(models.Model):
-    """Actionable entry: creator, co_author, share_with, approval and status workflow (final_Status, shared_Status)."""
+    """Actionable entry: creator, co_author, approval and final status. Share chain in FunctionsEntriesShare."""
     goal = models.ForeignKey(ActionableGoals, on_delete=models.CASCADE, db_column="sub_goal_id", null=True)
     Creator = models.ForeignKey(User, on_delete=models.CASCADE, to_field="username", db_column="Employee_id", null=False)
     co_author = models.ForeignKey(
@@ -94,15 +94,6 @@ class FunctionsEntries(models.Model):
         null=True,
         blank=True,
         related_name="co_authored_entries",
-    )
-    share_with = models.ForeignKey(
-        User,
-        on_delete=models.CASCADE,
-        to_field="username",
-        db_column="share_with",
-        null=True,
-        blank=True,
-        related_name="shared_entries",
     )
     approved_by_coauthor = models.BooleanField(default=False, db_column="approved_by_coauthor")
     date = models.DateField(auto_now=False, auto_now_add=False)
@@ -116,19 +107,43 @@ class FunctionsEntries(models.Model):
         related_name="functions_entries_final",
         db_column="status",
     )
-    shared_Status = models.ForeignKey(
-        TaskStatus,
-        on_delete=models.CASCADE,
-        null=True,
-        blank=True,
-        related_name="functions_entries_shared",
-        db_column="final_status",
-    )
     note = models.TextField()
 
     class Meta:
         db_table = 'quatery_reports"."FunctionsEntries'
         ordering = ["-date", "-time"]
+
+
+class FunctionsEntriesShare(models.Model):
+    """One link in the share chain: shared_with user, their note, shared_time, and individual_status."""
+    actionable_entry = models.ForeignKey(
+        FunctionsEntries,
+        on_delete=models.CASCADE,
+        related_name="share_chain",
+        db_column="actionable_entry_id",
+    )
+    shared_with = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        to_field="username",
+        db_column="shared_with",
+        related_name="shared_entries_chain",
+    )
+    note = models.TextField(blank=True)
+    shared_time = models.DateTimeField(auto_now_add=True)
+    individual_status = models.ForeignKey(
+        TaskStatus,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="functions_entries_share_status",
+        db_column="individual_status_id",
+    )
+
+    class Meta:
+        db_table = 'quatery_reports"."FunctionsEntriesShare'
+        ordering = ["shared_time"]
+        unique_together = [("actionable_entry", "shared_with")]
 
 class PlannedActions(models.Model):
     """Placeholder / planned actions (fields commented out)."""

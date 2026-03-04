@@ -76,6 +76,7 @@ INSTALLED_APPS = [
     "Calling",
     "events",
     "project",
+    "Clients",
     "QuaterlyReports",
     "notifications",
     "adminpanel",
@@ -183,7 +184,7 @@ if REDIS_URL:
 # List the schema that contains auth_user (and django_session) first, then other app schemas. No public.
 DB_SEARCH_PATH = os.getenv(
     "DB_SEARCH_PATH",
-    "login_details,events,task_management,notifications,project,quatery_reports,messaging,team_farm,team_infra,team_interns,team_management",
+    "login_details,clients,events,task_management,notifications,project,quatery_reports,messaging,team_farm,team_infra,team_interns,team_management",
 )
 
 DATABASES = {

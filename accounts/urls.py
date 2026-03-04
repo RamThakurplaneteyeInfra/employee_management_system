@@ -1,5 +1,10 @@
+from rest_framework.routers import DefaultRouter
 from ems.urlImports import *
 from . import views
+from .leave_views import LeaveApplicationViewSet
+
+leave_router = DefaultRouter()
+leave_router.register("leave-applications", LeaveApplicationViewSet, basename="leave-applications")
 
 sort_urls=[path("getBranch/",views.get_branches,name="sort"),
     path("getRoles/",views.get_roles,name="sort"),
@@ -24,6 +29,8 @@ admin_urls= [
     path('admin/changePhoto/<str:username>/', views.update_photo, name='users'),
     path('admin/FetchPhoto/<str:username>/', views.FetchImage, name='users'),
 ]
-urlpatterns =sort_urls+session_urls+employee_urls+admin_urls
+urlpatterns = sort_urls + session_urls + employee_urls + admin_urls + [
+    path("", include(leave_router.urls)),
+]
 
 
