@@ -90,7 +90,7 @@ def get_notification_types(request):
 # Method: GET
 def _cron_key_valid(request):
     """Return True if request has valid X-CRON-KEY header."""
-    key = (request.META.get("HTTP_X_CRON_KEY") or "").strip()
+    key = (request.META.get("X_CRON_KEY") or "").strip()
     expected = getattr(settings, "X_CRON_KEY", "") or ""
     return bool(expected) and constant_time_compare(key, expected)
 

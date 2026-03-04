@@ -122,6 +122,14 @@ WSGI_APPLICATION = "ems.wsgi.application"
 ASGI_APPLICATION = "ems.asgi.application"
 
 # =============================================================================
+# Render / 512MB memory limit
+# Set env WEB_CONCURRENCY=1 (or 2) in Render dashboard to reduce Gunicorn/Uvicorn
+# workers. Each worker loads full Django + Channels; 3–4 workers can exceed 512MB.
+# Start command example: gunicorn ems.asgi:application -k uvicorn.workers.UvicornWorker
+#   --workers ${WEB_CONCURRENCY:-1} --bind 0.0.0.0:$PORT
+# =============================================================================
+
+# =============================================================================
 # Channels (WebSockets, real-time)
 # InMemoryChannelLayer is process-local: with multiple workers/instances (e.g. on
 # Render), each process has its own layer, so group_send from one process only
@@ -137,16 +145,18 @@ if REDIS_URL:
             "CONFIG": {"hosts": [REDIS_URL]},
         },
     }
-else:
-    CHANNEL_LAYERS = {
-        "default": {"BACKEND": "channels.layers.InMemoryChannelLayer"},
-    }
+# else:
+#     CHANNEL_LAYERS = {
+#         "default": {"BACKEND": "channels.layers.InMemoryChannelLayer"},
+#     }
 
 # =============================================================================
 # Cache – Redis (same instance as Channels). GET API responses cached; invalidated on create/update.
+# When REDIS_URL is missing, use DummyCache to avoid in-process memory growth (e.g. on 512MB Render).
 # =============================================================================
 CACHE_GET_TIMEOUT = int(os.getenv("CACHE_GET_TIMEOUT", "300"))  # 5 min default
-CACHES = {
+if REDIS_URL:
+    CACHES = {
         "default": {
             "BACKEND": "django_redis.cache.RedisCache",
             "LOCATION": REDIS_URL,
