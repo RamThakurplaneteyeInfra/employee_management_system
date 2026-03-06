@@ -1,0 +1,202 @@
+================================================================================
+CLIENTS API - Request & Response JSON Format
+Base URL: /clientsapi/
+================================================================================
+
+--------------------------------------------------------------------------------
+1. PRODUCTS (static list)
+--------------------------------------------------------------------------------
+GET /clientsapi/products/
+
+Response 200:
+[
+  "Cropeye",
+  "BMS",
+  "RAMS",
+  "Climateye",
+  "solar",
+  "cropeyeApp",
+  "Topography",
+  "Nearlive crop monitoring"
+]
+
+
+--------------------------------------------------------------------------------
+2. EMPLOYEES LIST
+--------------------------------------------------------------------------------
+GET /clientsapi/employees/
+
+Response 200:
+[
+  { "id": 1, "username": "john_doe" },
+  { "id": 2, "username": "jane_smith" }
+]
+
+
+--------------------------------------------------------------------------------
+3. STAGES LIST
+--------------------------------------------------------------------------------
+GET /clientsapi/stages/
+
+Response 200:
+[
+  { "id": 1, "name": "Leads" },
+  { "id": 2, "name": "Qualified" },
+  { "id": 3, "name": "Demo" }
+]
+
+
+--------------------------------------------------------------------------------
+4. LIST CLIENT PROFILES
+--------------------------------------------------------------------------------
+GET /clientsapi/profiles/
+
+Response 200:
+[
+  {
+    "id": 1,
+    "company_name": "Acme Corp",
+    "client_name": "John Doe",
+    "client_contact": "9876543210",
+    "representative_contact_number": "9876543211",
+    "representative_name": "Jane Smith",
+    "motive": "Describe the lead...",
+    "gst_number": "27AABCU9603R1ZM",
+    "status_id": 1,
+    "status_name": "Leads",
+    "product_id": 5,
+    "product_name": "Cropeye",
+    "created_by": "admin",
+    "members": [
+      { "id": 2, "username": "employee1" },
+      { "id": 3, "username": "employee2" }
+    ],
+    "created_at": "2026-02-27T10:30:00.000Z",
+    "updated_at": "2026-02-27T11:00:00.000Z"
+  }
+]
+
+
+--------------------------------------------------------------------------------
+5. CREATE CLIENT LEAD
+--------------------------------------------------------------------------------
+POST /clientsapi/profiles/
+
+Request:
+{
+  "company_name": "Acme Corp",
+  "client_name": "John Doe",
+  "client_contact": "9876543210",
+  "representative_contact_number": "9876543211",
+  "representative_name": "Jane Smith",
+  "motive": "Describe the lead...",
+  "gst_number": "27AABCU9603R1ZM",
+  "status_id": 1,
+  "product_name": "Cropeye",
+  "members": [1, 2, 3]
+}
+
+Response 201:
+{
+  "id": 1,
+  "message": "Client lead created"
+}
+
+Response 400:
+{
+  "error": "company_name and client_name are required"
+}
+
+
+--------------------------------------------------------------------------------
+6. GET CLIENT DETAIL
+--------------------------------------------------------------------------------
+GET /clientsapi/profiles/1/
+
+Response 200:
+{
+  "id": 1,
+  "company_name": "Acme Corp",
+  "client_name": "John Doe",
+  "client_contact": "9876543210",
+  "representative_contact_number": "9876543211",
+  "representative_name": "Jane Smith",
+  "motive": "Describe the lead...",
+  "gst_number": "27AABCU9603R1ZM",
+  "status_id": 1,
+  "status_name": "Leads",
+  "product_id": 5,
+  "product_name": "Cropeye",
+  "created_by": "admin",
+  "members": [
+    { "id": 2, "username": "employee1" },
+    { "id": 3, "username": "employee2" }
+  ],
+  "created_at": "2026-02-27T10:30:00.000Z",
+  "updated_at": "2026-02-27T11:00:00.000Z"
+}
+
+Response 404:
+{
+  "error": "Client not found"
+}
+
+
+--------------------------------------------------------------------------------
+7. UPDATE CLIENT LEAD
+--------------------------------------------------------------------------------
+PUT /clientsapi/profiles/1/
+PATCH /clientsapi/profiles/1/
+
+Request:
+{
+  "company_name": "Acme Corp Updated",
+  "client_name": "John Doe",
+  "representative_name": "Jane Smith",
+  "status_id": 2,
+  "product_name": "RAMS",
+  "members": [2, 3, 4]
+}
+
+Response 200:
+{
+  "message": "Client lead updated"
+}
+
+Response 404:
+{
+  "error": "Client not found"
+}
+
+
+--------------------------------------------------------------------------------
+8. DELETE CLIENT LEAD
+--------------------------------------------------------------------------------
+DELETE /clientsapi/profiles/1/
+
+Response 200:
+{
+  "message": "Client lead deleted"
+}
+
+Response 404:
+{
+  "error": "Client not found"
+}
+
+
+--------------------------------------------------------------------------------
+9. GET SELECTED EMPLOYEES (members for a client)
+--------------------------------------------------------------------------------
+GET /clientsapi/profiles/1/members/
+
+Response 200:
+[
+  { "id": 2, "username": "employee1" },
+  { "id": 3, "username": "employee2" }
+]
+
+Response 404:
+{
+  "error": "Client not found"
+}

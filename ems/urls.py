@@ -29,6 +29,7 @@ urlpatterns = [
     path("notifications/", include("notifications.urls"), name="notifications"),
     path('adminapi/', include('adminpanel.urls'),name="adminpanelapi"),
     path('eventsapi/', include('events.urls'),name="eventsapi"),
+    path('clientsapi/', include('Clients.urls'), name="clientsapi"),
 ]
 
 if True:

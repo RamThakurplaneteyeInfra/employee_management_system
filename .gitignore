@@ -16,6 +16,7 @@ FunctionGoals.csv
 development.env
 Procfile
 .venv
+venv
 # Python compiled files (all apps, all folders)
 __pycache__/
 *.pyc
