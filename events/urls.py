@@ -12,6 +12,7 @@ from .views import (
     MeetingViewSet,
     holidays_ping,
     birthdaycounter,
+    birthdaycounter_bulk,
 )
 
 router = DefaultRouter()
@@ -27,5 +28,6 @@ urlpatterns = [
     # path("holidays-ping", holidays_ping),
     # path("holidays-ping/", holidays_ping),
     path("", include(router.urls)),
-    path('events/birthdaycounter/<str:username>/', birthdaycounter, name='birthday'),
+    path("events/birthdaycounter/", birthdaycounter_bulk),  # POST with body {"users": ["u1", "u2", ...]}
+    path("events/birthdaycounter/<str:username>/", birthdaycounter, name="birthday"),
 ]

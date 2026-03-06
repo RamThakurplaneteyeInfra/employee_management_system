@@ -101,8 +101,8 @@ def cron_delete_seen_older_than_day(request):
     """Delete seen notifications older than 1 day. Returns count deleted. Requires X-CRON-KEY header."""
     if not _cron_key_valid(request):
         return Response({"error": "Forbidden"}, status=status.HTTP_403_FORBIDDEN)
-    cutoff = timezone.now() - timedelta(days=1)
-    qs = Notification.objects.filter(is_read=True, created_at__lt=cutoff)
+    # cutoff = timezone.now() - timedelta(days=1)
+    qs = Notification.objects.filter(is_read=True).exclude(created_at__date=date.today())
     count, _ = qs.delete()
     return Response({"deleted": count})
 

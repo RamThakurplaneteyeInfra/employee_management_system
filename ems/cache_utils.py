@@ -77,6 +77,29 @@ def invalidate_get_cache_for_prefix(path_prefix):
         pass
 
 
+def invalidate_birthday_counter_cache():
+    """
+    Invalidate all GET cache entries for the birthday counter API so all clients see fresh counts.
+    Uses a broad pattern so it works with Redis KEY_PREFIX (e.g. "ems") and path format.
+    Call this after bulk or single birthday_counter updates.
+    """
+    try:
+        backend = getattr(cache, "_cache", None) or cache
+        # 1) Prefer delete_pattern: pattern is prefixed by backend (e.g. "ems:*get:*birthdaycounter*")
+        if hasattr(backend, "delete_pattern"):
+            backend.delete_pattern(f"*{CACHE_KEY_PREFIX}:*birthdaycounter*")
+        # 2) Fallback: raw Redis client (keys in Redis already include KEY_PREFIX)
+        if hasattr(backend, "get_master_client"):
+            client = backend.get_master_client()
+            if client:
+                # Match any Redis key containing "birthdaycounter"
+                keys = list(client.scan_iter(match="*birthdaycounter*", count=100))
+                if keys:
+                    client.delete(*keys)
+    except Exception:
+        pass
+
+
 def get_path_prefixes_from_request(request):
     """
     Return specific GET path prefixes to invalidate for this mutation request.

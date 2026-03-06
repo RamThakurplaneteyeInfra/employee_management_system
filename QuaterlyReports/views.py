@@ -312,7 +312,16 @@ def _get_entries(request: HttpRequest):
     user = request.user
     permissible = username and user.is_superuser
     user_obj = get_object_or_404(User, username=username) if permissible else None
-    base_qs = FunctionsEntries.objects.prefetch_related("share_chain", "share_chain__shared_with", "share_chain__individual_status")
+    base_qs = FunctionsEntries.objects.select_related(
+        "Creator__accounts_profile", "co_author__accounts_profile"
+    ).prefetch_related(
+        Prefetch(
+            "share_chain",
+            queryset=FunctionsEntriesShare.objects.select_related(
+                "shared_with__accounts_profile", "individual_status"
+            ).order_by("shared_time"),
+        )
+    )
     if permissible and user_obj:
         visible = Q(Creator=user_obj) | Q(co_author=user_obj) | Q(share_chain__shared_with=user_obj, approved_by_coauthor=True)
         base = base_qs.filter(visible).distinct()
@@ -337,8 +346,15 @@ def _create_entry(request: HttpRequest):
     if serializer.is_valid():
         entry = serializer.save(Creator=request.user)
         entry.refresh_from_db()
-        entry = FunctionsEntries.objects.prefetch_related(
-            Prefetch("share_chain", queryset=FunctionsEntriesShare.objects.select_related("shared_with", "individual_status"))
+        entry = FunctionsEntries.objects.select_related(
+            "Creator__accounts_profile", "co_author__accounts_profile"
+        ).prefetch_related(
+            Prefetch(
+                "share_chain",
+                queryset=FunctionsEntriesShare.objects.select_related(
+                    "shared_with__accounts_profile", "individual_status"
+                ).order_by("shared_time"),
+            )
         ).get(pk=entry.pk)
         return JsonResponse(FunctionsEntriesSerializer(entry).data, safe=False, status=status.HTTP_201_CREATED)
     return JsonResponse(serializer.errors or {"message": "error occurred"}, status=status.HTTP_400_BAD_REQUEST)
@@ -362,57 +378,28 @@ def entry_list_create(request: HttpRequest):
         return Response({"message": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
 
-# ==================== co_author_approve_entry ====================
-# Co-author approves an actionable entry (no payload). Sets approved_by_coauthor=True and final_Status=In-progress.
-# URL: {{baseurl}}/ActionableEntriesByID/<id>/co-author-approve/
-# Method: POST
-def _co_author_approve_sync(entry_id, user):
-    entry = FunctionsEntries.objects.get(pk=entry_id)
-    if not entry.co_author_id:
-        return {"error": "Entry has no co-author assigned", "status_code": status.HTTP_400_BAD_REQUEST}
-    if str(entry.co_author_id) != str(user.username):
-        return {"error": "Only the co-author can approve this entry", "status_code": status.HTTP_403_FORBIDDEN}
-    if entry.approved_by_coauthor:
-        return {"already_approved": True, "entry": entry, "status_code": status.HTTP_200_OK}
-    inprogress = _get_taskStatus_object_sync(status_name="INPROCESS")
-    if not inprogress:
-        return {"error": "In-progress status not found", "status_code": status.HTTP_500_INTERNAL_SERVER_ERROR}
-    entry.approved_by_coauthor = True
-    entry.final_Status = inprogress
-    entry.save()
-    return {"entry": entry, "status_code": status.HTTP_200_OK}
-
-
-@api_view(["POST"])
-@permission_classes([IsAuthenticated, EntryPermission])
-def co_author_approve_entry(request, id):
-    """Co-author approves an actionable entry. No payload required. Only the assigned co_author can call this."""
-    try:
-        result = _co_author_approve_sync(id, request.user)
-        status_code = result["status_code"]
-        if "error" in result:
-            return Response({"error": result["error"]}, status=status_code)
-        entry = result["entry"]
-        entry = _get_entry_with_share_chain(entry.pk)
-        data = FunctionsEntriesSerializer(entry).data
-        if result.get("already_approved"):
-            return Response({"message": "Entry already approved", "entry": data}, status=status_code)
-        return Response({"message": "Entry approved by co-author", "entry": data}, status=status_code)
-    except FunctionsEntries.DoesNotExist:
-        return Response({"error": "Entry not found"}, status=status.HTTP_404_NOT_FOUND)
-    except DatabaseError as e:
-        return JsonResponse({"message": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-
 def _get_entry_with_share_chain(entry_id):
-    return FunctionsEntries.objects.prefetch_related(
-        Prefetch("share_chain", queryset=FunctionsEntriesShare.objects.select_related("shared_with", "individual_status").order_by("shared_time"))
+    return FunctionsEntries.objects.select_related(
+        "Creator__accounts_profile", "co_author__accounts_profile"
+    ).prefetch_related(
+        Prefetch(
+            "share_chain",
+            queryset=FunctionsEntriesShare.objects.select_related(
+                "shared_with__accounts_profile", "individual_status"
+            ).order_by("shared_time"),
+        )
     ).get(pk=entry_id)
 
 
 def _last_share_in_chain(entry):
     """Return the last share row (by shared_time); None if no shares."""
     return entry.share_chain.order_by("-shared_time").first()
+
+
+def _last_share_has_completed(entry):
+    """True if the last user in the share chain (by shared_time) has set their status to COMPLETED."""
+    last = _last_share_in_chain(entry)
+    return last and last.individual_status and getattr(last.individual_status, "status_name", "") == "COMPLETED"
 
 
 def _share_chain_has_completed(entry):
@@ -436,15 +423,15 @@ def _entry_detail_ops(request, id):
             # User is in share chain (not creator/co_author): update only their share row
             share_data = {}
             if "share_note" in request.data:
-                share_data["note"] = request.data["share_note"]
+                share_data["shared_note"] = request.data["share_note"]
             if "individual_status" in request.data:
                 new_status_name = request.data.get("individual_status")
                 if new_status_name and str(new_status_name).upper() == "COMPLETED":
                     last = _last_share_in_chain(entry)
-                    if last and last.id != my_share.id:
-                        return Response({"error": "Only the last person in the share chain can set status to Completed"}, status=status.HTTP_403_FORBIDDEN)
-                    if _share_chain_has_completed(entry):
-                        return Response({"error": "Share chain already has Completed; no further updates"}, status=status.HTTP_400_BAD_REQUEST)
+                    last_has_completed = _last_share_has_completed(entry)
+                    # Only the last user (by shared_time) can set COMPLETED first; after that, any share-chain user can set their own to COMPLETED.
+                    if not last_has_completed and last and last.id != my_share.id:
+                        return Response({"error": "Only the last person in the share chain can set status to Completed first. After that, others may mark their status as Completed."}, status=status.HTTP_403_FORBIDDEN)
                 try:
                     st = TaskStatus.objects.get(status_name__iexact=str(new_status_name).strip())
                     share_data["individual_status"] = st
@@ -462,8 +449,13 @@ def _entry_detail_ops(request, id):
             entry, data=request.data, partial=True, context={"request": request}
         )
         if serializer.is_valid():
+            is_creator = str(entry.Creator_id or "") == str(user.username)
             serializer.save()
             entry = _get_entry_with_share_chain(id)
+            # When the creator updates the entry, notify co_author, all shared_with, and MD (see QuaterlyReports.signals).
+            if is_creator:
+                from QuaterlyReports.signals import notify_associates_and_md_on_creator_update
+                notify_associates_and_md_on_creator_update(entry)
             return Response(FunctionsEntriesSerializer(entry).data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
     elif request.method == "DELETE":
@@ -513,7 +505,7 @@ def _share_further_sync(entry_id, request_user, share_with_username, note):
     FunctionsEntriesShare.objects.create(
         actionable_entry=entry,
         shared_with=new_user,
-        note=note or "",
+        shared_note=note or "",
         individual_status=pending,
     )
     entry = _get_entry_with_share_chain(entry_id)
@@ -523,10 +515,11 @@ def _share_further_sync(entry_id, request_user, share_with_username, note):
 @api_view(["POST"])
 @permission_classes([IsAuthenticated, EntryPermission])
 def share_further(request, id):
-    """Add next user to the share chain. Body: { \"share_with\": \"username\", \"note\": \"...\" }. Caller must be in chain; their status set to Inprogress."""
+    """Add next user to the share chain. Body: { \"share_with\": \"username\", \"shared_note\": \"...\" }. Caller must be in chain; their status set to Inprogress."""
     try:
         share_with_username = (request.data.get("share_with") or "").strip()
-        note = (request.data.get("note") or "").strip()
+        # Accept shared_note (preferred) or note for backward compatibility
+        note = (request.data.get("shared_note") or request.data.get("note") or "").strip()
         if not share_with_username:
             return Response({"error": "share_with (username) is required"}, status=status.HTTP_400_BAD_REQUEST)
         result = _share_further_sync(id, request.user, share_with_username, note)
@@ -539,8 +532,8 @@ def share_further(request, id):
         return JsonResponse({"message": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
-# ==================== Co-author entries (list + detail) ====================
-# Entries where the current user is co_author. Same fields as ActionableEntries.
+# ==================== Co-author entries (list + detail; approval via PATCH) ====================
+# Single API: GET list, GET/PATCH detail. Co-author approves by PATCH with {"approved_by_coauthor": true}.
 # URL: {{baseurl}}/ActionableEntriesCoAuthor/  |  {{baseurl}}/ActionableEntriesCoAuthor/<id>/
 @api_view(["GET"])
 @permission_classes([IsAuthenticated, EntryPermission])
@@ -554,7 +547,16 @@ def co_author_entries_list(request):
             month_val = current_month
     except (TypeError, ValueError):
         month_val = current_month
-    entries = FunctionsEntries.objects.filter(co_author=request.user, date__month=month_val).order_by("-date", "-time")
+    entries = FunctionsEntries.objects.select_related(
+        "Creator__accounts_profile", "co_author__accounts_profile"
+    ).prefetch_related(
+        Prefetch(
+            "share_chain",
+            queryset=FunctionsEntriesShare.objects.select_related(
+                "shared_with__accounts_profile", "individual_status"
+            ).order_by("shared_time"),
+        )
+    ).filter(co_author=request.user, date__month=month_val).order_by("-date", "-time")
     serializer = FunctionsEntriesSerializer(entries, many=True)
     return Response(serializer.data)
 
@@ -562,9 +564,9 @@ def co_author_entries_list(request):
 @api_view(["GET", "PATCH"])
 @permission_classes([IsAuthenticated, EntryPermission])
 def co_author_entry_detail(request, id):
-    """Get or update one actionable entry. Allowed only if current user is co_author. Same fields as ActionableEntries."""
+    """Get or update one actionable entry; co-author can approve via PATCH with approved_by_coauthor=true."""
     try:
-        entry = FunctionsEntries.objects.get(pk=id)
+        entry = _get_entry_with_share_chain(id)
         if str(entry.co_author_id or "") != str(request.user.username):
             return Response({"error": "Entry not found or you are not the co-author"}, status=status.HTTP_404_NOT_FOUND)
         if request.method == "GET":
@@ -572,7 +574,8 @@ def co_author_entry_detail(request, id):
         serializer = FunctionsEntriesSerializer(entry, data=request.data, partial=True, context={"request": request})
         if serializer.is_valid():
             serializer.save()
-            return Response(serializer.data)
+            entry = _get_entry_with_share_chain(id)
+            return Response(FunctionsEntriesSerializer(entry).data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
     except FunctionsEntries.DoesNotExist:
         return Response({"error": "Entry not found"}, status=status.HTTP_404_NOT_FOUND)
@@ -595,9 +598,18 @@ def shared_with_entries_list(request):
             month_val = current_month
     except (TypeError, ValueError):
         month_val = current_month
-    entries = FunctionsEntries.objects.filter(
+    entries = FunctionsEntries.objects.select_related(
+        "Creator__accounts_profile", "co_author__accounts_profile"
+    ).filter(
         share_chain__shared_with=request.user, approved_by_coauthor=True, date__month=month_val
-    ).prefetch_related(Prefetch("share_chain", queryset=FunctionsEntriesShare.objects.select_related("shared_with", "individual_status").order_by("shared_time"))).distinct().order_by("-date", "-time")
+    ).prefetch_related(
+        Prefetch(
+            "share_chain",
+            queryset=FunctionsEntriesShare.objects.select_related(
+                "shared_with__accounts_profile", "individual_status"
+            ).order_by("shared_time"),
+        )
+    ).distinct().order_by("-date", "-time")
     serializer = FunctionsEntriesSerializer(entries, many=True)
     return Response(serializer.data)
 
@@ -617,18 +629,20 @@ def shared_with_entry_detail(request, id):
         my_share = entry.share_chain.get(shared_with=request.user)
         share_data = {}
         if "share_note" in request.data:
-            my_share.note = request.data["share_note"]
-            share_data["note"] = my_share.note
+            my_share.shared_note = request.data["share_note"]
+            share_data["shared_note"] = my_share.shared_note
         if "individual_status" in request.data:
             new_status_name = (request.data.get("individual_status") or "").strip()
             if new_status_name.upper() == "COMPLETED":
                 last = _last_share_in_chain(entry)
-                if last and last.id != my_share.id:
-                    return Response({"error": "Only the last person in the share chain can set status to Completed"}, status=status.HTTP_403_FORBIDDEN)
+                last_has_completed = _last_share_has_completed(entry)
+                # Only the last user (by shared_time) can set COMPLETED first; after that, any share-chain user can set their own to COMPLETED.
+                if not last_has_completed and last and last.id != my_share.id:
+                    return Response({"error": "Only the last person in the share chain can set status to Completed first. After that, others may mark their status as Completed."}, status=status.HTTP_403_FORBIDDEN)
             try:
                 st = TaskStatus.objects.get(status_name__iexact=new_status_name)
                 my_share.individual_status = st
-                share_data["individual_status_id"] = st.id
+                share_data["individual_status"] = st  # use field name for update_fields; TaskStatus uses status_id as PK (no .id)
             except TaskStatus.DoesNotExist:
                 pass
         if share_data:

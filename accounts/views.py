@@ -203,6 +203,23 @@ async def get_session_data(request: HttpRequest):
 # Login view. Authenticate and create session.
 # URL: {{baseurl}}/accounts/login/
 # Method: POST
+# One device only: if user already has a live session, block login on another device.
+
+
+def _user_has_live_session(user):
+    """Return True if this user has any existing session (logged in on another device)."""
+    from django.contrib.sessions.models import Session
+    user_id = str(user.pk)
+    for s in Session.objects.all():
+        try:
+            data = s.get_decoded()
+            if data.get("_auth_user_id") == user_id:
+                return True
+        except Exception:
+            continue
+    return False
+
+
 @csrf_exempt
 def user_login(req: HttpRequest):
     """Sync helper: authenticate, login, get_user_role. Returns HttpResponse."""
@@ -217,6 +234,12 @@ def user_login(req: HttpRequest):
         user = authenticate(req, username=u, password=p)
         if not user:
             return JsonResponse({"messege": "Incorrect userID/Password,Try again"}, status=status.HTTP_400_BAD_REQUEST)
+        # One device only: if already logged in elsewhere, reject this login
+        # if _user_has_live_session(user):
+        #     return JsonResponse(
+        #         {"message": "Already logged in on another device. Log out there first or wait for the session to expire."},
+        #         status=status.HTTP_403_FORBIDDEN,
+        #     )
         login(req, user)
         user_role = _get_user_role_sync(user)
         if not user_role:
@@ -312,9 +335,14 @@ def _update_profile_sync(req, username):
     # print(data)
     for i in fields:
         if i == "Functions":
-            raw = data.get("Functions", [])
-            if raw is not None:
-                function_names = [raw] if not isinstance(raw, list) else [v for v in raw if v]
+            # Support both JSON (list) and form-data (multiple keys with same name)
+            if hasattr(data, "getlist"):
+                raw_list = data.getlist("Functions")
+                function_names = [v for v in raw_list if v]
+            else:
+                raw = data.get("Functions", [])
+                if raw is not None:
+                    function_names = [raw] if not isinstance(raw, list) else [v for v in raw if v]
             continue
         field_value = data.get(i)
         if not field_value and i not in not_required_fields:

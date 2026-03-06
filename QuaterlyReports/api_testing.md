@@ -1,23 +1,21 @@
 # Quaterly Reports – Actionable Entries APIs (Testing reference)
 
-Base URL: `http://localhost:8000` (or your server).  
+<!-- Base URL: `http://localhost:8000` (or your server).  
 Endpoints below are at the **root** (e.g. `/ActionableEntries/`).  
 All require **logged-in user** (session/cookie auth).
 
----
+--- -->
 
 ## Status and share chain
 
-- **Final status (creator):** `final_Status` on the entry. Default **PENDING** at creation. After **co-author approves** → **INPROCESS**. Creator can set to **COMPLETED** when done (final status from creator).
-- **Share chain:** Stored in `FunctionsEntriesShare`. First `share_with` is set by the creator at create. Others are added via **Share further**. Each row has: `shared_with`, `note`, `shared_time`, `individual_status`.
-- **Who shares further:** Anyone already in the share chain. When they share, their **individual_status** is set to **INPROCESS**. The **last** person in the chain can set their **individual_status** to **COMPLETED**; then no further sharing is allowed.
+- **Final status (creator):** `final_Status` on the entry. Default **PENDING** at creation. After **co-author approves** → **INPROCESS**. The creator can set **COMPLETED** **only after all share-chain users** have marked their **individual_status** as **COMPLETED** (or when there is no share chain).
+- **Share chain:** Stored in `FunctionsEntriesShare`. First `share_with` and `shared_note` can be set by the creator at create. Others are added via **Share further**. Each row has: `shared_with`, `shared_note`, `shared_time`, `individual_status`. Entry creator text is `original_entry`; share-row text is `shared_note`.
+- **Who shares further:** Anyone already in the share chain. When they share, their **individual_status** is set to **INPROCESS**. The **last** person in the chain (by `shared_time`) can set their **individual_status** to **COMPLETED** first. **After** the last user has set **COMPLETED**, any other share-chain user may change their own status from **Inprogress** to **Completed**.
 - **No further sharing** when: any share row has status **COMPLETED**, or entry **final_Status** is **COMPLETED**.
-
----
 
 ## 1. List / Create actionable entries
 
-| Field    | Value |
+<!-- | Field    | Value |
 |----------|--------|
 | **Method** | `GET` (list) \| `POST` (create) |
 | **URL**    | `{{baseurl}}/ActionableEntries/` |
@@ -26,7 +24,7 @@ All require **logged-in user** (session/cookie auth).
 
 **Query (optional):** `username`, `month`. If not superuser, only own entries (and month) are allowed.
 
-**Success (200):** Array of entry objects, each with `share_chain` (array of `{ id, shared_with, shared_with_username, note, shared_time, individual_status, individual_status_name }`).
+**Success (200):** Array of entry objects. Each entry has `creator_name`, `co_author_name` (full names from Profile), `original_entry` (creator’s entry text), and `share_chain` (array of `{ id, actionable_entry, shared_with_name, shared_note, shared_time, status_name }`). User references return full name from Profile; status is `status_name` only.
 
 ### POST – Create
 
@@ -39,24 +37,26 @@ All require **logged-in user** (session/cookie auth).
   "goal": 1,
   "co_author": "jane",
   "share_with": "bob",
+  "shared_note": "Note for the first share.",
   "date": "2026-03-15",
-  "note": "Entry note.",
+  "original_entry": "Entry note.",
   "final_Status": null
 }
 ```
 
-| Key          | Type   | Required | Description |
-|--------------|--------|----------|-------------|
-| goal         | int    | No       | ActionableGoals PK. |
-| co_author    | string | No       | Username of co-author. |
-| share_with   | string | No       | Username of **first** share recipient (creates first row in share chain). |
-| date         | string | Yes      | YYYY-MM-DD. |
-| note         | string | Yes      | Entry note. |
-| final_Status | string | No       | Default PENDING. |
+| Key            | Type   | Required | Description |
+|----------------|--------|----------|-------------|
+| goal           | int    | **Yes**  | ActionableGoals PK (Goal_id). Required when creating an entry. |
+| co_author      | string | **Yes**  | Username of co-author. Required when creating an entry. |
+| share_with     | string | **Yes**  | Username of **first** share recipient (creates first row in share chain). Required when creating an entry. |
+| shared_note    | string | No       | Note for the first share (stored in `FunctionsEntriesShare.shared_note`). |
+| date           | string | Yes      | YYYY-MM-DD. |
+| original_entry | string | Yes      | Creator’s entry text. |
+| final_Status   | string | No       | Default PENDING. |
 
-**Success (201):** Created entry with `share_chain` (one item if `share_with` was provided).
+**Success (201):** Created entry with `share_chain` (one item; `co_author` and `share_with` are required on create).
 
----
+--- -->
 
 ## 2. Get / Update / Delete one entry
 
@@ -69,14 +69,14 @@ All require **logged-in user** (session/cookie auth).
 
 ### PATCH – Update (creator / co_author)
 
-Creator or co_author can update entry fields (e.g. `note`, `final_Status`, `co_author`). Creator can set `final_Status` to **COMPLETED** when done.
+Creator or co_author can update entry fields (e.g. `original_entry`, `final_Status`, `co_author`, `co_author_note`). **Creator cannot set `final_Status` to INPROCESS**—that only changes when the co_author approves. Creator can set `final_Status` to **COMPLETED** **only after all share-chain users** have marked their **individual_status** as **COMPLETED**; otherwise the API returns a validation error. **Only the co_author** can set or update **`co_author_note`** (details to the creator before or after approval).
 
 ### PATCH – Update (share-chain user)
 
 If the current user is in the share chain (and not creator/co_author), only these body fields are applied:
 
-- **share_note** – update this user’s share row `note`.
-- **individual_status** – set this user’s share row status (e.g. `"COMPLETED"`). **Only the last person in the chain** can set **COMPLETED**; after that, no further sharing.
+- **share_note** – update this user’s share row `shared_note`.
+- **individual_status** – set this user’s share row status (e.g. `"COMPLETED"`). The **last** person in the chain (by `shared_time`) must set **COMPLETED** first. **After** the last user has set **COMPLETED**, any other share-chain user may change their status from **Inprogress** to **Completed**.
 
 **Example (share-chain user):**
 
@@ -93,22 +93,7 @@ Only the **creator** can delete the entry.
 
 ---
 
-## 3. Co-author approve
-
-| Field    | Value |
-|----------|--------|
-| **Method** | `POST` |
-| **URL**    | `{{baseurl}}/ActionableEntriesByID/<id>/co-author-approve/` |
-
-**Body:** None.
-
-**Effect:** Sets `approved_by_coauthor=True` and `final_Status=INPROCESS`. Only the assigned co_author can call.
-
-**Success (200):** `{ "message": "Entry approved by co-author", "entry": { ... } }`
-
----
-
-## 4. Share further
+## 3. Share further
 
 | Field    | Value |
 |----------|--------|
@@ -120,15 +105,20 @@ Only the **creator** can delete the entry.
 ```json
 {
   "share_with": "next_username",
-  "note": "Optional note for this share."
+  "shared_note": "Optional note for this share (stored in share chain as shared_note)."
 }
 ```
+
+| Key         | Type   | Required | Description |
+|-------------|--------|----------|-------------|
+| share_with  | string | **Yes**  | Username of the next user in the share chain. |
+| shared_note | string | No       | Note for this share (stored in `FunctionsEntriesShare.shared_note`). |
 
 **Rules:**
 
 - Caller must be in the share chain.
 - Caller’s share row `individual_status` is set to **INPROCESS**.
-- A new share row is created for `share_with` with **PENDING**.
+- A new share row is created for `share_with` with **PENDING**; body `shared_note` is stored in that row’s `shared_note` field.
 - Not allowed if any share row is **COMPLETED** or entry `final_Status` is **COMPLETED**.
 - `share_with` must not already be in the chain.
 
@@ -142,7 +132,9 @@ Only the **creator** can delete the entry.
 
 ---
 
-## 5. Co-author entries (list + detail)
+## 4. Co-author entries (list + detail + approval)
+
+Single endpoint for fetching co-author entries and changing approval status.
 
 | Method | URL |
 |--------|-----|
@@ -150,13 +142,15 @@ Only the **creator** can delete the entry.
 | GET    | `{{baseurl}}/ActionableEntriesCoAuthor/<id>/` |
 | PATCH  | `{{baseurl}}/ActionableEntriesCoAuthor/<id>/` |
 
-**List:** Optional `?month=1`–`12`. Returns entries where current user is `co_author`.
+**List (GET):** Optional `?month=1`–`12`. Returns entries where current user is `co_author`.
 
-**Detail:** Get or update one entry; allowed only if current user is the co_author.
+**Detail (GET):** One entry; allowed only if current user is the co_author.
+
+**Update / approve (PATCH):** Co-author can update entry fields, set **`co_author_note`** (message to the creator, before or after approval), or **approve** by sending `{"approved_by_coauthor": true}`. Approval sets `approved_by_coauthor=True` and `final_Status=INPROCESS`. Only the assigned co_author can set approval and `co_author_note`. Responses include `co_author_note`.
 
 ---
 
-## 6. Shared-with entries (list + detail)
+## 5. Shared-with entries (list + detail)
 
 | Method | URL |
 |--------|-----|
@@ -166,11 +160,11 @@ Only the **creator** can delete the entry.
 
 **List:** Optional `?month=1`–`12`. Returns entries where current user is in the **share chain** and `approved_by_coauthor=True`.
 
-**Detail:** Get or update; allowed only if current user is in the share chain and entry is approved. PATCH accepts **share_note** and **individual_status** (same rules as in section 2: only last in chain can set COMPLETED).
+**Detail:** Get or update; allowed only if current user is in the share chain and entry is approved. PATCH accepts **share_note** and **individual_status** (same rules as in section 2: last in chain sets COMPLETED first, then other share-chain users may set their status to COMPLETED).
 
 ---
 
-## 7. Other endpoints (unchanged)
+## 6. Other endpoints (unchanged)
 
 | Purpose                    | Method | URL |
 |----------------------------|--------|-----|
@@ -190,9 +184,8 @@ Only the **creator** can delete the entry.
 |----------------------|--------|-----|
 | List / create entries| GET / POST | `/ActionableEntries/` |
 | Get / update / delete one | GET / PUT / PATCH / DELETE | `/ActionableEntriesByID/<id>/` |
-| Co-author approve    | POST   | `/ActionableEntriesByID/<id>/co-author-approve/` |
 | Share further        | POST   | `/ActionableEntriesByID/<id>/share/` |
-| Co-author list/detail| GET / PATCH | `/ActionableEntriesCoAuthor/`, `/ActionableEntriesCoAuthor/<id>/` |
+| Co-author list, detail, approve | GET / PATCH | `/ActionableEntriesCoAuthor/`, `/ActionableEntriesCoAuthor/<id>/` |
 | Shared-with list/detail | GET / PATCH | `/ActionableEntriesSharedWith/`, `/ActionableEntriesSharedWith/<id>/` |
 
 **TaskStatus values:** `PENDING`, `INPROCESS`, `COMPLETED` (confirm in your DB).

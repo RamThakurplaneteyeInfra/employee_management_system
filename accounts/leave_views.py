@@ -20,7 +20,7 @@ from .models import (
     Profile,
 )
 from .serializers import (
-    LeaveApplicationListSerializer,
+    LeaveApplicationResponseSerializer,
     LeaveApplicationCreateSerializer,
     LeaveApplicationEmergencyCreateSerializer,
     LeaveApplicationUpdateSerializer,
@@ -113,8 +113,13 @@ def _set_team_lead_from_profile(application, applicant):
 
 def _set_approvals_by_role(application, applicant, status_map, is_md_approval_by_default=False):
     """
-    Set team_lead_approval, HR_approval, MD_approval, admin_approval on application
-    based on applicant's role. If is_md_approval_by_default True (MD applicant), set MD=Approved.
+    Set team_lead_approval, HR_approval, admin_approval, MD_approval on application
+    based on applicant's role.
+    - MD applicant: all None except MD=Approved.
+    - Admin applicant: team_lead=None, HR=Pending, admin=None, MD=Pending.
+    - HR applicant: team_lead=None, HR=None, admin=Pending, MD=Pending.
+    - TeamLead applicant: team_lead=None, HR=Pending, admin=None, MD=Pending.
+    - Employee/Intern: team_lead=Pending, HR=None, admin=None, MD=Pending (team lead approves first).
     """
     pending = status_map.get("Pending")
     approved = status_map.get("Approved")
@@ -131,8 +136,8 @@ def _set_approvals_by_role(application, applicant, status_map, is_md_approval_by
     if role_name == "Admin":
         application.team_lead_approval_id = None
         application.HR_approval_id = pending.id if pending else None
-        application.MD_approval_id = pending.id if pending else None
         application.admin_approval_id = None
+        application.MD_approval_id = pending.id if pending else None
         return
     if role_name == "HR":
         application.team_lead_approval_id = None
@@ -140,14 +145,22 @@ def _set_approvals_by_role(application, applicant, status_map, is_md_approval_by
         application.admin_approval_id = pending.id if pending else None
         application.MD_approval_id = pending.id if pending else None
         return
-    # TeamLead, Employee, Intern (or no profile): TeamLead -> HR -> MD
+    if role_name in ("TeamLead", "Teamlead"):
+        # Applicant is team lead: no team lead step; goes to HR
+        application.team_lead_approval_id = None
+        application.HR_approval_id = pending.id if pending else None
+        application.admin_approval_id = None
+        application.MD_approval_id = pending.id if pending else None
+        return
+    # Employee or Intern: team_lead = Pending when they have a team lead; else skip to HR
     if teamlead:
         application.team_lead_approval_id = pending.id if pending else None
+        application.HR_approval_id = None
     else:
         application.team_lead_approval_id = None
-    application.HR_approval_id = pending.id if pending else None
-    application.MD_approval_id = pending.id if pending else None
+        application.HR_approval_id = pending.id if pending else None
     application.admin_approval_id = None
+    application.MD_approval_id = pending.id if pending else None
 
 
 # ---------- ViewSet ----------
@@ -169,7 +182,7 @@ class LeaveApplicationViewSet(ModelViewSet):
         )
         .order_by("-application_date", "-id")
     )
-    serializer_class = LeaveApplicationListSerializer
+    serializer_class = LeaveApplicationResponseSerializer
     authentication_classes = [CsrfExemptSessionAuthentication]
     permission_classes = [IsAuthenticated]
 
@@ -180,15 +193,20 @@ class LeaveApplicationViewSet(ModelViewSet):
             return LeaveApplicationEmergencyCreateSerializer
         if self.action in ("update", "partial_update"):
             return LeaveApplicationUpdateSerializer
-        return LeaveApplicationListSerializer
+        return LeaveApplicationResponseSerializer
 
     def create(self, request, *args, **kwargs):
-        """POST: apply for leave (self). Validates remaining leaves; sets approval chain by role."""
+        """POST: apply for leave (self). leave_type as string; Full_day: validate remaining leaves, no half_day_slots validation; Half_day: validate half_day_slots, no duration validation. Returns name/status fields only (no FK ids)."""
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         applicant = request.user
-        duration = serializer.validated_data.get("duration_of_days") or 0
-        _validate_remaining_leaves(applicant, duration)
+        validated = serializer.validated_data
+        leave_type = validated.get("leave_type")
+        leave_type_name = getattr(leave_type, "name", None) or ""
+        duration = validated.get("duration_of_days") or 0
+        # Only validate remaining leaves for Full_day
+        if leave_type_name == "Full_day" and duration >= 1:
+            _validate_remaining_leaves(applicant, duration)
 
         status_map = _get_leave_status_map()
         with transaction.atomic():
@@ -201,7 +219,7 @@ class LeaveApplicationViewSet(ModelViewSet):
             ])
         application.refresh_from_db()
         return Response(
-            LeaveApplicationListSerializer(application).data,
+            LeaveApplicationResponseSerializer(application).data,
             status=status.HTTP_201_CREATED,
         )
 
@@ -209,32 +227,62 @@ class LeaveApplicationViewSet(ModelViewSet):
     def emergency_leave(self, request):
         """
         HR only: create emergency leave on behalf of any user.
-        team_lead_approval=Approved by default; HR_approval=choice; MD_approval=Pending.
-        No remaining-leaves check.
+        Emergency leaves are limited to 10%% of user's total_leaves (LeaveSummary.emergency_leaves tracks used emergency days).
+        team_lead_approval, HR_approval, MD_approval are all set to Approved by default for emergency requests.
         """
+        from rest_framework import serializers as s
+
         serializer = LeaveApplicationEmergencyCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         status_map = _get_leave_status_map()
         approved = status_map.get("Approved")
-        pending = status_map.get("Pending")
-        hr_choice = serializer.validated_data.pop("hr_approval_status", "Approved")
-        hr_status = status_map.get(hr_choice) or approved
+
+        applicant = serializer.validated_data.get("applicant")
+        duration = serializer.validated_data.get("duration_of_days") or 0
+        if duration < 1:
+            raise s.ValidationError({"duration_of_days": ["duration_of_days must be at least 1."]})
+
+        # Enforce emergency leave quota: emergency_leaves is filled from total_leaves (10%) on create and decremented on use
+        summary, _ = LeaveSummary.objects.get_or_create(
+            user=applicant,
+            defaults={"total_leaves": 0, "used_leaves": 0},
+        )
+        if duration > summary.emergency_leaves:
+            raise s.ValidationError(
+                {
+                    "non_field_errors": [
+                        f"Insufficient emergency leave balance. Remaining emergency: {summary.emergency_leaves}, requested: {duration}."
+                    ]
+                }
+            )
 
         with transaction.atomic():
             application = serializer.save()
             application.is_emergency = True
             _set_team_lead_from_profile(application, application.applicant)
+            # For emergency: all approvers default to Approved
             application.team_lead_approval = approved
-            application.HR_approval = hr_status
-            application.MD_approval = pending
+            application.HR_approval = approved
+            application.MD_approval = approved
             application.admin_approval = None
+            application.approved_by_MD_at = timezone.now()
             application.save(update_fields=[
-                "is_emergency", "team_lead", "team_lead_approval", "HR_approval",
-                "MD_approval", "admin_approval",
+                "is_emergency",
+                "team_lead",
+                "team_lead_approval",
+                "HR_approval",
+                "MD_approval",
+                "admin_approval",
+                "approved_by_MD_at",
             ])
+
+            # Decrement emergency quota and add to used_leaves
+            summary.emergency_leaves = summary.emergency_leaves - duration
+            summary.used_leaves = summary.used_leaves + duration
+            summary.save(update_fields=["emergency_leaves", "used_leaves"])
         application.refresh_from_db()
         return Response(
-            LeaveApplicationListSerializer(application).data,
+            LeaveApplicationResponseSerializer(application).data,
             status=status.HTTP_201_CREATED,
         )
 
@@ -245,7 +293,7 @@ class LeaveApplicationViewSet(ModelViewSet):
         serializer = self.get_serializer(instance, data=request.data, partial=partial)
         serializer.is_valid(raise_exception=True)
         self._apply_update_by_role(instance, serializer.validated_data, request.user)
-        return Response(LeaveApplicationListSerializer(instance).data)
+        return Response(LeaveApplicationResponseSerializer(instance).data)
 
     def partial_update(self, request, *args, **kwargs):
         """PATCH: update allowed fields by role (approval fields or applicant's draft fields)."""
@@ -253,7 +301,7 @@ class LeaveApplicationViewSet(ModelViewSet):
         serializer = self.get_serializer(instance, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         self._apply_update_by_role(instance, serializer.validated_data, request.user)
-        return Response(LeaveApplicationListSerializer(instance).data)
+        return Response(LeaveApplicationResponseSerializer(instance).data)
 
     def _apply_update_by_role(self, instance, validated_data, user):
         """Apply validated_data according to role: approvers set their approval; applicant can edit draft."""
@@ -280,7 +328,7 @@ class LeaveApplicationViewSet(ModelViewSet):
         for key, value in approval_updates.items():
             setattr(instance, key, value)
 
-        draft_fields = ("start_date", "duration_of_days", "live_subject", "reason", "leave_type", "half_day_slots")
+        draft_fields = ("start_date", "duration_of_days", "leave_subject", "reason", "leave_type", "half_day_slots")
         updated_fields = list(approval_updates.keys())
 
         # Applicant can update content fields only if no approval is yet Approved (draft)
@@ -319,6 +367,25 @@ class LeaveApplicationViewSet(ModelViewSet):
         instance.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
 
+    # ---------- GET: my leave summary (total / used / remaining) ----------
+    @action(detail=False, methods=["get"], url_path="summary")
+    def leave_summary(self, request):
+        """
+        Logged-in user's leave balance: total_leaves, used_leaves, remaining_leaves from LeaveSummary.
+        GET /accounts/leave-applications/summary/
+        """
+        summary, _ = LeaveSummary.objects.get_or_create(
+            user=request.user,
+            defaults={"total_leaves": 0, "used_leaves": 0},
+        )
+        return Response(
+            {
+                "total_leaves": summary.total_leaves,
+                "used_leaves": summary.used_leaves,
+                "remaining_leaves": summary.remaining_leaves,
+            }
+        )
+
     # ---------- GET: view history (my applications) ----------
     @action(detail=False, methods=["get"], url_path="view_history")
     def view_history(self, request):
@@ -327,39 +394,39 @@ class LeaveApplicationViewSet(ModelViewSet):
         GET /accounts/leave-applications/view_history/
         """
         qs = self.get_queryset().filter(applicant=request.user)
-        serializer = LeaveApplicationListSerializer(qs, many=True)
+        serializer = LeaveApplicationResponseSerializer(qs, many=True)
         return Response(serializer.data)
 
-    # ---------- GET: approval tab by team lead ----------
-    @action(detail=False, methods=["get"], url_path="approval_teamlead")
-    def approval_teamlead(self, request):
-        """
-        Applications where the current user is the team lead (for approval tab).
-        GET /accounts/leave-applications/approval_teamlead/
-        """
-        qs = self.get_queryset().filter(team_lead=request.user)
-        serializer = LeaveApplicationListSerializer(qs, many=True)
-        return Response(serializer.data)
-
-    # ---------- GET: approval tab (HR / Admin / MD – single API by role) ----------
+    # ---------- GET: approval tab (Team lead + HR / Admin / MD – single API) ----------
     @action(detail=False, methods=["get"], url_path="approval")
     def approval(self, request):
         """
-        Leave applications pending the current user's approval. Role-based:
-        - HR: applications where HR_approval = Pending
-        - Admin: applications where admin_approval = Pending
-        - MD: applications where MD_approval = Pending
-        Returns [] if user is not HR, Admin, or MD.
-        GET /accounts/leave-applications/approval/
+        Leave applications for the current user's approval tab. Hierarchy-based:
+        - Team lead: ALL applications where team_lead = user (irrespective of status).
+        - HR: ALL applications approved by team lead (team_lead_approval=Approved), regardless of HR_approval.
+        - Admin: ALL applications approved by team lead (team_lead_approval=Approved), regardless of admin_approval.
+        - MD: ALL applications approved by HR or Admin (HR_approval=Approved or admin_approval=Approved), regardless of MD_approval.
+        Single endpoint: GET /accounts/leave-applications/approval/
         """
+        from django.db.models import Q
+
         role = _get_user_role_sync(request.user)
+        base = self.get_queryset()
+        q = Q()
+
+        # Team lead: all applications assigned to this user as team_lead (any status)
+        if role in ("TeamLead", "Teamlead"):
+            q |= Q(team_lead=request.user)
+        # HR: all applications approved by team lead (history + pending/current)
         if role == "HR":
-            qs = self.get_queryset().filter(HR_approval__name="Pending")
-        elif role == "Admin":
-            qs = self.get_queryset().filter(admin_approval__name="Pending")
-        elif role == "MD":
-            qs = self.get_queryset().filter(MD_approval__name="Pending")
-        else:
-            qs = self.get_queryset().none()
-        serializer = LeaveApplicationListSerializer(qs, many=True)
+            q |= Q(team_lead_approval__name="Approved")
+        # Admin: all applications approved by team lead (history + pending/current)
+        if role == "Admin":
+            q |= Q(team_lead_approval__name="Approved")
+        # MD: all applications approved by HR or Admin (history + pending/current)
+        if role == "MD":
+            q |= Q(HR_approval__name="Approved") | Q(admin_approval__name="Approved")
+
+        qs = base.filter(q).distinct()
+        serializer = LeaveApplicationResponseSerializer(qs, many=True)
         return Response(serializer.data)

@@ -96,6 +96,7 @@ class FunctionsEntries(models.Model):
         related_name="co_authored_entries",
     )
     approved_by_coauthor = models.BooleanField(default=False, db_column="approved_by_coauthor")
+    co_author_note = models.TextField(blank=True, default="")
     date = models.DateField(auto_now=False, auto_now_add=False)
     time = models.TimeField(auto_now_add=True)
     final_Status = models.ForeignKey(
@@ -107,7 +108,7 @@ class FunctionsEntries(models.Model):
         related_name="functions_entries_final",
         db_column="status",
     )
-    note = models.TextField()
+    original_entry = models.TextField()
 
     class Meta:
         db_table = 'quatery_reports"."FunctionsEntries'
@@ -129,7 +130,7 @@ class FunctionsEntriesShare(models.Model):
         db_column="shared_with",
         related_name="shared_entries_chain",
     )
-    note = models.TextField(blank=True)
+    shared_note = models.TextField(blank=True)
     shared_time = models.DateTimeField(auto_now_add=True)
     individual_status = models.ForeignKey(
         TaskStatus,

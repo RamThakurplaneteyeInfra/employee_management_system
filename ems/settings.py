@@ -281,7 +281,11 @@ X_CRON_KEY = os.getenv("X_CRON_KEY","").strip()
 # =============================================================================
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 DATA_UPLOAD_MAX_NUMBER_FIELDS = 5000
-SESSION_SAVE_EVERY_REQUEST = True
+
+# Session: 12 hours global expiry; do not refresh on every request (fixed 12h from login).
+SESSION_COOKIE_AGE = 12 * 60 * 60  # 12 hours in seconds
+SESSION_SAVE_EVERY_REQUEST = False  # Session expires 12h after login, not extended per request
+SESSION_EXPIRE_AT_BROWSER_CLOSE = True  # Use SESSION_COOKIE_AGE
 
 # =============================================================================
 # CORS

@@ -210,29 +210,89 @@ class MeetingViewSet(ModelViewSet):
         return Response({"deleted": count})
         
 # ==================== birthdaycounter ====================
-# Increment or fetch birthday counter for a user.
-# URL: {{baseurl}}/accounts/birthdaycounter/<username>/  (or as configured)
-# Method: GET (fetch) | POST (increment)
-def _birthdaycounter_sync(username, method):
-    """Sync helper: DB operations with transaction.atomic."""
+# GET only at .../birthdaycounter/<username>/ to fetch count.
+# POST (update counts) only at .../birthdaycounter/ with body {"users": ["user1", "user2", ...]} (array may have one or more users).
+# URL: {{baseurl}}/eventsapi/events/birthdaycounter/  (POST only) | {{baseurl}}/eventsapi/events/birthdaycounter/<username>/  (GET only)
+
+def _birthdaycounter_get_sync(username):
+    """Sync helper: fetch birthday_counter for one user."""
     user_obj = get_object_or_404(User, username=username)
     user_profile = Profile.objects.select_related("Employee_id").filter(Employee_id=user_obj).first()
-    if method == "POST":
-        with transaction.atomic():
-            user_profile.birthday_counter += 1
-            user_profile.save()
+    if not user_profile:
+        raise Http404
     return {"birthday_counter": user_profile.birthday_counter}
+
+
+def _birthdaycounter_bulk_post_sync(body):
+    """
+    Accept list of usernames in body["users"], increment birthday_counter on each user's Profile,
+    then invalidate Redis GET cache for birthday_counter for all users so next GET returns fresh data.
+    Returns {"updated": [{"username": u, "birthday_counter": n}, ...], "invalidated_cache": True}.
+    """
+    User = get_user_model()
+    users_list = body.get("users") if isinstance(body, dict) else None
+    if not users_list or not isinstance(users_list, list):
+        return {"error": "Body must contain a list 'users' of usernames."}, 400
+    updated = []
+    with transaction.atomic():
+        for username in users_list:
+            if not username or not isinstance(username, str):
+                continue
+            username = username.strip()
+            if not username:
+                continue
+            try:
+                user_obj = User.objects.get(username=username)
+            except User.DoesNotExist:
+                continue
+            profile = Profile.objects.filter(Employee_id=user_obj).first()
+            if not profile:
+                continue
+            profile.birthday_counter += 1
+            profile.save(update_fields=["birthday_counter"])
+            updated.append({"username": username, "birthday_counter": profile.birthday_counter})
+    if not updated:
+        return {"error": "No valid users found or no profiles updated."}, 400
+    # Erase Redis GET cache for birthday_counter so all clients see updated counts (works with KEY_PREFIX e.g. "ems")
+    try:
+        from ems.cache_utils import invalidate_birthday_counter_cache
+        invalidate_birthday_counter_cache()
+    except Exception:
+        pass
+    return {"updated": updated, "invalidated_cache": True}, 200
+
 
 @csrf_exempt
 async def birthdaycounter(request: HttpRequest, username=None):
+    """GET only: fetch birthday_counter for the given username. Use POST .../birthdaycounter/ with body {\"users\": [\"username\"]} to update."""
+    if request.method != "GET":
+        return JsonResponse(
+            {"error": "Method not allowed. Use POST /eventsapi/events/birthdaycounter/ with body {\"users\": [\"username\", ...]} to update."},
+            status=status.HTTP_405_METHOD_NOT_ALLOWED,
+        )
     try:
-        result = await sync_to_async(_birthdaycounter_sync)(username, request.method)
-        print("count not from cache")
+        result = await sync_to_async(_birthdaycounter_get_sync)(username)
         return JsonResponse(result, status=status.HTTP_200_OK)
     except Http404:
         return JsonResponse({"message": "user not found"}, status=status.HTTP_400_BAD_REQUEST)
     except DatabaseError as e:
         return JsonResponse({"message": f"{e}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@csrf_exempt
+def birthdaycounter_bulk(request: HttpRequest):
+    """
+    POST with body {"users": ["username1", "username2", ...]}.
+    Increments birthday_counter on each user's Profile, then invalidates the GET birthday_counter cache for all users.
+    """
+    if request.method != "POST":
+        return JsonResponse({"error": "Method not allowed"}, status=status.HTTP_405_METHOD_NOT_ALLOWED)
+    try:
+        body = json.loads(request.body) if request.body else {}
+    except Exception:
+        return JsonResponse({"error": "Invalid JSON body"}, status=status.HTTP_400_BAD_REQUEST)
+    result, code = _birthdaycounter_bulk_post_sync(body)
+    return JsonResponse(result, status=code)
         
 # ******************************************************************** UNUSED APIS*****************************************************
 # @api_view(["GET"])

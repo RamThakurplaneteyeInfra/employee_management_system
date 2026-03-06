@@ -1,6 +1,7 @@
 from django.db import models
 from django.contrib.auth.models import User
 from django.core.validators import validate_email
+from datetime import timedelta
 # A model for "Roles" table
 class Roles(models.Model):
     """User role (e.g. Admin, MD); used for permissions and counts."""
@@ -149,7 +150,7 @@ class LeaveTypes(models.Model):
 
 
 class LeaveSummary(models.Model):
-    """Per-user leave summary: total, used, and computed remaining leaves (total - used)."""
+    """Per-user leave summary: total, used, emergency quota (from total), and computed remaining leaves."""
     user = models.OneToOneField(
         User,
         on_delete=models.CASCADE,
@@ -160,11 +161,18 @@ class LeaveSummary(models.Model):
     )
     total_leaves = models.PositiveIntegerField(default=0)
     used_leaves = models.PositiveIntegerField(default=0)
+    # Emergency leave quota: 10%% of total_leaves, filled on create and decremented when emergency leave is taken.
+    emergency_leaves = models.PositiveIntegerField(default=0)
 
     class Meta:
         db_table = 'team_management"."leave_summary'
         verbose_name = "leave summary"
         verbose_name_plural = "leave summaries"
+
+    def save(self, *args, **kwargs):
+        if self._state.adding:
+            self.emergency_leaves = self.total_leaves // 10
+        super().save(*args, **kwargs)
 
     @property
     def remaining_leaves(self):
@@ -216,7 +224,7 @@ class LeaveApplicationData(models.Model):
     )
     start_date = models.DateField()
     duration_of_days = models.SmallIntegerField()
-    live_subject = models.CharField(max_length=255)
+    leave_subject = models.CharField(max_length=255)
     reason = models.TextField()
     leave_type = models.ForeignKey(
         LeaveTypes,
@@ -264,6 +272,7 @@ class LeaveApplicationData(models.Model):
     is_emergency = models.BooleanField(default=False)
     application_date = models.DateField(auto_now_add=True)
     approved_by_MD_at = models.DateTimeField(null=True, blank=True)
+    note=models.TextField(null=True,blank=True)
 
     class Meta:
         db_table = 'team_management"."leave_application_data'
@@ -271,7 +280,7 @@ class LeaveApplicationData(models.Model):
         verbose_name_plural = "leave applications"
 
     def __str__(self):
-        return f"{self.applicant.username} from {self.start_date} ({self.leave_type.name})"
+        return f"leave {self.id}"
 
 
 
