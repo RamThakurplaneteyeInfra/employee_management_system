@@ -2,6 +2,7 @@ from rest_framework import serializers
 from django.db.models import Q
 from .models import *
 from ems.RequiredImports import *
+from ems.utils import gmt_to_ist_str
 from accounts.filters import _get_users_Name_sync
 class SlotMemberSerializer(serializers.ModelSerializer):
     member=serializers.SlugRelatedField(
@@ -19,12 +20,14 @@ class BookSlotSerializer(serializers.ModelSerializer):
     room= serializers.SlugRelatedField(
         queryset=Room.objects.all(),
         slug_field="name")
-    
+    start_time = serializers.TimeField(format="%H:%M:%S", required=False)
+    end_time = serializers.TimeField(format="%H:%M:%S", required=False)
     members = serializers.SlugRelatedField(
         many=True,
         slug_field='username',
         queryset=User.objects.all(),write_only=True,required=True)
     created_by = serializers.HiddenField(default=serializers.CurrentUserDefault())
+    created_at = serializers.SerializerMethodField()
     member_details = serializers.SerializerMethodField()
     creater_details = serializers.SerializerMethodField()
     class Meta:
@@ -34,6 +37,9 @@ class BookSlotSerializer(serializers.ModelSerializer):
             'room', 'description', 'meeting_type', 'status',"members",
             'created_at','member_details',"creater_details","created_by"
         ]
+
+    def get_created_at(self, obj):
+        return gmt_to_ist_str(obj.created_at, "%d/%m/%Y %H:%M:%S") if obj.created_at else None
         
     def get_member_details(self, obj: BookSlot):
         # Use prefetched slotmembers (no extra query per slot).
@@ -177,6 +183,7 @@ class TourSerializer(serializers.ModelSerializer):
         queryset=User.objects.all()
     )
     created_by = serializers.HiddenField(default=serializers.CurrentUserDefault())
+    created_at = serializers.SerializerMethodField()
     member_details = serializers.SerializerMethodField()
     creater_details = serializers.SerializerMethodField()
     class Meta:
@@ -184,7 +191,10 @@ class TourSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'tour_name', 'starting_date','description','created_at',"location",'member_details',"creater_details","total_members","duration_days","created_by","members",
         ]
-        
+
+    def get_created_at(self, obj):
+        return gmt_to_ist_str(obj.created_at, "%d/%m/%Y %H:%M:%S") if obj.created_at else None
+
     def get_member_details(self, obj):
         # Use prefetched tourmembers to avoid N+1.
         return [
@@ -263,13 +273,17 @@ class MeetingSerializer(serializers.ModelSerializer):
         slug_field="name")
     # For READ: Show detailed info (Username + Full Name)
     user_details = serializers.SerializerMethodField()
+    created_at = serializers.SerializerMethodField()
     # schedule_time = serializers.SerializerMethodField()
     class Meta:
         model = Meeting
         fields = [
             'id', 'users', 'user_details', 'meeting_type', 
-            'time', 'meeting_room', 'is_active',"created_at"
+            'time', 'meeting_room', 'is_active', "created_at"
         ]
+
+    def get_created_at(self, obj):
+        return gmt_to_ist_str(obj.created_at, "%d/%m/%Y %H:%M:%S") if obj.created_at else None
 
     def get_user_details(self, obj):
         return [

@@ -14,4 +14,6 @@ urlpatterns = [
                 path("joinGroupCall/", join_group_call, name="join_group_call"),
                 path("leaveGroupCall/", leave_group_call, name="leave_group_call"),
                 path("endGroupCall/", end_group_call, name="end_group_call"),
-                path("activeGroupCalls/", get_active_group_calls, name="active_group_calls"),]
+                path("activeGroupCalls/", get_active_group_calls, name="active_group_calls"),
+    path("callHistory/", get_call_history, name="call_history"),
+]

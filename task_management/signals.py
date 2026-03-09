@@ -4,14 +4,18 @@ Task management signals: counts, logs, and WebSocket notifications.
 Important: Django dispatches signals synchronously. Receivers must be sync functions.
 Async receivers are never awaited, so notification/WebSocket would never run.
 """
+import logging
 from asgiref.sync import async_to_sync
 from django.db.models.signals import post_save
 from django.dispatch import receiver
+from django.utils import timezone
 from channels.layers import get_channel_layer
-from accounts.filters import  _get_users_Name_sync
+from accounts.filters import _get_users_Name_sync
 
 from .models import Task, TaskAssignies, AssingnedTasksCount, CreatedTasksCount, TaskCreateAndEditLogs, TaskMessage
 from notifications.models import Notification, notification_type
+
+logger = logging.getLogger(__name__)
 
 
 def _add_task_count_for_assignee_sync(sender, created, instance: TaskAssignies, **kwargs):
@@ -103,35 +107,44 @@ def _task_message_notification_sync(sender, created, instance: TaskMessage, **kw
     task = instance.task
     sender_user = instance.sender
     sender_name = _get_users_Name_sync(sender_user)
-    message_preview = (instance.message[:20] + "…") if len(instance.message) > 80 else instance.message
+    message_preview = (instance.message[:20] + "…") if len(instance.message) > 20 else instance.message
     msg = message_preview
     try:
         nt = notification_type.objects.get(type_name="Task_Message")
     except notification_type.DoesNotExist:
-        return
+        nt = None
     assignees = TaskAssignies.objects.filter(task=task).select_related("assigned_to")
     channel_layer = get_channel_layer()
+    if not channel_layer:
+        return
     for ta in assignees:
         assignee = ta.assigned_to
         if assignee == sender_user:
             continue
-        notification_obj = Notification.objects.create(
-            from_user=sender_user,
-            receipient=assignee,
-            message=msg,
-            type_of_notification=nt,
-        )
-        async_to_sync(channel_layer.group_send)(
-            f"user_{assignee.username}",
-            {
-                "type": "send_notification",
-                "title": f"Task Message for the task '{task.title}'",
-                "from":sender_name,
-                "category": "Task_Message",
-                "message": msg,
-                "extra": {"time": notification_obj.created_at.strftime("%d/%m/%Y, %H:%M:%S")},
-            },
-        )
+        try:
+            if nt:
+                notification_obj = Notification.objects.create(
+                    from_user=sender_user,
+                    receipient=assignee,
+                    message=msg,
+                    type_of_notification=nt,
+                )
+                extra_time = notification_obj.created_at.strftime("%d/%m/%Y, %H:%M:%S")
+            else:
+                extra_time = timezone.now().strftime("%d/%m/%Y, %H:%M:%S")
+            async_to_sync(channel_layer.group_send)(
+                f"user_{assignee.username}",
+                {
+                    "type": "send_notification",
+                    "title": f"Task Message for the task '{task.title}'",
+                    "from": sender_name,
+                    "category": "Task_Message",
+                    "message": msg,
+                    "extra": {"time": extra_time},
+                },
+            )
+        except Exception as e:
+            logger.warning("Task message WebSocket notification failed for assignee %s: %s", assignee.username, e)
 
 
 @receiver(post_save, sender=TaskMessage)

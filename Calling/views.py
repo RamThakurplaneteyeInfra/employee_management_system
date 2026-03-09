@@ -8,6 +8,7 @@ from datetime import timedelta
 
 from accounts.models import User, Profile
 from ems.verify_methods import *
+from ems.utils import gmt_to_ist_str
 from .models import Call, GroupCall, GroupCallParticipant
 
 # ==================== Voice/Video Call APIs ====================
@@ -333,7 +334,7 @@ def _get_pending_calls_sync(user):
             "sender": c.sender.username,
             "receiver": c.receiver.username,
             "call_type": c.call_type,
-            "timestamp": c.timestamp.isoformat(),
+            "timestamp": gmt_to_ist_str(c.timestamp, "%d/%m/%Y %H:%M:%S") if c.timestamp else None,
         }
         for c in calls
     ]
@@ -354,7 +355,7 @@ def _get_active_calls_sync(user):
             "receiver": c.receiver.username,
             "call_type": c.call_type,
             "status": c.status,
-            "timestamp": c.timestamp.isoformat(),
+            "timestamp": gmt_to_ist_str(c.timestamp, "%d/%m/%Y %H:%M:%S") if c.timestamp else None,
         }
         for c in calls
     ]
@@ -798,7 +799,7 @@ def _get_active_group_calls_sync(user):
             "creator": gc.creator.username,
             "call_type": gc.call_type,
             "status": gc.status,
-            "created_at": gc.created_at.isoformat(),
+            "created_at": gmt_to_ist_str(gc.created_at, "%d/%m/%Y %H:%M:%S") if gc.created_at else None,
             "participants_joined": joined,
             "participants_invited": invited,
         })
@@ -840,4 +841,93 @@ async def get_callable_users(request: HttpRequest):
         return verifyGet(request)
     result = await sync_to_async(_get_callable_users_sync)(request.user)
     return JsonResponse(result, safe=False)
-# Create your views here.
+
+
+# ==================== Call history (individual + group, sorted by time) ====================
+
+def _get_display_name(user):
+    """Return Profile.Name for user if exists, else username."""
+    try:
+        profile = Profile.objects.get(Employee_id=user)
+        return profile.Name or user.username
+    except Profile.DoesNotExist:
+        return user.username
+
+
+def _display_name_map(usernames):
+    """Return dict username -> display name (Profile.Name or username)."""
+    if not usernames:
+        return {}
+    profiles = Profile.objects.filter(Employee_id__username__in=usernames).values_list("Employee_id__username", "Name")
+    name_map = {uname: (name or uname) for uname, name in profiles}
+    return {uname: name_map.get(uname, uname) for uname in usernames}
+
+
+def _get_call_history_sync(user):
+    """Fetch all calls (Call + GroupCall) for user, sort by timestamp desc, add initiator and initiator_name."""
+    history = []
+
+    # ---- Individual calls (Call) ----
+    calls = Call.objects.filter(Q(sender=user) | Q(receiver=user)).select_related("sender", "receiver")
+    for c in calls:
+        initiator_user = c.sender
+        initiator = user == c.sender
+        name_map = _display_name_map([c.sender.username, c.receiver.username])
+        initiator_name = name_map.get(initiator_user.username, initiator_user.username)
+        participant_names = [name_map.get(c.sender.username, c.sender.username), name_map.get(c.receiver.username, c.receiver.username)]
+        history.append({
+            "sort_at": c.timestamp,
+            "call_kind": "individual",
+            "id": c.id,
+            "sender": c.sender.username,
+            "receiver": c.receiver.username,
+            "call_type": c.call_type,
+            "status": c.status,
+            "timestamp": gmt_to_ist_str(c.timestamp, "%d/%m/%Y %H:%M:%S") if c.timestamp else None,
+            "initiator": initiator,
+            "initiator_name": initiator_name,
+            "participant": participant_names,
+        })
+
+    # ---- Group calls (GroupCall) ----
+    creator_calls = GroupCall.objects.filter(creator=user).prefetch_related("participants__user")
+    group_participation = GroupCallParticipant.objects.filter(user=user).values_list("group_call_id", flat=True)
+    group_call_ids = set(creator_calls.values_list("id", flat=True)) | set(group_participation)
+    group_calls = GroupCall.objects.filter(id__in=group_call_ids).select_related("creator").prefetch_related("participants__user")
+
+    for gc in group_calls:
+        initiator_user = gc.creator
+        initiator = user == gc.creator
+        participant_usernames = list(
+            GroupCallParticipant.objects.filter(group_call=gc).values_list("user__username", flat=True)
+        )
+        name_map = _display_name_map(participant_usernames) if participant_usernames else {}
+        initiator_name = name_map.get(gc.creator.username, gc.creator.username)
+        participant_names = [name_map.get(u, u) for u in participant_usernames]
+        history.append({
+            "sort_at": gc.created_at,
+            "call_kind": "group",
+            "id": gc.id,
+            "creator": gc.creator.username,
+            "call_type": gc.call_type,
+            "status": gc.status,
+            "created_at": gmt_to_ist_str(gc.created_at, "%d/%m/%Y %H:%M:%S") if gc.created_at else None,
+            "initiator": initiator,
+            "initiator_name": initiator_name,
+            "participant": participant_names,
+        })
+
+    # Sort by timestamp descending (last first)
+    history.sort(key=lambda x: x["sort_at"], reverse=True)
+    for item in history:
+        del item["sort_at"]
+    return history
+
+
+@login_required
+async def get_call_history(request: HttpRequest):
+    """GET: Call history for current user. Individual and group calls sorted by time (newest first)."""
+    if verifyGet(request):
+        return verifyGet(request)
+    result = await sync_to_async(_get_call_history_sync)(request.user)
+    return JsonResponse(result, safe=False)

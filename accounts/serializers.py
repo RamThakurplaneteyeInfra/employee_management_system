@@ -4,6 +4,7 @@ Serializers for accounts app (leave applications, etc.).
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
 
+from ems.utils import gmt_to_ist_str
 from .models import LeaveApplicationData, LeaveTypes, LeaveStatus, Profile
 
 User = get_user_model()
@@ -24,6 +25,7 @@ class LeaveApplicationListSerializer(serializers.ModelSerializer):
     """Read-only serializer for list/retrieve; char/name fields only, no FK ids. User names from Profile.Name."""
     applicant_name = serializers.SerializerMethodField()
     team_lead_name = serializers.SerializerMethodField()
+    alternative_name = serializers.SerializerMethodField()
     leave_type_name = serializers.CharField(source="leave_type.name", read_only=True)
     team_lead_approval_status = serializers.CharField(
         source="team_lead_approval.name", read_only=True, allow_null=True
@@ -37,6 +39,7 @@ class LeaveApplicationListSerializer(serializers.ModelSerializer):
     admin_approval_status = serializers.CharField(
         source="admin_approval.name", read_only=True, allow_null=True
     )
+    approved_by_MD_at = serializers.SerializerMethodField()
 
     class Meta:
         model = LeaveApplicationData
@@ -44,6 +47,7 @@ class LeaveApplicationListSerializer(serializers.ModelSerializer):
             "id",
             "applicant_name",
             "team_lead_name",
+            "alternative_name",
             "start_date",
             "duration_of_days",
             "leave_subject",
@@ -67,11 +71,18 @@ class LeaveApplicationListSerializer(serializers.ModelSerializer):
     def get_team_lead_name(self, obj):
         return _get_applicant_display_name(getattr(obj, "team_lead", None))
 
+    def get_alternative_name(self, obj):
+        return _get_applicant_display_name(getattr(obj, "alternative", None))
+
+    def get_approved_by_MD_at(self, obj):
+        return gmt_to_ist_str(obj.approved_by_MD_at, "%d/%m/%Y %H:%M:%S") if obj.approved_by_MD_at else None
+
 
 class LeaveApplicationResponseSerializer(serializers.ModelSerializer):
     """POST/GET response: char/name fields only (no FK ids). User names from Profile.Name."""
     applicant_name = serializers.SerializerMethodField()
     team_lead_name = serializers.SerializerMethodField()
+    alternative_name = serializers.SerializerMethodField()
     leave_type_name = serializers.CharField(source="leave_type.name", read_only=True)
     team_lead_approval_status = serializers.CharField(
         source="team_lead_approval.name", read_only=True, allow_null=True
@@ -85,6 +96,7 @@ class LeaveApplicationResponseSerializer(serializers.ModelSerializer):
     admin_approval_status = serializers.CharField(
         source="admin_approval.name", read_only=True, allow_null=True
     )
+    approved_by_MD_at = serializers.SerializerMethodField()
 
     class Meta:
         model = LeaveApplicationData
@@ -92,6 +104,7 @@ class LeaveApplicationResponseSerializer(serializers.ModelSerializer):
             "id",
             "applicant_name",
             "team_lead_name",
+            "alternative_name",
             "start_date",
             "duration_of_days",
             "leave_subject",
@@ -114,6 +127,12 @@ class LeaveApplicationResponseSerializer(serializers.ModelSerializer):
     def get_team_lead_name(self, obj):
         return _get_applicant_display_name(getattr(obj, "team_lead", None))
 
+    def get_alternative_name(self, obj):
+        return _get_applicant_display_name(getattr(obj, "alternative", None))
+
+    def get_approved_by_MD_at(self, obj):
+        return gmt_to_ist_str(obj.approved_by_MD_at, "%d/%m/%Y %H:%M:%S") if obj.approved_by_MD_at else None
+
 
 class LeaveApplicationCreateSerializer(serializers.ModelSerializer):
     """Create leave application (regular). leave_type as string (Full_day/Half_day); validation by type."""
@@ -121,6 +140,7 @@ class LeaveApplicationCreateSerializer(serializers.ModelSerializer):
     leave_type = serializers.CharField(max_length=20, trim_whitespace=True)
     # Optional for Half_day (defaulted to 1 in validate()); required >= 1 for Full_day
     duration_of_days = serializers.IntegerField(required=False, allow_null=True, min_value=0)
+    alternative = serializers.CharField(required=False, allow_blank=True, allow_null=True)
 
     class Meta:
         model = LeaveApplicationData
@@ -132,8 +152,18 @@ class LeaveApplicationCreateSerializer(serializers.ModelSerializer):
             "reason",
             "leave_type",
             "half_day_slots",
+            "alternative",
             "is_emergency",
         ]
+
+    def validate_alternative(self, value):
+        if not value or (isinstance(value, str) and not value.strip()):
+            return None
+        username = value.strip()
+        try:
+            return User.objects.get(username=username)
+        except User.DoesNotExist:
+            raise serializers.ValidationError("Alternative user with this username does not exist.")
 
     def validate_leave_type(self, value):
         name = (value or "").strip()
@@ -180,6 +210,7 @@ class LeaveApplicationEmergencyCreateSerializer(serializers.ModelSerializer):
     """HR-only: create emergency leave on behalf of any user. applicant = username, leave_type = string, with optional note."""
     applicant = serializers.CharField(trim_whitespace=True)
     leave_type = serializers.CharField(max_length=20, trim_whitespace=True)
+    alternative = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     hr_approval_status = serializers.ChoiceField(
         choices=[("Approved", "Approved"), ("Pending", "Pending"), ("Rejected", "Rejected")],
         default="Approved",
@@ -197,9 +228,19 @@ class LeaveApplicationEmergencyCreateSerializer(serializers.ModelSerializer):
             "reason",
             "leave_type",
             "half_day_slots",
+            "alternative",
             "note",
             "hr_approval_status",
         ]
+
+    def validate_alternative(self, value):
+        if not value or (isinstance(value, str) and not value.strip()):
+            return None
+        username = value.strip()
+        try:
+            return User.objects.get(username=username)
+        except User.DoesNotExist:
+            raise serializers.ValidationError("Alternative user with this username does not exist.")
 
     def validate_leave_type(self, value):
         name = (value or "").strip()
@@ -238,6 +279,7 @@ class LeaveApplicationUpdateSerializer(serializers.ModelSerializer):
     MD_approval = serializers.CharField(required=False, allow_blank=False)
     admin_approval = serializers.CharField(required=False, allow_blank=False)
     leave_type = serializers.CharField(required=False, allow_blank=True)
+    alternative = serializers.CharField(required=False, allow_blank=True, allow_null=True)
 
     class Meta:
         model = LeaveApplicationData
@@ -248,11 +290,21 @@ class LeaveApplicationUpdateSerializer(serializers.ModelSerializer):
             "reason",
             "leave_type",
             "half_day_slots",
+            "alternative",
             "team_lead_approval",
             "HR_approval",
             "MD_approval",
             "admin_approval",
         ]
+
+    def validate_alternative(self, value):
+        if value is None or (isinstance(value, str) and not value.strip()):
+            return None
+        username = (value or "").strip()
+        try:
+            return User.objects.get(username=username)
+        except User.DoesNotExist:
+            raise serializers.ValidationError("Alternative user with this username does not exist.")
 
     _APPROVAL_NAMES = {"Approved", "Pending", "Rejected"}
     _LEAVE_TYPE_NAMES = {"Full_day", "Half_day"}

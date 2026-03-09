@@ -157,6 +157,7 @@ def _get_all_employees_sync():
                 "Department": department,
                 "Role": role,
                 "Teamleader": lead,
+                "TL_id": p.Teamlead.username if p.Teamlead else None,
                 "Photo_link": p.Photo_link.url if p.Photo_link else None,
                 "Employee_id": p.Employee_id.username,
                 "Date_of_join": p.Date_of_join,

@@ -115,9 +115,9 @@ def _get_addeded_entries_sync(request: HttpRequest, **argu):
         else:
             raise ValueError("Insufficient query data")
         if user_obj and month_and_quater_obj:
-            entries = UsersEntries.objects.select_related("user", "month_and_quater_id", "status").filter(user=user_obj, month_and_quater_id=month_and_quater_obj).order_by("date")
+            entries = UsersEntries.objects.select_related("user", "month_and_quater_id", "status", "product").filter(user=user_obj, month_and_quater_id=month_and_quater_obj).order_by("date")
         elif user_obj and date_val and month_and_quater_obj:
-            entries = UsersEntries.objects.select_related("user", "month_and_quater_id", "status").filter(user=user_obj, month_and_quater_id=month_and_quater_obj, date=date_val).order_by("date")
+            entries = UsersEntries.objects.select_related("user", "month_and_quater_id", "status", "product").filter(user=user_obj, month_and_quater_id=month_and_quater_obj, date=date_val).order_by("date")
         else:
             return JsonResponse({"error": "invalid query parameter"}, status=status.HTTP_203_NON_AUTHORITATIVE_INFORMATION)
         data = []
@@ -131,6 +131,7 @@ def _get_addeded_entries_sync(request: HttpRequest, **argu):
                 "date": entry.date,
                 "status": entry.status.status_name,
                 "month_quater_id": entry.month_and_quater_id.quater.quater,
+                "product_name": entry.product.name if entry.product else None,
             })
         return data
     except ValueError:

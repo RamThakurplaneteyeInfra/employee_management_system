@@ -30,6 +30,7 @@ urlpatterns = [
     path('adminapi/', include('adminpanel.urls'),name="adminpanelapi"),
     path('eventsapi/', include('events.urls'),name="eventsapi"),
     path('clientsapi/', include('Clients.urls'), name="clientsapi"),
+    path("projectapi/", include("project.urls"), name="project"),
 ]
 
 if True:

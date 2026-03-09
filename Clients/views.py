@@ -5,32 +5,27 @@ No database changes. Uses existing ClientProfile, CurrentClientStage, ClientProf
 import json
 from ems.RequiredImports import sync_to_async, JsonResponse, status, HttpRequest
 from ems.verify_methods import verifyGet, verifyPost, verifyPut, verifyPatch, verifyDelete, load_data
+from ems.utils import gmt_to_ist_str
 from accounts.snippet import login_required, csrf_exempt
 from accounts.models import User
 from django.db.models import Prefetch
 from .models import ClientProfile, CurrentClientStage, ClientProfileMembers, ClientConversation
-from project.models import Project
-
-# Static product list for dropdown - no DB
-PRODUCT_NAMES = [
-    "Cropeye",
-    "BMS",
-    "RAMS",
-    "Climateye",
-    "solar",
-    "cropeyeApp",
-    "Topography",
-    "Nearlive crop monitoring",
-]
+from project.models import Project, Product
 
 
-# ==================== Products (static list) ====================
+def _product_list_sync():
+    """Fetch all products from database (id, name) for dropdown."""
+    return list(Product.objects.all().order_by("name").values("id", "name"))
+
+
+# ==================== Products (from database) ====================
 @login_required
 async def product_list(request: HttpRequest):
-    """GET /clientsapi/products/ - Returns static product list for dropdown."""
+    """GET /clientsapi/products/ - Returns product list from database for dropdown."""
     if verifyGet(request):
         return verifyGet(request)
-    return JsonResponse(PRODUCT_NAMES, safe=False)
+    data = await sync_to_async(_product_list_sync)()
+    return JsonResponse(data, safe=False)
 
 
 # ==================== Employees list ====================
@@ -83,7 +78,7 @@ def _note_to_dict(conv):
         "id": conv.id,
         "note": conv.note,
         "created_by": conv.created_by.username if conv.created_by else None,
-        "created_at": conv.created_at.isoformat(),
+        "created_at": gmt_to_ist_str(conv.created_at, "%d/%m/%Y %H:%M:%S") if conv.created_at else None,
     }
 
 
@@ -105,8 +100,8 @@ def _profile_to_dict(c):
         "created_by": c.created_by.username if c.created_by else None,
         "members": [_get_user_display_name(u) for u in c.members.all()],
         "notes": notes,
-        "created_at": c.created_at.isoformat(),
-        "updated_at": c.updated_at.isoformat(),
+        "created_at": gmt_to_ist_str(c.created_at, "%d/%m/%Y %H:%M:%S") if c.created_at else None,
+        "updated_at": gmt_to_ist_str(c.updated_at, "%d/%m/%Y %H:%M:%S") if c.updated_at else None,
     }
 
 

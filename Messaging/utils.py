@@ -34,5 +34,5 @@ def gmt_to_ist_date_str(dt):
 
 
 def gmt_to_ist_time_str(dt):
-    """IST time only: %H:%M."""
-    return gmt_to_ist_str(dt, "%H:%M") if dt else None
+    """IST time only: %H:%M:%S."""
+    return gmt_to_ist_str(dt, "%H:%M:%S") if dt else None

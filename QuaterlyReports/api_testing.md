@@ -1,10 +1,11 @@
-# Quaterly Reports – Actionable Entries APIs (Testing reference)
+# Quaterly Reports – API testing reference (Postman)
 
-<!-- Base URL: `http://localhost:8000` (or your server).  
-Endpoints below are at the **root** (e.g. `/ActionableEntries/`).  
-All require **logged-in user** (session/cookie auth).
+**Base URL:** `http://localhost:8000/` (or your server). QuaterlyReports routes are at the **root** (no prefix).  
+**Auth:** All endpoints require a **logged-in user** (session/cookie).
 
---- -->
+This doc covers: user day entries (add/get/change/delete), monthly schedule (by department), meeting head/subhead, functions & goals, and actionable entries (list/create/share/co-author/shared-with).
+
+---
 
 ## Status and share chain
 
@@ -15,7 +16,7 @@ All require **logged-in user** (session/cookie auth).
 
 ## 1. List / Create actionable entries
 
-<!-- | Field    | Value |
+| Field    | Value |
 |----------|--------|
 | **Method** | `GET` (list) \| `POST` (create) |
 | **URL**    | `{{baseurl}}/ActionableEntries/` |
@@ -40,6 +41,7 @@ All require **logged-in user** (session/cookie auth).
   "shared_note": "Note for the first share.",
   "date": "2026-03-15",
   "original_entry": "Entry note.",
+  "product": "Product A",
   "final_Status": null
 }
 ```
@@ -52,11 +54,12 @@ All require **logged-in user** (session/cookie auth).
 | shared_note    | string | No       | Note for the first share (stored in `FunctionsEntriesShare.shared_note`). |
 | date           | string | Yes      | YYYY-MM-DD. |
 | original_entry | string | Yes      | Creator’s entry text. |
+| product        | string | No       | **Full product name** (must exist in Product table). Omit or leave blank for no product. |
 | final_Status   | string | No       | Default PENDING. |
 
-**Success (201):** Created entry with `share_chain` (one item; `co_author` and `share_with` are required on create).
+**Success (201):** Created entry with `share_chain` (one item); response includes **product_name** (full product name or null). `co_author` and `share_with` are required on create.
 
---- -->
+---
 
 ## 2. Get / Update / Delete one entry
 
@@ -164,28 +167,222 @@ Single endpoint for fetching co-author entries and changing approval status.
 
 ---
 
-## 6. Other endpoints (unchanged)
+## 6. Other endpoints (user entries, schedule, meeting head, functions & goals)
 
-| Purpose                    | Method | URL |
-|----------------------------|--------|-----|
-| Add day entries            | POST   | `{{baseurl}}/addDayEntries/` |
-| Get user entries           | GET    | `{{baseurl}}/getUserEntries/` |
-| Change user entry status   | PATCH  | `{{baseurl}}/changeStatus/<user_entry_id>/` |
-| Delete user entry          | DELETE | `{{baseurl}}/deleteEntry/<user_entry_id>/` |
-| Get monthly schedule       | GET    | `{{baseurl}}/getMonthlySchedule/<user_id>/` |
-| Add meeting head/subhead   | POST   | `{{baseurl}}/addMeetingHeadSubhead/` |
-| Get functions & goals      | GET    | `{{baseurl}}/get_functions_and_actionable_goals/?function_name=<name>` |
+All below use **base URL** = root (e.g. `http://localhost:8000/`). QuaterlyReports routes are mounted at root. All require **logged-in user** (session/cookie).
+
+### 6.1 Get monthly schedule (by department)
+
+| Field    | Value |
+|----------|--------|
+| **Method** | `GET` |
+| **URL**    | `{{baseurl}}/getMonthlySchedule/?department=<department_name>` |
+
+**Query parameters:**
+
+| Key        | Required | Description |
+|------------|----------|-------------|
+| department | **Yes**  | Department name (e.g. `Engineering`). Alternatively use `dept` instead of `department`. |
+| month      | No       | Month name (e.g. `April`) – if omitted, current financial year’s month is used. |
+| quater     | No       | Quarter (e.g. `Q1`) – required together with `month` when specifying a specific month. |
+
+**Postman example:**
+
+- URL: `http://localhost:8000/getMonthlySchedule/?department=Engineering`
+- Optional: `http://localhost:8000/getMonthlySchedule/?department=Engineering&quater=Q1&month=April`
+
+**Success (200):** Array of objects with `id`, `quater`, `financial_year`, `month`, `actual_month`, `Meeting-head`, `Sub-Meeting-head`, `sub-head-D1`, `sub-head-D2`, `sub-head-D3`.
 
 ---
 
-## Quick reference – Actionable entries
+### 6.2 Add day entries
 
-| Purpose              | Method | URL |
-|----------------------|--------|-----|
-| List / create entries| GET / POST | `/ActionableEntries/` |
-| Get / update / delete one | GET / PUT / PATCH / DELETE | `/ActionableEntriesByID/<id>/` |
-| Share further        | POST   | `/ActionableEntriesByID/<id>/share/` |
-| Co-author list, detail, approve | GET / PATCH | `/ActionableEntriesCoAuthor/`, `/ActionableEntriesCoAuthor/<id>/` |
-| Shared-with list/detail | GET / PATCH | `/ActionableEntriesSharedWith/`, `/ActionableEntriesSharedWith/<id>/` |
+| Field    | Value |
+|----------|--------|
+| **Method** | `POST` |
+| **URL**    | `{{baseurl}}/addDayEntries/` |
 
-**TaskStatus values:** `PENDING`, `INPROCESS`, `COMPLETED` (confirm in your DB).
+**Headers:** `Content-Type: application/json`
+
+**Body (example):**
+
+```json
+{
+  "date": "2026-03-15",
+  "month_quater_id": 1,
+  "product": "Product A",
+  "entries": [
+    {
+      "note": "Completed report review",
+      "status": "Done"
+    },
+    {
+      "note": "Follow-up meeting",
+      "status": "Pending"
+    }
+  ]
+}
+```
+
+| Key              | Type   | Required | Description |
+|------------------|--------|----------|-------------|
+| date             | string | **Yes**  | Date in YYYY-MM-DD. |
+| month_quater_id  | int    | **Yes**  | ID of `Monthly_department_head_and_subhead` record. |
+| product          | string | No       | **Full product name** (applies to all entries in this request). Must exist in Product table. Omit or leave blank for no product. |
+| entries          | array  | **Yes**  | List of entry objects. |
+| entries[].note   | string | **Yes**  | Entry note. |
+| entries[].status | string | **Yes**  | Task status name (e.g. `Done`, `Pending`). |
+
+**Success (201):** `{"message": "Entries created successfully", "created_entry_ids": [1, 2]}`.
+
+---
+
+### 6.3 Get user entries
+
+| Field    | Value |
+|----------|--------|
+| **Method** | `GET` |
+| **URL**    | `{{baseurl}}/getUserEntries/?username=<username>&quater=<Q>&month=<month>&department=<dept_name>` |
+
+**Query parameters:**
+
+| Key        | Required | Description |
+|------------|----------|-------------|
+| username   | **Yes**  | Username of the user whose entries to fetch. |
+| quater     | **Yes**  | Quarter (e.g. `Q1`, `Q2`, `Q3`, `Q4`). |
+| month      | **Yes**  | Month (e.g. `April`). |
+| department | **Yes**  | Department name. |
+| date       | No       | If provided, filter entries to this date (YYYY-MM-DD). |
+
+**Postman example:**
+
+- URL: `http://localhost:8000/getUserEntries/?username=jane&quater=Q1&month=April&department=Engineering`
+
+**Success (200):** Array of entry objects. Each has: `id`, `note`, `meeting_head`, `meeting_sub_head`, `username`, `date`, `status`, `month_quater_id`, **`product_name`** (full product name or `null`).
+
+---
+
+### 6.4 Change user entry status
+
+| Field    | Value |
+|----------|--------|
+| **Method** | `PATCH` |
+| **URL**    | `{{baseurl}}/changeStatus/<user_entry_id>/` |
+
+**Headers:** `Content-Type: application/json`
+
+**Body (example):**
+
+```json
+{
+  "change_Status_to": "Done"
+}
+```
+
+| Key               | Type   | Required | Description |
+|-------------------|--------|----------|-------------|
+| change_Status_to  | string | **Yes**  | New status name (e.g. `Done`, `Pending`). |
+
+**Postman example:**
+
+- URL: `http://localhost:8000/changeStatus/42/`
+- Body: `{"change_Status_to": "Done"}`
+
+---
+
+### 6.5 Delete user entry
+
+| Field    | Value |
+|----------|--------|
+| **Method** | `DELETE` |
+| **URL**    | `{{baseurl}}/deleteEntry/<user_entry_id>/` |
+
+No body. Only the entry owner can delete.
+
+**Postman example:**
+
+- URL: `http://localhost:8000/deleteEntry/42/`
+
+**Success (200):** `{"message": "entry deleted successfully"}`.
+
+---
+
+### 6.6 Add meeting head / subhead
+
+| Field    | Value |
+|----------|--------|
+| **Method** | `POST` |
+| **URL**    | `{{baseurl}}/addMeetingHeadSubhead/` |
+
+**Headers:** `Content-Type: application/json`
+
+**Body (example):**
+
+```json
+{
+  "dept": "Engineering",
+  "month": 1,
+  "head": "Meeting Head Name",
+  "sub_head": "Sub Head Name",
+  "sub_d1": "Sub Head D1",
+  "sub_d2": "Sub Head D2",
+  "sub_d3": "Sub Head D3"
+}
+```
+
+| Key       | Type   | Required | Description |
+|-----------|--------|----------|-------------|
+| dept      | string | **Yes**  | Department name. |
+| month     | int    | **Yes**  | Month-of-quarter value (e.g. 1, 2, 3 for Q1). |
+| head      | string | **Yes**  | Meeting head. |
+| sub_head  | string | **Yes**  | Meeting sub-head. |
+| sub_d1    | string | **Yes**  | Sub-head D1. |
+| sub_d2    | string | **Yes**  | Sub-head D2. |
+| sub_d3    | string | **Yes**  | Sub-head D3. |
+
+**Success (200):** `{"Message": "added successfully"}`.
+
+---
+
+### 6.7 Get functions and actionable goals
+
+| Field    | Value |
+|----------|--------|
+| **Method** | `GET` |
+| **URL**    | `{{baseurl}}/get_functions_and_actionable_goals/?function_name=<name>` |
+
+**Query parameters:**
+
+| Key            | Required | Description |
+|----------------|----------|-------------|
+| function_name  | **Yes**  | Function name (case-insensitive). |
+
+**Postman example:**
+
+- URL: `http://localhost:8000/get_functions_and_actionable_goals/?function_name=Sales`
+
+**Success (200):** Object with `function` and `functional_goals` (list of main goals and actionable goals with `actionable_id`, `purpose`, `grp_id`).
+
+---
+
+## Quick reference – All QuaterlyReports APIs (Postman)
+
+**Base URL:** `http://localhost:8000/` (or your server root). All require **logged-in session**.
+
+| Purpose                    | Method | URL | Body / Params |
+|----------------------------|--------|-----|----------------|
+| Get monthly schedule       | GET    | `/getMonthlySchedule/?department=<dept_name>` | Query: **department** (or **dept**); optional: **month**, **quater** |
+| Add day entries            | POST   | `/addDayEntries/` | Body: `date`, `month_quater_id`, optional `product` (name, applies to all entries), `entries` (each: `note`, `status`) |
+| Get user entries           | GET    | `/getUserEntries/?username=&quater=&month=&department=` | Query: **username**, **quater**, **month**, **department**; optional: **date** |
+| Change user entry status   | PATCH  | `/changeStatus/<user_entry_id>/` | Body: `{"change_Status_to": "Done"}` |
+| Delete user entry          | DELETE | `/deleteEntry/<user_entry_id>/` | No body |
+| Add meeting head/subhead   | POST   | `/addMeetingHeadSubhead/` | Body: `dept`, `month`, `head`, `sub_head`, `sub_d1`, `sub_d2`, `sub_d3` |
+| Get functions & goals     | GET    | `/get_functions_and_actionable_goals/?function_name=<name>` | Query: **function_name** |
+| List / create actionable entries | GET / POST | `/ActionableEntries/` | POST: see section 1 |
+| Get / update / delete one entry | GET / PUT / PATCH / DELETE | `/ActionableEntriesByID/<id>/` | PATCH: see section 2 |
+| Share further              | POST   | `/ActionableEntriesByID/<id>/share/` | Body: `share_with`, optional `shared_note` |
+| Co-author list, detail, approve | GET / PATCH | `/ActionableEntriesCoAuthor/`, `/ActionableEntriesCoAuthor/<id>/` | PATCH: e.g. `approved_by_coauthor`, `co_author_note` |
+| Shared-with list/detail    | GET / PATCH | `/ActionableEntriesSharedWith/`, `/ActionableEntriesSharedWith/<id>/` | PATCH: `share_note`, `individual_status` |
+
+**TaskStatus values (user entries):** e.g. `Done`, `Pending` (confirm in your DB).  
+**Actionable entry status:** `PENDING`, `INPROCESS`, `COMPLETED`.

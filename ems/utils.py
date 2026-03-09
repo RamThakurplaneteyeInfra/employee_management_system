@@ -24,14 +24,14 @@ def gmt_to_ist_date_str(dt):
 
 
 def gmt_to_ist_time_str(dt):
-    """IST time only: %H:%M."""
+    """IST time only: %H:%M:%S."""
     if dt is None:
         return None
     if isinstance(dt, date) and not isinstance(dt, datetime):
         return None
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(IST).strftime("%H:%M")
+    return dt.astimezone(IST).strftime("%H:%M:%S")
 
 
 def custom_exception_handler(exc, context):

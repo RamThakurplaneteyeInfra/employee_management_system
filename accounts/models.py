@@ -222,6 +222,14 @@ class LeaveApplicationData(models.Model):
         related_name="leave_applications_as_teamlead",
         db_column="team_lead_id",
     )
+    alternative = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="leave_applications_as_alternative",
+        db_column="alternative_id",
+    )
     start_date = models.DateField()
     duration_of_days = models.SmallIntegerField()
     leave_subject = models.CharField(max_length=255)

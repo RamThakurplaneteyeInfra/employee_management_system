@@ -111,6 +111,21 @@ def _set_team_lead_from_profile(application, applicant):
     application.team_lead = teamlead
 
 
+def _increment_used_leaves(applicant, duration_of_days):
+    """
+    When MD approves a (non-emergency) leave, add duration to applicant's LeaveSummary.used_leaves.
+    Emergency leave already updates used_leaves in emergency_leave().
+    """
+    if not applicant or (duration_of_days or 0) <= 0:
+        return
+    summary, _ = LeaveSummary.objects.get_or_create(
+        user=applicant,
+        defaults={"total_leaves": 0, "used_leaves": 0},
+    )
+    summary.used_leaves = (summary.used_leaves or 0) + duration_of_days
+    summary.save(update_fields=["used_leaves"])
+
+
 def _set_approvals_by_role(application, applicant, status_map, is_md_approval_by_default=False):
     """
     Set team_lead_approval, HR_approval, admin_approval, MD_approval on application
@@ -173,7 +188,11 @@ class LeaveApplicationViewSet(ModelViewSet):
         LeaveApplicationData.objects.all()
         .select_related(
             "applicant",
+            "applicant__accounts_profile",
             "team_lead",
+            "team_lead__accounts_profile",
+            "alternative",
+            "alternative__accounts_profile",
             "leave_type",
             "team_lead_approval",
             "HR_approval",
@@ -209,14 +228,18 @@ class LeaveApplicationViewSet(ModelViewSet):
             _validate_remaining_leaves(applicant, duration)
 
         status_map = _get_leave_status_map()
+        is_md_applicant = _get_user_role_sync(applicant) == "MD"
         with transaction.atomic():
             application = serializer.save()
             _set_team_lead_from_profile(application, applicant)
-            _set_approvals_by_role(application, applicant, status_map, is_md_approval_by_default=(_get_user_role_sync(applicant) == "MD"))
+            _set_approvals_by_role(application, applicant, status_map, is_md_approval_by_default=is_md_applicant)
             application.save(update_fields=[
                 "team_lead", "team_lead_approval", "HR_approval", "MD_approval", "admin_approval",
                 "approved_by_MD_at",
             ])
+            # When applicant is MD, leave is auto-approved; deduct from leave_summary
+            if is_md_applicant and not application.is_emergency and (application.duration_of_days or 0) > 0:
+                _increment_used_leaves(applicant, application.duration_of_days)
         application.refresh_from_db()
         return Response(
             LeaveApplicationResponseSerializer(application).data,
@@ -292,7 +315,8 @@ class LeaveApplicationViewSet(ModelViewSet):
         instance = self.get_object()
         serializer = self.get_serializer(instance, data=request.data, partial=partial)
         serializer.is_valid(raise_exception=True)
-        self._apply_update_by_role(instance, serializer.validated_data, request.user)
+        with transaction.atomic():
+            self._apply_update_by_role(instance, serializer.validated_data, request.user)
         return Response(LeaveApplicationResponseSerializer(instance).data)
 
     def partial_update(self, request, *args, **kwargs):
@@ -300,7 +324,8 @@ class LeaveApplicationViewSet(ModelViewSet):
         instance = self.get_object()
         serializer = self.get_serializer(instance, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
-        self._apply_update_by_role(instance, serializer.validated_data, request.user)
+        with transaction.atomic():
+            self._apply_update_by_role(instance, serializer.validated_data, request.user)
         return Response(LeaveApplicationResponseSerializer(instance).data)
 
     def _apply_update_by_role(self, instance, validated_data, user):
@@ -312,6 +337,12 @@ class LeaveApplicationViewSet(ModelViewSet):
         is_applicant = user == instance.applicant
         is_teamlead = teamlead == user
 
+        # Capture MD approval state before we change it (for leave_summary update)
+        old_md_approved = (
+            instance.MD_approval
+            and getattr(instance.MD_approval, "name", None) == "Approved"
+        )
+
         approval_updates = {}
         if "team_lead_approval" in validated_data and is_teamlead:
             approval_updates["team_lead_approval"] = validated_data.pop("team_lead_approval")
@@ -322,13 +353,23 @@ class LeaveApplicationViewSet(ModelViewSet):
         if "MD_approval" in validated_data and role == "MD":
             md_status = validated_data.pop("MD_approval")
             approval_updates["MD_approval"] = md_status
-            if md_status.name == "Approved":
+            if md_status and md_status.name == "Approved":
                 approval_updates["approved_by_MD_at"] = timezone.now()
 
         for key, value in approval_updates.items():
             setattr(instance, key, value)
 
-        draft_fields = ("start_date", "duration_of_days", "leave_subject", "reason", "leave_type", "half_day_slots")
+        # When MD just approved (was not already Approved), deduct from leave_summary (non-emergency only; emergency already updated at create)
+        if (
+            approval_updates.get("MD_approval")
+            and getattr(approval_updates["MD_approval"], "name", None) == "Approved"
+            and not old_md_approved
+            and not instance.is_emergency
+            and (instance.duration_of_days or 0) > 0
+        ):
+            _increment_used_leaves(instance.applicant, instance.duration_of_days)
+
+        draft_fields = ("start_date", "duration_of_days", "leave_subject", "reason", "leave_type", "half_day_slots", "alternative")
         updated_fields = list(approval_updates.keys())
 
         # Applicant can update content fields only if no approval is yet Approved (draft)
@@ -383,6 +424,7 @@ class LeaveApplicationViewSet(ModelViewSet):
                 "total_leaves": summary.total_leaves,
                 "used_leaves": summary.used_leaves,
                 "remaining_leaves": summary.remaining_leaves,
+                "remaining_emergency_leave":summary.emergency_leaves
             }
         )
 

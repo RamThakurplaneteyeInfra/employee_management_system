@@ -54,13 +54,21 @@ class GRPS(models.Model):
         db_table= 'quatery_reports"."GRP'
         ordering=["grp"]
 class UsersEntries(models.Model):
-    """User entry for a month/quarter: date, status, and note."""
+    """User entry for a month/quarter: date, status, note, and optional product."""
     month_and_quater_id=models.ForeignKey(Monthly_department_head_and_subhead,on_delete=models.CASCADE,db_column="month_quater",null=False)
     user=models.ForeignKey(User,on_delete=models.CASCADE,to_field="username",db_column="Employee_id",null=False)
     date=models.DateField(auto_now=False,auto_now_add=False)
     status=models.ForeignKey(TaskStatus,editable=True,null=False,on_delete=models.CASCADE)
     note=models.TextField(null=False)
-    
+    product=models.ForeignKey(
+        "project.Product",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="users_entries",
+        db_column="product_id",
+    )
+
     class Meta:
         db_table= 'team_management"."UserEntries'
 
@@ -85,6 +93,14 @@ class ActionableGoals(models.Model):
 class FunctionsEntries(models.Model):
     """Actionable entry: creator, co_author, approval and final status. Share chain in FunctionsEntriesShare."""
     goal = models.ForeignKey(ActionableGoals, on_delete=models.CASCADE, db_column="sub_goal_id", null=True)
+    product = models.ForeignKey(
+        "project.Product",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="functions_entries",
+        db_column="product_id",
+    )
     Creator = models.ForeignKey(User, on_delete=models.CASCADE, to_field="username", db_column="Employee_id", null=False)
     co_author = models.ForeignKey(
         User,
@@ -148,19 +164,34 @@ class FunctionsEntriesShare(models.Model):
 
 class PlannedActions(models.Model):
     """Placeholder / planned actions (fields commented out)."""
-    # grp=models.ForeignKey(GRPS,on_delete=models.CASCADE,db_column="grp",null=False,verbose_name="grp")
-    # action=models.TextField(null=False)
-    # deadline=models.DateField(auto_now_add=False,auto_now=False)
-    # assigned_to=models.ForeignKey(User,on_delete=models.CASCADE,db_column="assigned_to",null=False,verbose_name="assigned_help_to")
-    # status=models.ForeignKey(TaskStatus,on_delete=models.CASCADE,db_column="status",null=False,verbose_name="status")
-    
-    # class Meta:
-    #     db_table= 'quatery_reports"."PlannedActions'
-    #     ordering=["grp","-deadline"]
+    grp=models.ForeignKey(GRPS,on_delete=models.CASCADE,db_column="grp",null=False,verbose_name="grp")
+    action=models.TextField(null=False)
+    deadline=models.DateField(auto_now_add=False,auto_now=False)
+    assigned_to=models.ForeignKey(User,on_delete=models.CASCADE,db_column="assigned_to",null=False,verbose_name="assigned_help_to")
+    status=models.ForeignKey(TaskStatus,on_delete=models.CASCADE,db_column="status",null=False,verbose_name="status")
+    product = models.ForeignKey(
+        "project.Product",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="planned_actions",
+        db_column="product_id",
+    )
+    class Meta:
+        db_table= "PlannedActions"
+        ordering=["grp","-deadline"]
     ...
 class SalesStatistics(models.Model):
     """Sales stats per GRP: sale, calls, trial, demand, conversion, etc."""
-    grp=models.ForeignKey(GRPS,on_delete=models.CASCADE,db_column="grp",null=False,verbose_name="grp")
+    grp = models.ForeignKey(GRPS, on_delete=models.CASCADE, db_column="grp", null=False, verbose_name="grp")
+    product = models.ForeignKey(
+        "project.Product",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="sales_statistics",
+        db_column="product_id",
+    )
     Sale=models.IntegerField(null=True)
     Calls=models.IntegerField(null=True)
     Trial=models.IntegerField(null=True)

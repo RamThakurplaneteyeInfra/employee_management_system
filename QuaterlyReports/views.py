@@ -1,3 +1,4 @@
+from django.http import Http404
 from ems.RequiredImports import (
     sync_to_async,
     Q,
@@ -15,6 +16,8 @@ from ems.RequiredImports import (
 from django.db.models import Prefetch
 from ems.verify_methods import *
 from accounts.filters import _get_department_obj_sync
+from accounts.models import Departments
+from project.models import Product
 from .models import *
 from task_management.filters import _get_taskStatus_object_sync
 from task_management.models import TaskStatus
@@ -39,6 +42,10 @@ from django.utils import timezone
 # Method: POST
 def _create_multiple_user_entries_sync(user, data):
     month_quater = Monthly_department_head_and_subhead.objects.get(id=data["month_quater_id"])
+    product = None
+    product_name = (data.get("product") or "").strip() if data.get("product") else None
+    if product_name:
+        product = get_object_or_404(Product, name__iexact=product_name)
     created_entries = []
     for entry in data["entries"]:
         note, status_name = entry.get("note"), entry.get("status")
@@ -46,8 +53,12 @@ def _create_multiple_user_entries_sync(user, data):
             continue
         status_obj = _get_taskStatus_object_sync(status_name=status_name)
         obj = UsersEntries.objects.create(
-            status=status_obj, user=user, month_and_quater_id=month_quater,
-            date=data["date"], note=note
+            status=status_obj,
+            user=user,
+            month_and_quater_id=month_quater,
+            date=data["date"],
+            note=note,
+            product=product,
         )
         created_entries.append(obj.id)
     return created_entries
@@ -76,7 +87,10 @@ async def create_multiple_user_entries(request: HttpRequest):
 
     except Monthly_department_head_and_subhead.DoesNotExist:
         return JsonResponse({"error": "Invalid month_quater_id"}, status=404)
-    
+
+    except Http404:
+        return JsonResponse({"error": "Product not found with the given name."}, status=404)
+
     except PermissionDenied as e:
         return JsonResponse({"error": str(e)},status=404)
 
@@ -182,51 +196,63 @@ async def delete_entry(request: HttpRequest, user_entry_id: int):
 
 
 # ==================== get_meeting_head_and_subhead ====================
-# Fetch meeting head and subhead for a user by quarter/month.
-# URL: {{baseurl}}/getMonthlySchedule/<user_id>/
-# Method: GET
-def _get_meeting_head_sync(request:HttpRequest,user_id:str):
-    user = get_object_or_404(User, username=user_id)
-    user_profile = get_object_or_404(Profile, Employee_id=user)
-    get_data=request.GET
-    if user_profile.Role.role_name in ["MD", "Admin"]:
-        return []
-    if not get_data:
+# Fetch meeting head and subhead by department name (and optional quarter/month).
+# URL: {{baseurl}}/getMonthlySchedule/?department=<department_name>
+# Method: GET. Query params: department (required), optional: month, quater
+def _get_meeting_head_sync(request: HttpRequest, department_name: str):
+    if not department_name or not str(department_name).strip():
+        return None  # caller will respond with 400
+    department_obj = get_object_or_404(Departments, dept_name=department_name.strip())
+    get_data = request.GET
+    if not get_data or "month" not in get_data or "quater" not in get_data:
         get_quater_data = get_financial_year_details()
-        actual_month = get_quater_data.get("respective_quarter_months")
         financial_year = get_quater_data.get("financial_year")
         reverse_month = get_quater_data.get("reverse_quater_month")
         quater = get_quater_data.get("quarter")
+        month = get_quater_data.get("respective_quarter_months")
     else:
         month = get_data.get("month")
-        # actual_month = month
-        # print(get_data)
-        # print(type(month))
         financial_year = get_current_financial_year()
         quater = get_data.get("quater")
-        # print(type(quater))
         reverse_month = reversed_quater_month[quater][month]
-        # print(reverse_month)
-    # quarter_obj = _get_quater_object_sync(quater=quater)
-    department_obj = user_profile.Department
     get_monthly_schedule_set = Monthly_department_head_and_subhead.objects.filter(
-        month_of_the_quater=reverse_month, department=department_obj)
-    return [{"id": obj.id, "quater": quater, "financial_year": financial_year,
-        "month": reverse_month, "actual_month": month, "Meeting-head": obj.Meeting_head,
-        "Sub-Meeting-head": obj.meeting_sub_head, "sub-head-D1": obj.Sub_Head_D1,
-        "sub-head-D2": obj.Sub_Head_D2, "sub-head-D3": obj.Sub_Head_D3}
-        for obj in get_monthly_schedule_set]
+        month_of_the_quater=reverse_month, department=department_obj
+    )
+    return [
+        {
+            "id": obj.id,
+            "quater": quater,
+            "financial_year": financial_year,
+            "month": reverse_month,
+            "actual_month": month,
+            "Meeting-head": obj.Meeting_head,
+            "Sub-Meeting-head": obj.meeting_sub_head,
+            "sub-head-D1": obj.Sub_Head_D1,
+            "sub-head-D2": obj.Sub_Head_D2,
+            "sub-head-D3": obj.Sub_Head_D3,
+        }
+        for obj in get_monthly_schedule_set
+    ]
 
 
 @login_required
-async def get_meeting_head_and_subhead(request: HttpRequest, user_id: str):
+async def get_meeting_head_and_subhead(request: HttpRequest):
+    department_name = request.GET.get("department") or request.GET.get("dept")
+    if not department_name or not str(department_name).strip():
+        return JsonResponse(
+            {"Message": "department (or dept) query parameter is required."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
     try:
-        values = await sync_to_async(_get_meeting_head_sync)(request,user_id)
+        values = await sync_to_async(_get_meeting_head_sync)(request, department_name)
         return JsonResponse(values, safe=False)
     except Http404:
-        return JsonResponse({"Message": "http 404 error occured"},status=status.HTTP_404_NOT_FOUND)
+        return JsonResponse(
+            {"Message": "Department not found or no schedule for the given criteria."},
+            status=status.HTTP_404_NOT_FOUND,
+        )
     except Exception as e:
-        return JsonResponse({"Message": f"{e}"},status=status.HTTP_501_NOT_IMPLEMENTED)
+        return JsonResponse({"Message": str(e)}, status=status.HTTP_501_NOT_IMPLEMENTED)
 
 
 # ==================== add_meeting_head_subhead ====================
@@ -313,7 +339,7 @@ def _get_entries(request: HttpRequest):
     permissible = username and user.is_superuser
     user_obj = get_object_or_404(User, username=username) if permissible else None
     base_qs = FunctionsEntries.objects.select_related(
-        "Creator__accounts_profile", "co_author__accounts_profile"
+        "Creator__accounts_profile", "co_author__accounts_profile", "product"
     ).prefetch_related(
         Prefetch(
             "share_chain",
@@ -347,7 +373,7 @@ def _create_entry(request: HttpRequest):
         entry = serializer.save(Creator=request.user)
         entry.refresh_from_db()
         entry = FunctionsEntries.objects.select_related(
-            "Creator__accounts_profile", "co_author__accounts_profile"
+            "Creator__accounts_profile", "co_author__accounts_profile", "product"
         ).prefetch_related(
             Prefetch(
                 "share_chain",
@@ -380,7 +406,7 @@ def entry_list_create(request: HttpRequest):
 
 def _get_entry_with_share_chain(entry_id):
     return FunctionsEntries.objects.select_related(
-        "Creator__accounts_profile", "co_author__accounts_profile"
+        "Creator__accounts_profile", "co_author__accounts_profile", "product"
     ).prefetch_related(
         Prefetch(
             "share_chain",
@@ -548,7 +574,7 @@ def co_author_entries_list(request):
     except (TypeError, ValueError):
         month_val = current_month
     entries = FunctionsEntries.objects.select_related(
-        "Creator__accounts_profile", "co_author__accounts_profile"
+        "Creator__accounts_profile", "co_author__accounts_profile", "product"
     ).prefetch_related(
         Prefetch(
             "share_chain",
@@ -599,7 +625,7 @@ def shared_with_entries_list(request):
     except (TypeError, ValueError):
         month_val = current_month
     entries = FunctionsEntries.objects.select_related(
-        "Creator__accounts_profile", "co_author__accounts_profile"
+        "Creator__accounts_profile", "co_author__accounts_profile", "product"
     ).filter(
         share_chain__shared_with=request.user, approved_by_coauthor=True, date__month=month_val
     ).prefetch_related(

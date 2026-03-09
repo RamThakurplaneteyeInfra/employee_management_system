@@ -1,4 +1,6 @@
 from ems.RequiredImports import serializers
+from ems.utils import gmt_to_ist_str
+from project.models import Product
 from .models import Functions, FunctionsGoals, ActionableGoals, FunctionsEntries, FunctionsEntriesShare
 from task_management.models import TaskStatus
 
@@ -38,6 +40,7 @@ def _get_completed_status():
 class FunctionsEntriesShareSerializer(serializers.ModelSerializer):
     """One share in the chain: shared_with_name (Profile), shared_note, shared_time, status_name only."""
     shared_with_name = serializers.SerializerMethodField()
+    shared_time = serializers.SerializerMethodField()
     status_name = serializers.CharField(
         source="individual_status.status_name", read_only=True, allow_null=True
     )
@@ -52,6 +55,9 @@ class FunctionsEntriesShareSerializer(serializers.ModelSerializer):
 
     def get_shared_with_name(self, obj):
         return _get_user_display_name(getattr(obj, "shared_with", None))
+
+    def get_shared_time(self, obj):
+        return gmt_to_ist_str(obj.shared_time, "%d/%m/%Y %H:%M:%S") if obj.shared_time else None
 
 
 class ActionableGoalSerializer(serializers.ModelSerializer):
@@ -80,6 +86,8 @@ class FunctionsEntriesSerializer(serializers.ModelSerializer):
     creator_name = serializers.SerializerMethodField()
     co_author_name = serializers.SerializerMethodField()
     co_author = serializers.CharField(write_only=True, required=True, allow_blank=False)
+    product_name = serializers.SerializerMethodField()
+    product = serializers.CharField(required=False, allow_blank=True, allow_null=True, write_only=True)
     final_Status = serializers.SlugRelatedField(
         slug_field="status_name",
         queryset=TaskStatus.objects.all(),
@@ -89,14 +97,30 @@ class FunctionsEntriesSerializer(serializers.ModelSerializer):
     share_chain = FunctionsEntriesShareSerializer(many=True, read_only=True)
     share_with = serializers.CharField(write_only=True, required=True, allow_blank=False)
     shared_note = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    time = serializers.TimeField(format="%H:%M:%S", read_only=True)
 
     class Meta:
         model = FunctionsEntries
         fields = [
-            "id", "goal", "creator_name", "co_author_name", "co_author", "share_with", "shared_note",
-            "approved_by_coauthor", "co_author_note", "date", "time", "final_Status", "original_entry", "share_chain",
+            "id", "goal", "product", "product_name", "creator_name", "co_author_name", "co_author",
+            "share_with", "shared_note", "approved_by_coauthor", "co_author_note", "date", "time",
+            "final_Status", "original_entry", "share_chain",
         ]
         read_only_fields = ["time"]
+
+    def get_product_name(self, obj):
+        return obj.product.name if obj.product else None
+
+    def validate_product(self, value):
+        """Accept product as full product name (string); resolve to Product instance or None."""
+        if value is None or (isinstance(value, str) and not value.strip()):
+            return None
+        name = value.strip() if isinstance(value, str) else str(value)
+        try:
+            return Product.objects.get(name__iexact=name)
+        except Product.DoesNotExist:
+            from rest_framework import serializers as s
+            raise s.ValidationError("Product with this name does not exist.")
 
     def get_creator_name(self, obj):
         return _get_user_display_name(getattr(obj, "Creator", None))

@@ -3,6 +3,25 @@ from accounts.models import User
 from task_management.models import TaskStatus
 
 # Create your models here.
+
+
+class Product(models.Model):
+    """Product: unique name and description. Same schema pattern as Project (name, description, timestamps)."""
+    name = models.CharField(max_length=255, unique=True)
+    description = models.TextField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'project"."Product'
+        verbose_name = "Product"
+        verbose_name_plural = "Products"
+        ordering = ["name"]
+
+    def __str__(self):
+        return self.name
+
+
 class Project(models.Model):
     """Project: name, description, initiator, participants (M2M), status, deadline, and timestamps."""
     # Project status choices
