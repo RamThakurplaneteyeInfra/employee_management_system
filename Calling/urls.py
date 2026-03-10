@@ -7,6 +7,7 @@ urlpatterns = [
                 path("acceptCall/",accept_call,name="accept_call"),
                 path("declineCall/",decline_call,name="decline_call"),
                 path("endCall/",end_call,name="end_call"),
+                path("screenShare/", screen_share, name="screen_share"),
                 path("pendingCalls/",get_pending_calls,name="pending_calls"),
                 path("activeCalls/",get_active_calls,name="active_calls"),
                 path("endAllMyCalls/",end_all_my_calls,name="end_all_my_calls"),

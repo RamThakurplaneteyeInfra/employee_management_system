@@ -10,11 +10,13 @@ class Call(models.Model):
     ACCEPTED = "accepted"
     DECLINED = "declined"
     ENDED = "ended"
+    MISSED = "missed"
     STATUS_CHOICES = [
         (PENDING, "Pending"),
         (ACCEPTED, "Accepted"),
         (DECLINED, "Declined"),
         (ENDED, "Ended"),
+        (MISSED, "Missed"),
     ]
 
     sender = models.ForeignKey(
@@ -33,6 +35,7 @@ class Call(models.Model):
     status = models.CharField(
         max_length=10, choices=STATUS_CHOICES, default=PENDING
     )
+    is_screen_shared = models.BooleanField(default=False)
     timestamp = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -52,7 +55,12 @@ class GroupCall(models.Model):
 
     ACTIVE = "active"
     ENDED = "ended"
-    STATUS_CHOICES = [(ACTIVE, "Active"), (ENDED, "Ended")]
+    MISSED = "missed"
+    STATUS_CHOICES = [
+        (ACTIVE, "Active"),
+        (ENDED, "Ended"),
+        (MISSED, "Missed"),
+    ]
 
     creator = models.ForeignKey(
         User,
@@ -64,6 +72,7 @@ class GroupCall(models.Model):
     status = models.CharField(
         max_length=10, choices=STATUS_CHOICES, default=ACTIVE
     )
+    is_screen_shared = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

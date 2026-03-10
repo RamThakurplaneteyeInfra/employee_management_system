@@ -194,6 +194,15 @@ class CallConsumer(AsyncWebsocketConsumer):
         except Exception:
             pass
 
+    async def screen_shared(self, event):
+        """Notify call/group-call participants that someone started screen sharing."""
+        try:
+            payload = event.get("payload", {})
+            logger.info("Screen shared: forwarding to participant(s)")
+            await self.send(text_data=json.dumps(payload))
+        except Exception:
+            pass
+
     # ---------- Group call events (sent to call_{username} or group_call_{call_id}) ----------
     async def incoming_group_call(self, event):
         """Pushed to invitees when creator starts a group call."""
