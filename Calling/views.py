@@ -73,7 +73,9 @@ def _initiate_call_sync(req, user_id, call_type):
             )
         except Exception:
             # Receiver offline or channel error; call created, API succeeds
-            pass
+            call.status = Call.MISSED
+            call.save()
+            logger.warning("initiate_call: missed call to %s", receiver.username)
     return {
         "success": True,
         "call_id": call.id,
@@ -275,18 +277,22 @@ def _end_call_sync(req, call_id):
         return {"error": "Call not found", "status": 404}
     if call.sender != req.user and call.receiver != req.user:
         return {"error": "Only caller or receiver can end this call", "status": 403}
-    if call.status == Call.ENDED:
+    if call.status in (Call.ENDED, Call.MISSED):
         return {
             "success": True,
             "call_id": call.id,
             "sender": call.sender.username,
             "receiver": call.receiver.username,
         }
-    call.status = Call.ENDED
+    # If call was never accepted (still PENDING), treat as missed (receiver didn't answer / offline / network)
+    if call.status == Call.PENDING:
+        call.status = Call.MISSED
+    else:
+        call.status = Call.ENDED
     call.save()
     logger.info(
-        "Call ended: call_id=%s sender=%s receiver=%s ended_by=%s",
-        call.id, call.sender.username, call.receiver.username, req.user.username,
+        "Call ended: call_id=%s sender=%s receiver=%s ended_by=%s status=%s",
+        call.id, call.sender.username, call.receiver.username, req.user.username, call.status,
     )
     return {
         "success": True,
@@ -325,7 +331,7 @@ async def end_call(request: HttpRequest):
         from channels.layers import get_channel_layer
         channel_layer = get_channel_layer()
         if channel_layer:
-            async_to_sync(channel_layer.group_send)(
+            await channel_layer.group_send(
                 f"call_{other_username}",
                 {
                     "type": "call_ended",
@@ -431,14 +437,14 @@ async def screen_share(request: HttpRequest):
             }
             if result.get("kind") == "call":
                 payload["call_id"] = result["call_id"]
-                async_to_sync(channel_layer.group_send)(
+                await channel_layer.group_send(
                     f"call_{result['other_username']}",
                     {"type": "screen_shared", "payload": payload},
                 )
                 logger.info("screen_share: notified %s (1:1 call %s)", result["other_username"], result["call_id"])
             else:
                 payload["group_call_id"] = result["group_call_id"]
-                async_to_sync(channel_layer.group_send)(
+                await channel_layer.group_send(
                     f"group_call_{result['group_call_id']}",
                     {"type": "screen_shared", "payload": payload},
                 )
@@ -460,6 +466,8 @@ def _get_pending_calls_sync(user):
             "sender": c.sender.username,
             "receiver": c.receiver.username,
             "call_type": c.call_type,
+            "status": c.status,
+            "is_screen_shared": getattr(c, "is_screen_shared", False),
             "timestamp": gmt_to_ist_str(c.timestamp, "%d/%m/%Y %H:%M:%S") if c.timestamp else None,
         }
         for c in calls
@@ -481,6 +489,7 @@ def _get_active_calls_sync(user):
             "receiver": c.receiver.username,
             "call_type": c.call_type,
             "status": c.status,
+            "is_screen_shared": getattr(c, "is_screen_shared", False),
             "timestamp": gmt_to_ist_str(c.timestamp, "%d/%m/%Y %H:%M:%S") if c.timestamp else None,
         }
         for c in calls
@@ -925,6 +934,7 @@ def _get_active_group_calls_sync(user):
             "creator": gc.creator.username,
             "call_type": gc.call_type,
             "status": gc.status,
+            "is_screen_shared": getattr(gc, "is_screen_shared", False),
             "created_at": gmt_to_ist_str(gc.created_at, "%d/%m/%Y %H:%M:%S") if gc.created_at else None,
             "participants_joined": joined,
             "participants_invited": invited,
@@ -1009,6 +1019,7 @@ def _get_call_history_sync(user):
             "receiver": c.receiver.username,
             "call_type": c.call_type,
             "status": c.status,
+            "is_screen_shared": getattr(c, "is_screen_shared", False),
             "timestamp": gmt_to_ist_str(c.timestamp, "%d/%m/%Y %H:%M:%S") if c.timestamp else None,
             "initiator": initiator,
             "initiator_name": initiator_name,
@@ -1037,6 +1048,7 @@ def _get_call_history_sync(user):
             "creator": gc.creator.username,
             "call_type": gc.call_type,
             "status": gc.status,
+            "is_screen_shared": getattr(gc, "is_screen_shared", False),
             "created_at": gmt_to_ist_str(gc.created_at, "%d/%m/%Y %H:%M:%S") if gc.created_at else None,
             "initiator": initiator,
             "initiator_name": initiator_name,
