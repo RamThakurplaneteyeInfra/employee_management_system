@@ -20,6 +20,7 @@ from django.contrib.auth import get_user_model
 from .models import FunctionsEntries, FunctionsEntriesShare
 from notifications.models import Notification, notification_type
 from accounts.filters import _get_users_Name_sync
+from ems.utils import gmt_to_ist_str
 
 User = get_user_model()
 # Username of the MD user who receives notifications for new entries, approvals, and creator updates.
@@ -46,17 +47,19 @@ def _send_notification_and_ws(from_user, recipient, msg, category, title, extra=
     except Exception:
         return
     # Persist in DB for notification list / API
-    Notification.objects.create(
+    notification_obj = Notification.objects.create(
         from_user=from_user,
         receipient=recipient,
         message=msg_trim,
         type_of_notification=nt,
     )
-    # Push to WebSocket so the recipient sees it in real time
+    # Push to WebSocket so the recipient sees it in real time (time in IST)
     channel_layer = get_channel_layer()
     if channel_layer:
         try:
             from_name = _get_users_Name_sync(from_user) or getattr(from_user, "username", "")
+            ws_extra = dict(extra or {})
+            ws_extra["time"] = gmt_to_ist_str(notification_obj.created_at, "%d/%m/%Y, %H:%M:%S")
             async_to_sync(channel_layer.group_send)(
                 f"user_{recipient.username}",
                 {
@@ -65,7 +68,7 @@ def _send_notification_and_ws(from_user, recipient, msg, category, title, extra=
                     "title": title or category,
                     "from": from_name,
                     "message": msg_trim,
-                    "extra": extra or {},
+                    "extra": ws_extra,
                 },
             )
         except Exception:

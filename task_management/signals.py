@@ -11,6 +11,7 @@ from django.dispatch import receiver
 from django.utils import timezone
 from channels.layers import get_channel_layer
 from accounts.filters import _get_users_Name_sync
+from ems.utils import gmt_to_ist_str
 
 from .models import Task, TaskAssignies, AssingnedTasksCount, CreatedTasksCount, TaskCreateAndEditLogs, TaskMessage
 from notifications.models import Notification, notification_type
@@ -92,7 +93,7 @@ def _task_assigned_notification_sync(sender, created, instance: TaskAssignies, *
     channel_layer = get_channel_layer()
     async_to_sync(channel_layer.group_send)(
         f"user_{assignee.username}",
-        {"type": "send_notification", "title": f"New task Assigned","category":"Task_Created", "message": msg, "extra": {"time": notification_obj.created_at.strftime("%d/%m/%Y, %H:%M:%S")}},
+        {"type": "send_notification", "title": f"New task Assigned", "category": "Task_Created", "message": msg, "extra": {"time": gmt_to_ist_str(notification_obj.created_at, "%d/%m/%Y, %H:%M:%S")}},
     )
 
 
@@ -129,9 +130,9 @@ def _task_message_notification_sync(sender, created, instance: TaskMessage, **kw
                     message=msg,
                     type_of_notification=nt,
                 )
-                extra_time = notification_obj.created_at.strftime("%d/%m/%Y, %H:%M:%S")
+                extra_time = gmt_to_ist_str(notification_obj.created_at, "%d/%m/%Y, %H:%M:%S")
             else:
-                extra_time = timezone.now().strftime("%d/%m/%Y, %H:%M:%S")
+                extra_time = gmt_to_ist_str(timezone.now(), "%d/%m/%Y, %H:%M:%S")
             async_to_sync(channel_layer.group_send)(
                 f"user_{assignee.username}",
                 {

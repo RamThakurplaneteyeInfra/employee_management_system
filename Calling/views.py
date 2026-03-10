@@ -396,6 +396,54 @@ def _screen_share_sync(req, call_id=None, group_call_id=None):
         return {"is_screen_shared": True, "shared_by_name": shared_by_name, "group_call_id": group_call.id, "kind": "group_call"}
 
 
+def _stop_screen_share_sync(req, call_id=None, group_call_id=None):
+    """Set is_screen_shared=False for Call or GroupCall; requester must be a participant."""
+    if call_id is not None and group_call_id is not None:
+        return {"error": "Provide either call_id or group_call_id, not both", "status": 400}
+    if call_id is None and group_call_id is None:
+        return {"error": "call_id or group_call_id is required", "status": 400}
+    user = req.user
+    stopped_by_name = _get_display_name(user)
+    if call_id is not None:
+        try:
+            call = Call.objects.get(id=call_id)
+        except Call.DoesNotExist:
+            return {"error": "Call not found", "status": 404}
+        if call.sender != user and call.receiver != user:
+            return {"error": "You are not a participant in this call", "status": 403}
+        if call.status not in (Call.PENDING, Call.ACCEPTED):
+            return {"error": "Call is not active", "status": 400}
+        call.is_screen_shared = False
+        call.save(update_fields=["is_screen_shared"])
+        other_username = call.receiver.username if user == call.sender else call.sender.username
+        return {
+            "is_screen_shared": False,
+            "stopped_by_name": stopped_by_name,
+            "call_id": call.id,
+            "other_username": other_username,
+            "kind": "call",
+        }
+    else:
+        try:
+            group_call = GroupCall.objects.get(id=group_call_id)
+        except GroupCall.DoesNotExist:
+            return {"error": "Group call not found", "status": 404}
+        is_creator = group_call.creator == user
+        is_participant = GroupCallParticipant.objects.filter(group_call=group_call, user=user).exists()
+        if not is_creator and not is_participant:
+            return {"error": "You are not a participant in this group call", "status": 403}
+        if group_call.status != GroupCall.ACTIVE:
+            return {"error": "Group call is not active", "status": 400}
+        group_call.is_screen_shared = False
+        group_call.save(update_fields=["is_screen_shared"])
+        return {
+            "is_screen_shared": False,
+            "stopped_by_name": stopped_by_name,
+            "group_call_id": group_call.id,
+            "kind": "group_call",
+        }
+
+
 @csrf_exempt
 @login_required
 async def screen_share(request: HttpRequest):
@@ -454,6 +502,68 @@ async def screen_share(request: HttpRequest):
 
     return JsonResponse(
         {"success": True, "is_screen_shared": result["is_screen_shared"], "shared_by_name": result["shared_by_name"]},
+        status=status.HTTP_200_OK,
+    )
+
+
+@csrf_exempt
+@login_required
+async def stop_screen_share(request: HttpRequest):
+    """PATCH: Set is_screen_shared=False for the current user's 1:1 call or group call. Notifies others via WebSocket."""
+    if request.method != "PATCH":
+        return JsonResponse({"success": False, "error": "Method not allowed"}, status=status.HTTP_405_METHOD_NOT_ALLOWED)
+    try:
+        data = load_data(request)
+    except json.JSONDecodeError:
+        return JsonResponse({"success": False, "error": "Invalid JSON"}, status=status.HTTP_400_BAD_REQUEST)
+    call_id = data.get("call_id")
+    group_call_id = data.get("group_call_id")
+    if call_id is not None:
+        try:
+            call_id = int(call_id)
+        except (TypeError, ValueError):
+            call_id = None
+    if group_call_id is not None:
+        try:
+            group_call_id = int(group_call_id)
+        except (TypeError, ValueError):
+            group_call_id = None
+    result = await sync_to_async(_stop_screen_share_sync)(request, call_id=call_id, group_call_id=group_call_id)
+    if "error" in result:
+        return JsonResponse(
+            {"success": False, "error": result["error"]},
+            status=result.get("status", status.HTTP_400_BAD_REQUEST),
+        )
+
+    # Notify other participants via WebSocket that screen sharing has stopped
+    try:
+        from channels.layers import get_channel_layer
+        channel_layer = get_channel_layer()
+        if channel_layer:
+            payload = {
+                "type": "screen_share_stopped",
+                "is_screen_shared": result["is_screen_shared"],
+                "stopped_by_name": result["stopped_by_name"],
+            }
+            if result.get("kind") == "call":
+                payload["call_id"] = result["call_id"]
+                await channel_layer.group_send(
+                    f"call_{result['other_username']}",
+                    {"type": "screen_shared", "payload": payload},
+                )
+                logger.info("stop_screen_share: notified %s (1:1 call %s)", result["other_username"], result["call_id"])
+            else:
+                payload["group_call_id"] = result["group_call_id"]
+                await channel_layer.group_send(
+                    f"group_call_{result['group_call_id']}",
+                    {"type": "screen_shared", "payload": payload},
+                )
+                logger.info("stop_screen_share: notified group_call_%s", result["group_call_id"])
+    except Exception as e:
+        logger.warning("stop_screen_share: failed to send WebSocket notification: %s", e)
+
+    return JsonResponse(
+        {"success": True, "is_screen_shared": result["is_screen_shared"], "stopped_by_name": result["stopped_by_name"]},
         status=status.HTTP_200_OK,
     )
 

@@ -1,14 +1,23 @@
 """
 Messaging signals: WebSocket notifications for group/private messages.
+
+These signals must remain synchronous; Django does not await async receivers.
+We keep WebSocket notifications resilient even if notification_type rows are missing
+or channel layer fails, so realtime messaging keeps working.
 """
-from asgiref.sync import sync_to_async, async_to_sync
+import logging
+from asgiref.sync import async_to_sync
 from django.db.models.signals import post_save, post_delete, pre_delete
 from django.dispatch import receiver
+from django.utils import timezone
 from channels.layers import get_channel_layer
 from accounts.filters import _get_users_Name_sync
+from ems.utils import gmt_to_ist_str
 
 from .models import GroupChats, GroupMessages, GroupMembers, IndividualMessages
 from notifications.models import Notification, notification_type
+
+logger = logging.getLogger(__name__)
 
 
 # -------- Group message: notify all members except sender --------
@@ -16,31 +25,42 @@ def _create_notification_for_groupmessage_sync(sender, instance: GroupMessages, 
     if not created:
         return
     group_obj = instance.group
-    sender_name=_get_users_Name_sync(instance.sender)
+    sender_name = _get_users_Name_sync(instance.sender)
     members = GroupMembers.objects.filter(groupchat=group_obj).exclude(participant=instance.sender)
     try:
         nt = notification_type.objects.get(type_name="Group_message")
     except notification_type.DoesNotExist:
-        return
+        nt = None
+        logger.warning("notification_type 'Group_message' not found; sending WebSocket only.")
     channel_layer = get_channel_layer()
+    if not channel_layer:
+        logger.warning("Group message: channel_layer is None, skipping WebSocket notifications.")
+        return
     for m in members:
-        notification_obj=Notification.objects.create(
-            from_user=instance.sender,
-            receipient=m.participant,
-            message=instance.content,
-            type_of_notification=nt,
-        )
-        async_to_sync(channel_layer.group_send)(
-            f"user_{m.participant.username}",
-            {
-                "type": "send_notification",
-                "category":"Group_message",
-                "title": f"Received a Group message from {group_obj.group_name}",
-                "from":sender_name,
-                "message": instance.content,
-                "extra":{"time": notification_obj.created_at.strftime("%d/%m/%Y, %H:%M:%S"), "group_id":group_obj.group_id}
-            }
-        )
+        try:
+            if nt:
+                notification_obj = Notification.objects.create(
+                    from_user=instance.sender,
+                    receipient=m.participant,
+                    message=instance.content,
+                    type_of_notification=nt,
+                )
+                extra_time = gmt_to_ist_str(notification_obj.created_at, "%d/%m/%Y, %H:%M:%S")
+            else:
+                extra_time = gmt_to_ist_str(timezone.now(), "%d/%m/%Y, %H:%M:%S")
+            async_to_sync(channel_layer.group_send)(
+                f"user_{m.participant.username}",
+                {
+                    "type": "send_notification",
+                    "category": "Group_message",
+                    "title": f"Received a Group message from {group_obj.group_name}",
+                    "from": sender_name,
+                    "message": instance.content,
+                    "extra": {"time": extra_time, "group_id": group_obj.group_id},
+                },
+            )
+        except Exception as e:
+            logger.warning("Group message WebSocket notification failed for %s: %s", m.participant.username, e)
 
 
 @receiver(post_save, sender=GroupMessages)
@@ -54,29 +74,40 @@ def _create_notification_for_chatmessage_sync(sender, instance: IndividualMessag
     if not created:
         return
     other = instance.chat.get_other_participant(user=instance.sender)
-    sender_name=_get_users_Name_sync(instance.sender)
+    sender_name = _get_users_Name_sync(instance.sender)
     try:
         nt = notification_type.objects.get(type_name="private_message")
     except notification_type.DoesNotExist:
-        return
-    notification_obj=Notification.objects.create(
-        from_user=instance.sender,
-        receipient=other,
-        message=instance.content,
-        type_of_notification=nt,
-    )
+        nt = None
+        logger.warning("notification_type 'private_message' not found; sending WebSocket only.")
     channel_layer = get_channel_layer()
-    async_to_sync(channel_layer.group_send)(
+    if not channel_layer:
+        logger.warning("Private message: channel_layer is None, skipping WebSocket notification.")
+        return
+    try:
+        if nt:
+            notification_obj = Notification.objects.create(
+                from_user=instance.sender,
+                receipient=other,
+                message=instance.content,
+                type_of_notification=nt,
+            )
+            extra_time = gmt_to_ist_str(notification_obj.created_at, "%d/%m/%Y, %H:%M:%S")
+        else:
+            extra_time = gmt_to_ist_str(timezone.now(), "%d/%m/%Y, %H:%M:%S")
+        async_to_sync(channel_layer.group_send)(
             f"user_{other.username}",
             {
                 "type": "send_notification",
-                "category":"Private_message",
-                "title": f"You received a Private message",
+                "category": "Private_message",
+                "title": "You received a Private message",
                 "from": sender_name,
                 "message": instance.content,
-                "extra":{"time": notification_obj.created_at.strftime("%d/%m/%Y, %H:%M:%S"),"chat_id":instance.chat.chat_id}
-            }
+                "extra": {"time": extra_time, "chat_id": instance.chat.chat_id},
+            },
         )
+    except Exception as e:
+        logger.warning("Private message WebSocket notification failed for %s: %s", other.username, e)
 
 
 @receiver(post_save, sender=IndividualMessages)
@@ -98,19 +129,36 @@ def _notify_added_to_group_sync(sender, created, instance: GroupMembers, **kwarg
     try:
         nt = notification_type.objects.get(type_name="Group_Created")
     except notification_type.DoesNotExist:
-        return
+        nt = None
+        logger.warning("notification_type 'Group_Created' not found; sending WebSocket only.")
     msg = f"You were added to a group '{group.group_name}'"
-    notification_obj=Notification.objects.create(
-        from_user=creator,
-        receipient=added_user,
-        message=msg,
-        type_of_notification=nt,
-    )
     channel_layer = get_channel_layer()
-    async_to_sync(channel_layer.group_send)(
-        f"user_{added_user.username}",
-        {"type": "send_notification", "title": "Added to a New Group","message":msg,"category":"Group_Created","extra": {"time": notification_obj.created_at.strftime("%d/%m/%Y, %H:%M:%S"),"group_id":group.group_id}},
-    )
+    if not channel_layer:
+        logger.warning("Added-to-group: channel_layer is None, skipping WebSocket notification.")
+        return
+    try:
+        if nt:
+            notification_obj = Notification.objects.create(
+                from_user=creator,
+                receipient=added_user,
+                message=msg,
+                type_of_notification=nt,
+            )
+            extra_time = gmt_to_ist_str(notification_obj.created_at, "%d/%m/%Y, %H:%M:%S")
+        else:
+            extra_time = gmt_to_ist_str(timezone.now(), "%d/%m/%Y, %H:%M:%S")
+        async_to_sync(channel_layer.group_send)(
+            f"user_{added_user.username}",
+            {
+                "type": "send_notification",
+                "title": "Added to a New Group",
+                "message": msg,
+                "category": "Group_Created",
+                "extra": {"time": extra_time, "group_id": group.group_id},
+            },
+        )
+    except Exception as e:
+        logger.warning("Added-to-group WebSocket notification failed for %s: %s", added_user.username, e)
 
 
 @receiver(post_save, sender=GroupMembers)
@@ -140,30 +188,41 @@ def _notify_removed_from_group_sync(sender, instance: GroupMembers, **kwargs):
     try:
         nt = notification_type.objects.get(type_name="User_Removed_From_Group")
     except notification_type.DoesNotExist:
-        return
+        nt = None
+        logger.warning("notification_type 'User_Removed_From_Group' not found; sending WebSocket only.")
     msg = f"You have been removed from the group '{group.group_name}'."
-    notification_obj = Notification.objects.create(
-        from_user=from_user,
-        receipient=removed_user,
-        message=msg,
-        type_of_notification=nt,
-    )
     channel_layer = get_channel_layer()
+    if not channel_layer:
+        logger.warning("Removed-from-group: channel_layer is None, skipping WebSocket notification.")
+        return
     remover_name = _get_users_Name_sync(from_user)
-    async_to_sync(channel_layer.group_send)(
-        f"user_{removed_user.username}",
-        {
-            "type": "send_notification",
-            "title": "Removed from the group",
-            "message": msg,
-            "category": "User_Removed_From_Group",
-            "from": remover_name,
-            "extra": {
-                "time": notification_obj.created_at.strftime("%d/%m/%Y, %H:%M:%S"),
-                "group_id": group.group_id,
+    try:
+        if nt:
+            notification_obj = Notification.objects.create(
+                from_user=from_user,
+                receipient=removed_user,
+                message=msg,
+                type_of_notification=nt,
+            )
+            extra_time = gmt_to_ist_str(notification_obj.created_at, "%d/%m/%Y, %H:%M:%S")
+        else:
+            extra_time = gmt_to_ist_str(timezone.now(), "%d/%m/%Y, %H:%M:%S")
+        async_to_sync(channel_layer.group_send)(
+            f"user_{removed_user.username}",
+            {
+                "type": "send_notification",
+                "title": "Removed from the group",
+                "message": msg,
+                "category": "User_Removed_From_Group",
+                "from": remover_name,
+                "extra": {
+                    "time": extra_time,
+                    "group_id": group.group_id,
+                },
             },
-        },
-    )
+        )
+    except Exception as e:
+        logger.warning("Removed-from-group WebSocket notification failed for %s: %s", removed_user.username, e)
 
 
 @receiver(post_delete, sender=GroupMembers)
@@ -179,33 +238,44 @@ def _notify_group_deleted_sync(sender, instance: GroupChats, **kwargs):
     try:
         nt = notification_type.objects.get(type_name="Group_Deleted")
     except notification_type.DoesNotExist:
-        return
+        nt = None
+        logger.warning("notification_type 'Group_Deleted' not found; sending WebSocket only.")
     from_user = instance.created_by
     group_name = instance.group_name or f"Group ({instance.group_id})"
     msg = f"The group '{group_name}' has been deleted."
     channel_layer = get_channel_layer()
+    if not channel_layer:
+        logger.warning("Group-deleted: channel_layer is None, skipping WebSocket notifications.")
+        return
     deleter_name = _get_users_Name_sync(from_user)
     for gm in members:
-        notification_obj = Notification.objects.create(
-            from_user=from_user,
-            receipient=gm.participant,
-            message=msg,
-            type_of_notification=nt,
-        )
-        async_to_sync(channel_layer.group_send)(
-            f"user_{gm.participant.username}",
-            {
-                "type": "send_notification",
-                "title": "Group deleted",
-                "message": msg,
-                "category": "Group_Deleted",
-                "from": deleter_name,
-                "extra": {
-                    "time": notification_obj.created_at.strftime("%d/%m/%Y, %H:%M:%S"),
-                    "group_id": instance.group_id,
+        try:
+            if nt:
+                notification_obj = Notification.objects.create(
+                    from_user=from_user,
+                    receipient=gm.participant,
+                    message=msg,
+                    type_of_notification=nt,
+                )
+                extra_time = gmt_to_ist_str(notification_obj.created_at, "%d/%m/%Y, %H:%M:%S")
+            else:
+                extra_time = gmt_to_ist_str(timezone.now(), "%d/%m/%Y, %H:%M:%S")
+            async_to_sync(channel_layer.group_send)(
+                f"user_{gm.participant.username}",
+                {
+                    "type": "send_notification",
+                    "title": "Group deleted",
+                    "message": msg,
+                    "category": "Group_Deleted",
+                    "from": deleter_name,
+                    "extra": {
+                        "time": extra_time,
+                        "group_id": instance.group_id,
+                    },
                 },
-            },
-        )
+            )
+        except Exception as e:
+            logger.warning("Group-deleted WebSocket notification failed for %s: %s", gm.participant.username, e)
 
 
 @receiver(pre_delete, sender=GroupChats)

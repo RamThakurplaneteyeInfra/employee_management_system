@@ -7,6 +7,7 @@ from channels.layers import get_channel_layer
 from datetime import date
 
 from accounts.filters import _get_users_Name_sync
+from ems.utils import gmt_to_ist_str
 
 from .models import Meeting, BookSlot, SlotMembers
 from notifications.models import Notification, notification_type
@@ -44,9 +45,9 @@ def _notify_slot_booked_sync(sender, created, instance: SlotMembers, **kwargs):
             message=msg,
             type_of_notification=nt,
         )
-        extra_time = notification_obj.created_at.strftime("%d/%m/%Y, %H:%M:%S")
+        extra_time = gmt_to_ist_str(notification_obj.created_at, "%d/%m/%Y, %H:%M:%S")
     except notification_type.DoesNotExist:
-        extra_time = timezone.now().strftime("%d/%m/%Y, %H:%M:%S")
+        extra_time = gmt_to_ist_str(timezone.now(), "%d/%m/%Y, %H:%M:%S")
     channel_layer = get_channel_layer()
     if not channel_layer:
         return
@@ -99,9 +100,9 @@ def _notify_meeting_scheduled_for_users_sync(instance: Meeting, user_pks):
                     message=msg,
                     type_of_notification=nt,
                 )
-                extra_time = notification_obj.created_at.strftime("%d/%m/%Y, %H:%M:%S")
+                extra_time = gmt_to_ist_str(notification_obj.created_at, "%d/%m/%Y, %H:%M:%S")
             else:
-                extra_time = timezone.now().strftime("%d/%m/%Y, %H:%M:%S")
+                extra_time = gmt_to_ist_str(timezone.now(), "%d/%m/%Y, %H:%M:%S")
             async_to_sync(channel_layer.group_send)(
                 f"user_{u.username}",
                 {
