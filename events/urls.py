@@ -24,10 +24,9 @@ router.register("rooms", RoomViewSet, basename="rooms")
 router.register("status", BookingStatusViewset, basename="status")
 router.register("meetingpush",MeetingViewSet , basename="meetingpush")
 
+# Birthday counter routes must come before router so "events/birthdaycounter/" is not matched by events/<pk>/ (pk="birthdaycounter")
 urlpatterns = [
-    # path("holidays-ping", holidays_ping),
-    # path("holidays-ping/", holidays_ping),
-    path("", include(router.urls)),
     path("events/birthdaycounter/", birthdaycounter_bulk),  # POST with body {"users": ["u1", "u2", ...]}
     path("events/birthdaycounter/<str:username>/", birthdaycounter, name="birthday"),
+    path("", include(router.urls)),
 ]

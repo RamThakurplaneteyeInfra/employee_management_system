@@ -443,7 +443,6 @@ def _stop_screen_share_sync(req, call_id=None, group_call_id=None):
             "kind": "group_call",
         }
 
-
 @csrf_exempt
 @login_required
 async def screen_share(request: HttpRequest):

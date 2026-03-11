@@ -81,6 +81,7 @@ INSTALLED_APPS = [
     "notifications",
     "adminpanel",
     "maintenance",
+    "Alerts_Announcements",
 ]
 
 MIDDLEWARE = [
@@ -184,7 +185,7 @@ if REDIS_URL:
 # List the schema that contains auth_user (and django_session) first, then other app schemas. No public.
 DB_SEARCH_PATH = os.getenv(
     "DB_SEARCH_PATH",
-    "login_details,clients,events,task_management,notifications,project,quatery_reports,messaging,team_farm,team_infra,team_interns,team_management",
+    "login_details,alerts,clients,events,task_management,notifications,project,quatery_reports,messaging,team_farm,team_infra,team_interns,team_management",
 )
 
 DATABASES = {
