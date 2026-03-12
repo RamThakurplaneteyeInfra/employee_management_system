@@ -24,8 +24,14 @@ class CallConsumer(AsyncWebsocketConsumer):
     """WebSocket for calls: incoming call notifications + WebRTC offer/answer/ICE + group calls."""
 
     async def connect(self):
+        # Align with NotificationConsumer: require authenticated user in scope.
+        # Closing before accept() can surface as 403 in some proxies if session/user missing.
         user = self.scope.get("user")
-        if not user or user.is_anonymous:
+        if user is None or getattr(user, "is_anonymous", True):
+            logger.warning(
+                "CallConsumer connect rejected: anonymous or missing user (path=%s)",
+                self.scope.get("path"),
+            )
             await self.close(code=4001)
             return
         self.room_name = f"call_{user.username}"

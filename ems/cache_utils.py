@@ -9,18 +9,46 @@ from django.http import HttpResponse
 from django.conf import settings
 
 CACHE_KEY_PREFIX = "get"
+CACHE_KEY_PREFIX_MESSAGING_SCOPE = "get:msg"
 DEFAULT_TIMEOUT = getattr(settings, "CACHE_GET_TIMEOUT", 300)
+
+# Messaging GET paths that are scoped by chat_id or group_id (segment after the path prefix).
+_MESSAGING_SCOPE_PATH_PREFIXES = ("/messaging/getMessages/", "/messaging/showGroupMembers/")
+
+
+def _get_messaging_scope_from_path(path):
+    """
+    If path is a messaging GET that includes chat_id or group_id (e.g. /messaging/getMessages/G-123/),
+    return that scope id (chat_id or group_id). Otherwise return None.
+    """
+    if not path or not path.startswith("/messaging/"):
+        return None
+    path_stripped = path.rstrip("/")
+    for prefix in _MESSAGING_SCOPE_PATH_PREFIXES:
+        if path_stripped.startswith(prefix):
+            rest = path_stripped[len(prefix):].strip("/")
+            if rest:
+                return rest
+    return None
 
 
 def _build_get_cache_key(request):
-    """Build a cache key for this GET request: get:<user_id>:<path_safe>:<hash>. User_id in key so invalidation can target one user."""
+    """
+    Build a cache key for this GET request.
+    - Messaging GET with chat_id/group_id in path: get:msg:<scope_id>:<path_safe>:<hash>
+    - All other GET: get:<user_id>:<path_safe>:<hash>
+    """
     path = request.path
     query = sorted(request.GET.items()) if request.GET else []
     query_str = "&".join(f"{k}={v}" for k, v in query)
-    user_id = request.user.pk if request.user.is_authenticated else "anon"
     path_safe = path.replace("/", ":").strip(":") or "root"
     raw = query_str or ""
     key_hash = hashlib.md5(raw.encode()).hexdigest()
+
+    scope_id = _get_messaging_scope_from_path(path)
+    if scope_id is not None:
+        return f"{CACHE_KEY_PREFIX_MESSAGING_SCOPE}:{scope_id}:{path_safe}:{key_hash}"
+    user_id = request.user.pk if request.user.is_authenticated else "anon"
     return f"{CACHE_KEY_PREFIX}:{user_id}:{path_safe}:{key_hash}"
 
 
@@ -105,6 +133,24 @@ def invalidate_missed_calls_count_cache(user_id=None, user_ids=None):
     """
     prefix = "messaging:missedCallsCount"
     invalidate_get_cache_for_prefix(prefix, user_id=user_id, user_ids=user_ids)
+
+
+def invalidate_get_cache_for_messaging_scope(scope_id):
+    """
+    Invalidate all GET cache entries for messaging endpoints tied to this chat_id or group_id.
+    Key format for messaging-scoped GET: get:msg:<scope_id>:<path_safe>:<hash>
+    Clears getMessages/<scope_id>/ and showGroupMembers/<scope_id>/ and any other GET under that scope.
+    """
+    if not scope_id:
+        return
+    try:
+        backend = getattr(cache, "_cache", None) or cache
+        if not hasattr(backend, "delete_pattern"):
+            return
+        pattern = f"*{CACHE_KEY_PREFIX_MESSAGING_SCOPE}:{scope_id}:*"
+        backend.delete_pattern(pattern)
+    except Exception:
+        pass
 
 
 def get_path_prefixes_from_request(request):

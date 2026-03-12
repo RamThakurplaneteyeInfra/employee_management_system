@@ -55,7 +55,7 @@ async def create_task(request: HttpRequest):
     data = load_data(request)
     for f in ["title", "description", "due_date", "assigned_to", "type"]:
         if not data.get(f):
-            return JsonResponse({"error": f"{f} is required"}, status=status.HTTP_206_PARTIAL_CONTENT)
+            return JsonResponse({"error": f"{f} is required"}, status=status.HTTP_400_BAD_REQUEST)
     try:
         await sync_to_async(_create_task_sync)(request.user, data)
         return JsonResponse({"message": "Task created"}, status=status.HTTP_201_CREATED)
@@ -177,7 +177,7 @@ async def delete_task(request: HttpRequest, task_id: int):
         return verify_request
     try:
         await sync_to_async(_delete_task_sync)(request.user, task_id)
-        return JsonResponse({"Message": f"task-task_id {task_id} deleted successfully"}, status=status.HTTP_201_CREATED)
+        return JsonResponse({"Message": f"task-task_id {task_id} deleted successfully"}, status=status.HTTP_200_OK)
     except PermissionDenied:
         return JsonResponse({"error": "You are not authorised to delete the task"}, status=status.HTTP_403_FORBIDDEN)
     except Exception as e:
@@ -206,7 +206,7 @@ async def post_task_message(request: HttpRequest):
         await sync_to_async(_post_task_message_sync)(request_data.get("task_id"), request.user, message_text)
         return JsonResponse({"status": "Message sent"}, status=status.HTTP_201_CREATED)
     except Exception as e:
-        return JsonResponse(str(e), status=status.HTTP_203_NON_AUTHORITATIVE_INFORMATION)
+        return JsonResponse(str(e), status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 # ==================== get_task_messages ====================

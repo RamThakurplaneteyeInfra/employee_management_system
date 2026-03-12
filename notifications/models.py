@@ -11,8 +11,8 @@ class notification_type(models.Model):
 class Notification(models.Model):
     """In-app notification: from_user, recipient, message, type, and read state."""
     type_of_notification=models.ForeignKey(notification_type,on_delete=models.CASCADE)
-    from_user=models.ForeignKey(User,on_delete=models.CASCADE,to_field="username",related_name="notification_sender")
-    receipient= models.ForeignKey(User, on_delete=models.CASCADE,to_field="username",related_name="notification_receiver")
+    from_user=models.ForeignKey(User,on_delete=models.CASCADE,to_field="username",related_name="notification_sender",null=True,blank=True)
+    receipient= models.ForeignKey(User, on_delete=models.CASCADE,to_field="username",related_name="notification_receiver",null=True,blank=True)
     message = models.TextField(max_length=100)
     is_read = models.BooleanField(default=False)
     # is_read = models.BooleanField(default=False)

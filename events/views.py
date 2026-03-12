@@ -172,12 +172,10 @@ class EventViewSet(ModelViewSet):
 # URL: {{baseurl}}/eventsapi/meetingpush/  | CRUD
 # Cron: {{baseurl}}/eventsapi/meetingpush/cron/delete-previous-days/  | GET (permissionless)
 class MeetingViewSet(ModelViewSet):
-    # Prefetch users with profile so serializer does not N+1 on get_user_details.
     User = get_user_model()
     queryset = (
         Meeting.objects.all()
-        .select_related("meeting_room")
-        .prefetch_related(Prefetch("users", queryset=User.objects.select_related("accounts_profile")))
+        .select_related("meeting_room", "product")
     )
     serializer_class = MeetingSerializer
     authentication_classes = [CsrfExemptSessionAuthentication]

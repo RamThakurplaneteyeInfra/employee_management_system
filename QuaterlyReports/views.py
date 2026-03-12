@@ -129,13 +129,13 @@ async def get_entries(request: HttpRequest):
             raise PermissionDenied("Not authorised")
     except ValueError as e:
             print(e)
-            return JsonResponse({"message":f"{e}"},status=status.HTTP_203_NON_AUTHORITATIVE_INFORMATION)
+            return JsonResponse({"message": f"{e}"}, status=status.HTTP_400_BAD_REQUEST)
     except PermissionDenied as e:
             print(e)
             return JsonResponse({"message":"you are not authorised to access other users records"},status=status.HTTP_403_FORBIDDEN)
     except Exception as e:
             print(e)
-            return JsonResponse({"error": str(e)}, status=status.HTTP_501_NOT_IMPLEMENTED)
+            return JsonResponse({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     else:
         if isinstance(data,JsonResponse):
             return data
@@ -252,7 +252,7 @@ async def get_meeting_head_and_subhead(request: HttpRequest):
             status=status.HTTP_404_NOT_FOUND,
         )
     except Exception as e:
-        return JsonResponse({"Message": str(e)}, status=status.HTTP_501_NOT_IMPLEMENTED)
+        return JsonResponse({"Message": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 # ==================== add_meeting_head_subhead ====================

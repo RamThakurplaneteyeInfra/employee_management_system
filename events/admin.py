@@ -12,4 +12,4 @@ admin.site.register(Event)
 
 @admin.register(Meeting)
 class MeetingAdmin(admin.ModelAdmin):
-    list_display = ("id", "meeting_type", "time", "meeting_room", "is_active", "created_at")
+    list_display = ("id", "product", "meeting_type", "time", "meeting_room", "is_active", "created_at")

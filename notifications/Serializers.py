@@ -8,12 +8,13 @@ class NotificationSerializer(serializers.ModelSerializer):
     from_user = serializers.SerializerMethodField()
     receipient = serializers.SerializerMethodField()
     created_at = serializers.SerializerMethodField()
+    notification_type= serializers.SerializerMethodField()
 
     class Meta:
         model = Notification
         fields = [
             "id",
-            "type_of_notification",
+            "notification_type",
             "from_user",
             "receipient",
             "message",
@@ -39,3 +40,8 @@ class NotificationSerializer(serializers.ModelSerializer):
             getattr(getattr(obj.receipient, "accounts_profile", None), "Name", None)
             or _get_users_Name_sync(obj.receipient)
         )
+        
+    def get_notification_type(self, obj):
+        """Return the full notification type name (from related notification_type), not the id."""
+        nt = getattr(obj, "type_of_notification", None)
+        return getattr(nt, "type_name", None) if nt else None

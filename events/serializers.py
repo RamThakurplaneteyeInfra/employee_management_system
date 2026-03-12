@@ -4,6 +4,7 @@ from .models import *
 from ems.RequiredImports import *
 from ems.utils import gmt_to_ist_str
 from accounts.filters import _get_users_Name_sync
+from project.models import Product
 class SlotMemberSerializer(serializers.ModelSerializer):
     member=serializers.SlugRelatedField(
         queryset=User.objects.all(),
@@ -261,41 +262,58 @@ class EventSerializer(serializers.ModelSerializer):
         fields = '__all__'
         
 class MeetingSerializer(serializers.ModelSerializer):
-    # For WRITE: Accept a list of usernames
-    users = serializers.SlugRelatedField(
-        many=True,
-        slug_field='username',
-        queryset=User.objects.all()
+    """
+    Meeting: create/update using product and meeting_room by name (write_only).
+    GET returns product_name and room_name only — no FK ids for referenced objects.
+    """
+    # Write by product name only; never expose product id in response.
+    product = serializers.SlugRelatedField(
+        queryset=Product.objects.all(),
+        slug_field="name",
+        required=False,
+        allow_null=True,
+        write_only=True,
     )
     is_active = serializers.BooleanField(default=True)
-    meeting_room= serializers.SlugRelatedField(
+    # Write by room name only; never expose meeting_room id in response.
+    meeting_room = serializers.SlugRelatedField(
         queryset=Room.objects.all(),
-        slug_field="name")
-    # For READ: Show detailed info (Username + Full Name)
-    user_details = serializers.SerializerMethodField()
+        slug_field="name",
+        required=False,
+        allow_null=True,
+        write_only=True,
+    )
+    product_name = serializers.SerializerMethodField(read_only=True)
+    room_name = serializers.SerializerMethodField(read_only=True)
     created_at = serializers.SerializerMethodField()
-    # schedule_time = serializers.SerializerMethodField()
+
     class Meta:
         model = Meeting
         fields = [
-            'id', 'users', 'user_details', 'meeting_type', 
-            'time', 'meeting_room', 'is_active', "created_at"
+            "id",
+            "product",
+            "meeting_room",
+            "product_name",
+            "room_name",
+            "meeting_type",
+            "time",
+            "is_active",
+            "created_at",
         ]
+        # product + meeting_room are write_only; omitted from GET output.
+
+    def get_product_name(self, obj):
+        if obj.product_id is None:
+            return None
+        return getattr(obj.product, "name", None)
+
+    def get_room_name(self, obj):
+        if obj.meeting_room_id is None:
+            return None
+        return getattr(obj.meeting_room, "name", None)
 
     def get_created_at(self, obj):
         return gmt_to_ist_str(obj.created_at, "%d/%m/%Y %H:%M:%S") if obj.created_at else None
-
-    def get_user_details(self, obj):
-        return [
-            {
-                "username": user.username,
-                "full_name": (
-                    getattr(user.accounts_profile, "Name", None)
-                    or _get_users_Name_sync(user)
-                ),
-            }
-            for user in obj.users.all()
-        ]
         
     # def get_schedule_time(self,obj:Meeting):
     #     schedule_time=obj.created_at+timedelta(minutes=obj.time)

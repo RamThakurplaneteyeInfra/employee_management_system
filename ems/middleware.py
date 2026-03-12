@@ -12,8 +12,8 @@ from .cache_utils import (
     get_path_prefixes_from_request,
 )
 
-# Do not cache these path prefixes (admin, static, etc.)
-CACHE_SKIP_PREFIXES = ("/admin/", "/static/", "/media/")
+# Do not cache these path prefixes (admin, static, notifications GETs, etc.)
+CACHE_SKIP_PREFIXES = ("/admin/", "/static/", "/media/", "/notifications/")
 MUTATION_METHODS = ("POST", "PUT", "PATCH", "DELETE")
 
 

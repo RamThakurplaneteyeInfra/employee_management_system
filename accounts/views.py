@@ -69,7 +69,7 @@ def _create_employee_login_sync(req):
         else:
             field_value = data.get(i)
         if not field_value and i not in not_required_field:
-            return {"error": JsonResponse({"messege": f"{i} is required"}, status=status.HTTP_406_NOT_ACCEPTABLE)}
+            return {"error": JsonResponse({"messege": f"{i} is required"}, status=status.HTTP_400_BAD_REQUEST)}
         if i == "Teamlead" and field_value:
             teamlead_user_obj = get_object_or_404(User, username=field_value)
             profile_values["Teamlead"] = teamlead_user_obj
@@ -128,7 +128,7 @@ async def create_employee_login(request: HttpRequest):
     except DatabaseError as e:
         return JsonResponse({"message": f"{e}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     except Exception as e:
-        return JsonResponse({"messege": f"{e}"}, status=status.HTTP_406_NOT_ACCEPTABLE)
+        return JsonResponse({"messege": f"{e}"}, status=status.HTTP_400_BAD_REQUEST)
 
 
 # ==================== get_all_employees ====================
@@ -231,7 +231,7 @@ def user_login(req: HttpRequest):
     u, p = data.get("username"), data.get("password")
     try:
         if not u or not p:
-            return JsonResponse({"message": "username or password is missing"}, status=status.HTTP_204_NO_CONTENT)
+            return JsonResponse({"message": "username or password is missing"}, status=status.HTTP_400_BAD_REQUEST)
         user = authenticate(req, username=u, password=p)
         if not user:
             return JsonResponse({"messege": "Incorrect userID/Password,Try again"}, status=status.HTTP_400_BAD_REQUEST)
@@ -347,7 +347,7 @@ def _update_profile_sync(req, username):
             continue
         field_value = data.get(i)
         if not field_value and i not in not_required_fields:
-            return {"error": JsonResponse({"messege": f"{i} is empty"}, status=status.HTTP_406_NOT_ACCEPTABLE)}
+            return {"error": JsonResponse({"messege": f"{i} is empty"}, status=status.HTTP_400_BAD_REQUEST)}
         if not field_value and i in not_required_fields:
             continue
         if i == 'Email_id':
@@ -391,7 +391,7 @@ async def update_profile(request: HttpRequest, username):
     except DatabaseError as e:
         return JsonResponse({"message": f"{e}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     except Exception as e:
-        return JsonResponse({"messege": f"{e}"}, status=status.HTTP_406_NOT_ACCEPTABLE)
+        return JsonResponse({"messege": f"{e}"}, status=status.HTTP_400_BAD_REQUEST)
 
 
 # ==================== changePassword ====================
@@ -416,7 +416,7 @@ async def changePassword(request: HttpRequest, u):
     data = load_data(request)
     new_password = data.get("new_password")
     if not new_password:
-        return JsonResponse({"messege": "Password is empty"}, status=status.HTTP_406_NOT_ACCEPTABLE)
+        return JsonResponse({"messege": "Password is empty"}, status=status.HTTP_400_BAD_REQUEST)
     try:
         await sync_to_async(_change_password_sync)(u, new_password)
         return JsonResponse({"messege": f"Password is changed to {new_password}"}, status=status.HTTP_200_OK)
@@ -524,20 +524,20 @@ def _update_photo_sync(request: HttpRequest, username: str):
         user_profile = _get_user_profile_object_sync(user_obj)
         files = request.FILES
         if not files:
-            return JsonResponse({"messege": "upload file is missing"}, status=status.HTTP_406_NOT_ACCEPTABLE)
+            return JsonResponse({"messege": "upload file is missing"}, status=status.HTTP_400_BAD_REQUEST)
         photo_link = files.get("Photo_link")
         old_photo = user_profile.Photo_link
         if old_photo and photo_link:
             old_photo.delete(save=True)
         user_profile.Photo_link = photo_link
         user_profile.save(force_update=True)
-        return JsonResponse({"messege": f"{user_profile.Name}'s Photo updated successfully"}, status=status.HTTP_205_RESET_CONTENT)
+        return JsonResponse({"messege": f"{user_profile.Name}'s Photo updated successfully"}, status=status.HTTP_200_OK)
     except Http404 as e:
         return JsonResponse({"messege": str(e)}, status=status.HTTP_404_NOT_FOUND)
     except DatabaseError as e:
         return JsonResponse({"message": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     except Exception as e:
-        return JsonResponse({"messege": str(e)}, status=status.HTTP_304_NOT_MODIFIED)
+        return JsonResponse({"messege": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 @csrf_exempt
 @admin_required

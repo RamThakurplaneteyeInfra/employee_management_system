@@ -5,12 +5,13 @@ Invalidation is per-user: only the affected user(s) cache keys are cleared (cach
 from django.db.models.signals import post_save, post_delete
 from django.dispatch import receiver
 
-from .cache_utils import invalidate_get_cache_for_prefix
+from .cache_utils import invalidate_get_cache_for_prefix, invalidate_get_cache_for_messaging_scope
 
 
 def _get_affected_user_ids(sender, instance, **kwargs):
     """Return list of user pks whose cache should be invalidated when this model instance changes, or None if not scoped."""
     model_key = f"{sender._meta.app_label}.{sender._meta.model_name}"
+    label = getattr(sender._meta, "label", None)  # e.g. QuaterlyReports.FunctionsEntries (matches dict keys)
     try:
         if model_key == "task_management.Task":
             pks = []
@@ -61,7 +62,7 @@ def _get_affected_user_ids(sender, instance, **kwargs):
             if u is not None and getattr(u, "pk", None) is not None:
                 return [u.pk]
             return []
-        if model_key == "QuaterlyReports.FunctionsEntries":
+        if model_key == "QuaterlyReports.functionsentries" or label == "QuaterlyReports.FunctionsEntries":
             pks = []
             c = getattr(instance, "Creator", None)
             if c is not None:
@@ -69,6 +70,46 @@ def _get_affected_user_ids(sender, instance, **kwargs):
             co = getattr(instance, "co_author", None)
             if co is not None:
                 pks.append(getattr(co, "pk", None))
+            # Everyone in the share chain must see fresh data (list/detail APIs)
+            try:
+                entry_id = getattr(instance, "pk", None) or getattr(instance, "id", None)
+                if entry_id:
+                    from QuaterlyReports.models import FunctionsEntriesShare
+                    for row in FunctionsEntriesShare.objects.filter(actionable_entry_id=entry_id).select_related("shared_with"):
+                        u = getattr(row, "shared_with", None)
+                        if u is not None:
+                            pks.append(getattr(u, "pk", None))
+            except Exception:
+                pass
+            return list(filter(None, set(pks)))
+        if model_key == "QuaterlyReports.functionsentriesshare" or label == "QuaterlyReports.FunctionsEntriesShare":
+            # Invalidate for the shared_with user, creator, co_author, and everyone else on the share chain
+            pks = []
+            sw = getattr(instance, "shared_with", None)
+            if sw is not None:
+                pks.append(getattr(sw, "pk", None))
+            entry = getattr(instance, "actionable_entry", None)
+            if entry is None and getattr(instance, "actionable_entry_id", None):
+                try:
+                    from QuaterlyReports.models import FunctionsEntries
+                    entry = FunctionsEntries.objects.filter(pk=instance.actionable_entry_id).first()
+                except Exception:
+                    entry = None
+            if entry is not None:
+                c = getattr(entry, "Creator", None)
+                if c is not None:
+                    pks.append(getattr(c, "pk", None))
+                co = getattr(entry, "co_author", None)
+                if co is not None:
+                    pks.append(getattr(co, "pk", None))
+                try:
+                    from QuaterlyReports.models import FunctionsEntriesShare
+                    for row in FunctionsEntriesShare.objects.filter(actionable_entry_id=entry.pk).select_related("shared_with"):
+                        u = getattr(row, "shared_with", None)
+                        if u is not None:
+                            pks.append(getattr(u, "pk", None))
+                except Exception:
+                    pass
             return list(filter(None, set(pks)))
         if model_key == "QuaterlyReports.Monthly_department_head_and_subhead":
             return None
@@ -101,6 +142,66 @@ def _get_affected_user_ids(sender, instance, **kwargs):
         return None
     except Exception:
         return None
+
+def _get_messaging_scope_ids(sender, instance, **kwargs):
+    """
+    Return list of chat_id or group_id (scope ids) for messaging GET cache invalidation.
+    Used when a Messaging model is saved so we invalidate get:msg:<scope_id>:* for that chat/group.
+    """
+    scope_ids = []
+    try:
+        label = getattr(sender._meta, "label", None) or f"{sender._meta.app_label}.{sender._meta.model_name}"
+        # GroupMessages -> group_id (instance.group_id is GroupChats.pk = group_id)
+        if "GroupMessages" in label or sender._meta.model_name == "groupmessages":
+            scope_id = getattr(instance, "group_id", None)
+            if scope_id is not None:
+                scope_ids.append(str(scope_id))
+            return list(dict.fromkeys(scope_ids))
+        # IndividualMessages -> chat_id (instance.chat_id is IndividualChats.pk = chat_id)
+        if "IndividualMessages" in label or sender._meta.model_name == "individualmessages":
+            scope_id = getattr(instance, "chat_id", None)
+            if scope_id is not None:
+                scope_ids.append(str(scope_id))
+            return list(dict.fromkeys(scope_ids))
+        # GroupChats -> group_id
+        if "GroupChats" in label or sender._meta.model_name == "groupchats":
+            scope_id = getattr(instance, "group_id", None)
+            if scope_id is not None:
+                scope_ids.append(str(scope_id))
+            return scope_ids
+        # GroupMembers -> groupchat_id is GroupChats.pk which is group_id
+        if "GroupMembers" in label or sender._meta.model_name == "groupmembers":
+            scope_id = getattr(instance, "groupchat_id", None)
+            if scope_id is not None:
+                scope_ids.append(str(scope_id))
+            return list(dict.fromkeys(scope_ids))
+        # IndividualChats -> chat_id
+        if "IndividualChats" in label or sender._meta.model_name == "individualchats":
+            scope_id = getattr(instance, "chat_id", None)
+            if scope_id is not None:
+                scope_ids.append(str(scope_id))
+            return scope_ids
+        # MessageAttachment -> group_message.group_id, individual_message.chat_id, or standalone group_id/chat_id
+        if "MessageAttachment" in label or sender._meta.model_name == "messageattachment":
+            gm = getattr(instance, "group_message", None)
+            if gm is not None:
+                sid = getattr(gm, "group_id", None) or (getattr(getattr(gm, "group", None), "group_id", None))
+                if sid:
+                    scope_ids.append(str(sid))
+            im = getattr(instance, "individual_message", None)
+            if im is not None:
+                sid = getattr(im, "chat_id", None) or (getattr(getattr(im, "chat", None), "chat_id", None))
+                if sid:
+                    scope_ids.append(str(sid))
+            if getattr(instance, "group_id", None) is not None:
+                scope_ids.append(str(instance.group_id))
+            if getattr(instance, "chat_id", None) is not None:
+                scope_ids.append(str(instance.chat_id))
+            return list(dict.fromkeys(scope_ids))
+    except Exception:
+        pass
+    return scope_ids
+
 
 # Fallback: path prefixes to invalidate per app when a model has no specific mapping
 PREFIXES_BY_APP = {
@@ -157,6 +258,15 @@ AFFECTED_GET_PREFIXES_BY_MODEL = {
     ],
     "QuaterlyReports.FunctionsEntries": [
         "ActionableEntries",
+        "get_functions_and_actionable_goals",
+        "ActionableEntriesCoAuthor",
+        "ActionableEntriesSharedWith",
+    ],
+    "QuaterlyReports.FunctionsEntriesShare": [
+        "ActionableEntries",
+        "get_functions_and_actionable_goals",
+        "ActionableEntriesCoAuthor",
+        "ActionableEntriesSharedWith",
     ],
     # Calling (under /messaging/): call lists and callable users
     "Calling.Call": [
@@ -180,8 +290,17 @@ AFFECTED_GET_PREFIXES_BY_MODEL = {
 
 
 def _invalidate_for_sender(sender, instance, **kwargs):
+    # Messaging: invalidate by chat_id/group_id so all GETs for that chat/group are refreshed
+    if sender._meta.app_label == "Messaging":
+        scope_ids = _get_messaging_scope_ids(sender, instance, **kwargs)
+        for scope_id in scope_ids:
+            invalidate_get_cache_for_messaging_scope(scope_id)
+
     model_key = f"{sender._meta.app_label}.{sender._meta.model_name}"
-    prefixes = AFFECTED_GET_PREFIXES_BY_MODEL.get(model_key)
+    # Prefer label (App.ModelClass) so dict keys match; model_name is lowercase and would miss lookups
+    prefixes = AFFECTED_GET_PREFIXES_BY_MODEL.get(getattr(sender._meta, "label", None))
+    if prefixes is None:
+        prefixes = AFFECTED_GET_PREFIXES_BY_MODEL.get(model_key)
     if prefixes is None:
         prefixes = PREFIXES_BY_APP.get(sender._meta.app_label, [])
     user_ids = _get_affected_user_ids(sender, instance, **kwargs)
@@ -208,6 +327,7 @@ def connect_cache_invalidation():
         FunctionsGoals,
         ActionableGoals,
         FunctionsEntries,
+        FunctionsEntriesShare,
         PlannedActions,
         SalesStatistics,
     )
@@ -226,6 +346,7 @@ def connect_cache_invalidation():
         FunctionsGoals,
         ActionableGoals,
         FunctionsEntries,
+        FunctionsEntriesShare,
         PlannedActions,
         SalesStatistics,
         Call,

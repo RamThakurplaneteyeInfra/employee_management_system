@@ -164,7 +164,7 @@ async def profile_detail_update_delete(request: HttpRequest, profile_id: int):
         return await profile_update(request, profile_id)
     if request.method == "DELETE":
         return await profile_delete(request, profile_id)
-    return JsonResponse({"error": "Method not allowed"}, status=status.HTTP_400_BAD_REQUEST)
+    return JsonResponse({"error": "Method not allowed"}, status=status.HTTP_405_METHOD_NOT_ALLOWED)
 
 
 def _get_profile_members_sync(profile_id):
@@ -321,7 +321,7 @@ async def profile_update(request: HttpRequest, profile_id: int):
     elif request.method == "PATCH":
         err = verifyPatch(request)
     else:
-        return JsonResponse({"error": "Method not allowed"}, status=status.HTTP_400_BAD_REQUEST)
+        return JsonResponse({"error": "Method not allowed"}, status=status.HTTP_405_METHOD_NOT_ALLOWED)
     if err:
         return err
     try:
@@ -410,7 +410,7 @@ async def conversation_list_create(request: HttpRequest, profile_id: int):
 
         conv = await sync_to_async(_create_one)(client, note_text, request.user)
         return JsonResponse({"id": conv.id, "message": "Note added"}, status=status.HTTP_201_CREATED)
-    return JsonResponse({"error": "Method not allowed"}, status=status.HTTP_400_BAD_REQUEST)
+    return JsonResponse({"error": "Method not allowed"}, status=status.HTTP_405_METHOD_NOT_ALLOWED)
 
 
 def _update_note_sync(profile_id, note_id, data):
@@ -450,4 +450,4 @@ async def conversation_update_delete(request: HttpRequest, profile_id: int, note
         except ClientConversation.DoesNotExist:
             return JsonResponse({"error": "Note not found"}, status=status.HTTP_404_NOT_FOUND)
         return JsonResponse({"message": "Note deleted"}, status=status.HTTP_200_OK)
-    return JsonResponse({"error": "Method not allowed"}, status=status.HTTP_400_BAD_REQUEST)
+    return JsonResponse({"error": "Method not allowed"}, status=status.HTTP_405_METHOD_NOT_ALLOWED)

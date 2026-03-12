@@ -119,7 +119,7 @@ def _get_addeded_entries_sync(request: HttpRequest, **argu):
         elif user_obj and date_val and month_and_quater_obj:
             entries = UsersEntries.objects.select_related("user", "month_and_quater_id", "status", "product").filter(user=user_obj, month_and_quater_id=month_and_quater_obj, date=date_val).order_by("date")
         else:
-            return JsonResponse({"error": "invalid query parameter"}, status=status.HTTP_203_NON_AUTHORITATIVE_INFORMATION)
+            return JsonResponse({"error": "invalid query parameter"}, status=status.HTTP_400_BAD_REQUEST)
         data = []
         for entry in entries:
             data.append({
@@ -135,7 +135,7 @@ def _get_addeded_entries_sync(request: HttpRequest, **argu):
             })
         return data
     except ValueError:
-        return JsonResponse({"error": "query parameter is absent"}, status=status.HTTP_203_NON_AUTHORITATIVE_INFORMATION)
+        return JsonResponse({"error": "query parameter is absent"}, status=status.HTTP_400_BAD_REQUEST)
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=status.HTTP_404_NOT_FOUND)
 

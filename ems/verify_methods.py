@@ -3,7 +3,7 @@ from ems.RequiredImports import *
 # use in the view that has been passed in the respective path function of the requested url.
 def verifyPost(request: HttpRequest):
     if request.method != "POST":
-        return JsonResponse({"error": "Method not allowed"}, status=status.HTTP_400_BAD_REQUEST)
+        return JsonResponse({"error": "Method not allowed"}, status=status.HTTP_405_METHOD_NOT_ALLOWED)
     else:
         return None
 
@@ -11,7 +11,7 @@ def verifyPost(request: HttpRequest):
 # use in the view that has been passed in the respective path function of the requested url.
 def verifyGet(request: HttpRequest):
     if request.method != "GET":
-        return JsonResponse({"error": "Method not allowed"}, status=status.HTTP_400_BAD_REQUEST)
+        return JsonResponse({"error": "Method not allowed"}, status=status.HTTP_405_METHOD_NOT_ALLOWED)
     else:
         return None
 
@@ -19,7 +19,7 @@ def verifyGet(request: HttpRequest):
 # use in the view that has been passed in the respective path function of the requested url.
 def verifyPatch(request: HttpRequest):
     if request.method != "PATCH":
-        return JsonResponse({"error": "Method not allowed"}, status=status.HTTP_400_BAD_REQUEST)
+        return JsonResponse({"error": "Method not allowed"}, status=status.HTTP_405_METHOD_NOT_ALLOWED)
     else:
         return None
 
@@ -27,7 +27,7 @@ def verifyPatch(request: HttpRequest):
 # use in the view that has been passed in the respective path function of the requested url.
 def verifyPut(request: HttpRequest):
     if request.method != "PUT":
-        return JsonResponse({"error": "Method not allowed"}, status=status.HTTP_400_BAD_REQUEST)
+        return JsonResponse({"error": "Method not allowed"}, status=status.HTTP_405_METHOD_NOT_ALLOWED)
     else:
         return None
 
@@ -35,7 +35,7 @@ def verifyPut(request: HttpRequest):
 # use in the view that has been passed in the respective path function of the requested url.
 def verifyDelete(request: HttpRequest):
     if request.method != "DELETE":
-        return JsonResponse({"error": "Method not allowed"}, status=status.HTTP_400_BAD_REQUEST)
+        return JsonResponse({"error": "Method not allowed"}, status=status.HTTP_405_METHOD_NOT_ALLOWED)
     else:
         return None
 

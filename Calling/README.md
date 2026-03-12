@@ -6,7 +6,8 @@ Audio and video calling (1:1 and group) via HTTP APIs and WebSocket signaling.
 
 - **HTTP APIs:** Under `/messaging/` (included via `Messaging.urls`).  
   Example: `POST /messaging/initiateCall/`, `GET /messaging/pendingCalls/`, etc.
-- **WebSocket:** `ws://<host>/ws/calls/` (ASGI; use the same host as the site in production).
+- **WebSocket:** `wss://<host>/ws/calls/` (ASGI; use the same host as the API in production so session cookies are sent).
+- **Auth:** Connections are **rejected (403/close 4001)** if the user is not authenticated—same rules as `/ws/notifications/`. Open this socket **after login** using the same origin (or cross-origin with `SameSite=None; Secure` on the session cookie) so the session cookie is sent. Close the socket on **logout** (same as notifications).
 
 ## Deployment
 

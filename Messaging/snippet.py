@@ -8,7 +8,7 @@ def add_participant_to_groupMembers(group_chat:GroupChats,participant:User):
         GroupMembers.objects.create(groupchat=group_chat,participant=participant)
     except Exception as e:
         print(e)
-        return  JsonResponse({"message":f"{e}"},status=status.HTTP_304_NOT_MODIFIED)
+        return JsonResponse({"message": f"{e}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     else:
         return "Inserted"
     

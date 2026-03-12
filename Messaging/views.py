@@ -63,14 +63,14 @@ def _create_group_sync(req, data):
     has_permission = has_group_create_or_add_member_permission(req.user)
     current_user_name = Profile.objects.get(Employee_id=req.user).Name
     if not current_user_name:
-        return {"error": JsonResponse({"message": "You cannot create your group, untill you Complete your profile"}, status=status.HTTP_304_NOT_MODIFIED)}
+        return {"error": JsonResponse({"message": "You cannot create your group, untill you Complete your profile"}, status=status.HTTP_400_BAD_REQUEST)}
     if not has_permission:
         raise PermissionDenied("Not allowed")
     group_create_fields = ["group_name", "description", "participants"]
     temp_dict = {}
     for i in group_create_fields:
         if (i == "group_name" or i == "participants") and not data.get(i):
-            return {"error": JsonResponse({"message": "Participants are required"}, status=status.HTTP_406_NOT_ACCEPTABLE)}
+            return {"error": JsonResponse({"message": "Participants are required"}, status=status.HTTP_400_BAD_REQUEST)}
         elif i == "participants":
             temp_dict[i] = len(data.get(i))
         else:
@@ -85,7 +85,7 @@ def _create_group_sync(req, data):
         if isinstance(user, User):
             add_participant_to_groupMembers(group_chat=chat, participant=user)
         else:
-            return {"error": JsonResponse(user, status=status.HTTP_304_NOT_MODIFIED)}
+            return {"error": JsonResponse(user, status=status.HTTP_400_BAD_REQUEST)}
     return {"ok": True}
 
 
@@ -104,7 +104,7 @@ async def create_group(request: HttpRequest):
     except PermissionDenied:
         return JsonResponse({"message": "you cannot create a Group. Kindly contact your TeamLead/Admin"}, status=status.HTTP_403_FORBIDDEN)
     except Exception as e:
-        return JsonResponse({"message": f"{e}"}, status=status.HTTP_304_NOT_MODIFIED)
+        return JsonResponse({"message": f"{e}"}, status=status.HTTP_400_BAD_REQUEST)
 
 
 # ==================== api_to_get_group_members ====================
@@ -132,7 +132,7 @@ def _add_user_sync(req, group_id, participant_username):
     data = json.loads(present_members.content.decode('utf-8'))
     for i in data:
         if i.get("participant") == participant_username:
-            return {"error": JsonResponse({"Message": "user Already Exists"}, status=status.HTTP_302_FOUND)}
+            return {"error": JsonResponse({"Message": "user Already Exists"}, status=status.HTTP_409_CONFLICT)}
         elif i.get("message"):
             return {"response": present_members}
         user = _get_user_object_sync(username=participant_username)
@@ -141,7 +141,7 @@ def _add_user_sync(req, group_id, participant_username):
         group_obj.participants += 1
         group_obj.save()
         return {"ok": True}
-    return {"error": JsonResponse(user, status=status.HTTP_304_NOT_MODIFIED)}
+    return {"error": JsonResponse(user, status=status.HTTP_400_BAD_REQUEST)}
 
 
 @csrf_exempt
@@ -304,7 +304,7 @@ def _post_message_sync(req, chat_id):
     has_attachments = bool(attachment_ids)
 
     if not (has_text or has_attachments):
-        return JsonResponse({"message": "Message or attachments required"}, status=status.HTTP_204_NO_CONTENT)
+        return JsonResponse({"message": "Message or attachments required"}, status=status.HTTP_400_BAD_REQUEST)
 
     is_group = check_group_or_chat(id=chat_id)
 
@@ -398,7 +398,7 @@ async def post_message(request: HttpRequest, chat_id: str):
 def _upload_message_file_sync(req):
     """Sync helper: upload file to S3 and create MessageAttachment."""
     if req.method != "POST":
-        return {"error": JsonResponse({"error": "Method not allowed"}, status=status.HTTP_400_BAD_REQUEST)}
+        return {"error": JsonResponse({"error": "Method not allowed"}, status=status.HTTP_405_METHOD_NOT_ALLOWED)}
     file_obj = req.FILES.get("file")
     if not file_obj:
         return {"error": JsonResponse({"error": "No file provided"}, status=status.HTTP_400_BAD_REQUEST)}
@@ -447,7 +447,7 @@ async def upload_message_file(request: HttpRequest):
 def _add_link_sync(req):
     """Sync helper: create MessageAttachment for a shared link."""
     if req.method != "POST":
-        return {"error": JsonResponse({"error": "Method not allowed"}, status=status.HTTP_400_BAD_REQUEST)}
+        return {"error": JsonResponse({"error": "Method not allowed"}, status=status.HTTP_405_METHOD_NOT_ALLOWED)}
     data = load_data(req)
     url = (data.get("url") or "").strip()
     if not url:
@@ -717,7 +717,7 @@ async def update_group(request: HttpRequest, group_id: str):
     try:
         data = load_data(request=request)
         await sync_to_async(_update_group_sync)(request, group_id, data)
-        return JsonResponse({"Messsage": "Group details updated successfully"}, status=status.HTTP_201_CREATED)
+        return JsonResponse({"Messsage": "Group details updated successfully"}, status=status.HTTP_200_OK)
     except Http404 as e:
         return JsonResponse({"message": f"{e}"}, status=status.HTTP_404_NOT_FOUND)
     except PermissionDenied:

@@ -29,6 +29,7 @@ def _create_notification_for_groupmessage_sync(sender, instance: GroupMessages, 
     if not created:
         return
     group_obj = instance.group
+    group_name=group_obj.group_name
     sender_name = _get_users_Name_sync(instance.sender)
     members = GroupMembers.objects.filter(groupchat=group_obj).exclude(participant=instance.sender)
     try:
@@ -57,10 +58,10 @@ def _create_notification_for_groupmessage_sync(sender, instance: GroupMessages, 
                 {
                     "type": "send_notification",
                     "category": "Group_message",
-                    "title": f"Received a Group message from {group_obj.group_name}",
+                    "title": f"Received a Group message in {group_name}",
                     "from": sender_name,
                     "message": instance.content,
-                    "extra": {"time": extra_time, "group_id": group_obj.group_id},
+                    "extra": {"time": extra_time, "group_name": group_name},
                 },
             )
         except Exception as e:
@@ -286,6 +287,171 @@ def _notify_group_deleted_sync(sender, instance: GroupChats, **kwargs):
 def notify_group_deleted(sender, instance: GroupChats, **kwargs):
     """Receiver: GroupChats pre_delete → notify all members that the group was deleted (DB + WebSocket)."""
     _notify_group_deleted_sync(sender, instance, **kwargs)
+
+
+# -------- Meeting (events.Meeting): broadcast on product channel (create/update/delete) --------
+# Skip broadcast when only is_active is toggled. Labels: Created | reschedule | updated | abandoned.
+_meeting_previous_state = {}
+
+
+def _meeting_pre_save_store(sender, instance, **kwargs):
+    """Store field snapshot before save so post_save can detect what changed."""
+    from events.models import Meeting
+
+    if not isinstance(instance, Meeting) or not instance.pk:
+        return
+    try:
+        old = Meeting.objects.get(pk=instance.pk)
+    except Meeting.DoesNotExist:
+        return
+    _meeting_previous_state[instance.pk] = {
+        "product_id": old.product_id,
+        "meeting_room_id": old.meeting_room_id,
+        "meeting_type": old.meeting_type,
+        "time": old.time,
+        "is_active": old.is_active,
+    }
+
+
+def _meeting_send_product_channel(instance, action_label, message_text):
+    """
+    Send WebSocket notification to product group. action_label is one of:
+    Created | reschedule | updated | abandoned
+    """
+    if instance.product_id is None:
+        return
+    try:
+        product = instance.product
+        product_name = (getattr(product, "name", None) or "").strip()
+    except Exception:
+        return
+    if not product_name:
+        return
+
+    from notifications.consumer import _product_group_name
+
+    group_name = _product_group_name(product_name)
+    channel_layer = get_channel_layer()
+    if not channel_layer:
+        logger.warning("Meeting notification: channel_layer is None, skipping WebSocket broadcast.")
+        return
+
+    room_name = None
+    if instance.meeting_room_id:
+        try:
+            room_name = getattr(instance.meeting_room, "name", None)
+        except Exception:
+            room_name = None
+
+    extra_time = gmt_to_ist_str(timezone.now(), "%d/%m/%Y, %H:%M:%S")
+    try:
+        async_to_sync(channel_layer.group_send)(
+            group_name,
+            {
+                "type": "send_notification",
+                "category": "Meeting_push",
+                "title": action_label,
+                "message": message_text,
+                "from": None,
+                "extra": {
+                    "time": extra_time,
+                    "action": action_label,
+                    "product_name": product_name,
+                    "room_name": room_name,
+                    "meeting_type": getattr(instance, "meeting_type", None),
+                    "time_minutes": getattr(instance, "time", None),
+                    "is_active": getattr(instance, "is_active", None),
+                },
+            },
+        )
+    except Exception as e:
+        logger.warning(
+            "Meeting product-channel WebSocket notification failed (group=%s): %s",
+            group_name,
+            e,
+        )
+
+
+def _notify_meeting_post_save(sender, instance, created, **kwargs):
+    """
+    Created → 'Created'. Updated: if only is_active changed, skip.
+    If time changed → 'reschedule'. Any other attribute change → 'updated'.
+    """
+    from events.models import Meeting
+
+    if not created:
+        prev = _meeting_previous_state.pop(instance.pk, None)
+        if prev is None:
+            return
+        # No broadcast when only is_active is flipped
+        only_active_changed = (
+            prev["product_id"] == instance.product_id
+            and prev["meeting_room_id"] == instance.meeting_room_id
+            and prev["meeting_type"] == instance.meeting_type
+            and prev["time"] == instance.time
+            and prev["is_active"] != instance.is_active
+        )
+        if only_active_changed:
+            return
+        time_changed = prev["time"] != instance.time
+        if time_changed:
+            action_label = "reschedule"
+            msg = (
+                f"Meeting rescheduled: duration {instance.time} min, "
+                f"room={getattr(instance.meeting_room, 'name', None) or 'N/A'}, "
+                f"type={instance.meeting_type}."
+            )
+        else:
+            action_label = "updated"
+            msg = (
+                f"Meeting updated: room={getattr(instance.meeting_room, 'name', None) or 'N/A'}, "
+                f"type={instance.meeting_type}, duration={instance.time} min."
+            )
+        _meeting_send_product_channel(instance, action_label, msg)
+        return
+
+    # Created
+    room_name = None
+    if instance.meeting_room_id:
+        try:
+            room_name = getattr(instance.meeting_room, "name", None)
+        except Exception:
+            pass
+    msg = (
+        f"Meeting created: type={instance.meeting_type}, "
+        f"room={room_name or 'N/A'}, duration={instance.time} min."
+    )
+    _meeting_send_product_channel(instance, "Created", msg)
+
+
+def _notify_meeting_pre_delete(sender, instance, **kwargs):
+    """Deleted meeting → label 'abandoned' on product channel."""
+    from events.models import Meeting
+
+    room_name = None
+    if instance.meeting_room_id:
+        try:
+            room_name = getattr(instance.meeting_room, "name", None)
+        except Exception:
+            pass
+    msg = (
+        f"Meeting abandoned: type={getattr(instance, 'meeting_type', None)}, "
+        f"room={room_name or 'N/A'}."
+    )
+    _meeting_send_product_channel(instance, "abandoned", msg)
+    _meeting_previous_state.pop(instance.pk, None)
+
+
+def _register_meeting_signals():
+    """Register Meeting pre_save, post_save, pre_delete; deferred to avoid circular imports."""
+    from events.models import Meeting
+
+    pre_save.connect(_meeting_pre_save_store, sender=Meeting)
+    post_save.connect(_notify_meeting_post_save, sender=Meeting)
+    pre_delete.connect(_notify_meeting_pre_delete, sender=Meeting)
+
+
+_register_meeting_signals()
 
 
 # -------- Call status MISSED: increment receiver's MissedCallCount (table in Calling app) --------

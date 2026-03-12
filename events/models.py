@@ -136,12 +136,19 @@ class Event(models.Model):
         return self.title
 class Meeting(models.Model):
     """
-    Model representing a meeting booking.
+    Meeting booking: product (FK), type, duration (time minutes), room, active flag.
     """
     MEETING_TYPE_CHOICES = [("individual", "Individual"),("group", "Group Meeting"),]
 
-    users = models.ManyToManyField(User)
-    meeting_type=models.CharField(choices=MEETING_TYPE_CHOICES)
+    product = models.ForeignKey(
+        "project.Product",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="meetings",
+        db_column="product_id",
+    )
+    meeting_type=models.CharField(max_length=20, choices=MEETING_TYPE_CHOICES)
     time = models.SmallIntegerField(default=5)
     meeting_room = models.ForeignKey(Room,on_delete=models.CASCADE,null=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -152,4 +159,6 @@ class Meeting(models.Model):
         ordering=["-created_at","is_active"]
     
     def __str__(self):
-        return f"{self.title} - {self.name} ({self.meeting_room})"
+        room = getattr(self.meeting_room, "name", None) or ""
+        prod = getattr(self.product, "name", None) or ""
+        return f"Meeting {self.pk} — {prod} — {room}"
