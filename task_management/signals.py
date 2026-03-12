@@ -13,7 +13,16 @@ from channels.layers import get_channel_layer
 from accounts.filters import _get_users_Name_sync
 from ems.utils import gmt_to_ist_str
 
-from .models import Task, TaskAssignies, AssingnedTasksCount, CreatedTasksCount, TaskCreateAndEditLogs, TaskMessage
+from .models import (
+    Task,
+    TaskAssignies,
+    TaskStatus,
+    TaskStatusChangeLogs,
+    AssingnedTasksCount,
+    CreatedTasksCount,
+    TaskCreateAndEditLogs,
+    TaskMessage,
+)
 from notifications.models import Notification, notification_type
 
 logger = logging.getLogger(__name__)
@@ -151,3 +160,22 @@ def _task_message_notification_sync(sender, created, instance: TaskMessage, **kw
 @receiver(post_save, sender=TaskMessage)
 def task_message_notification(sender, created, instance: TaskMessage, **kwargs):
     _task_message_notification_sync(sender, created, instance, **kwargs)
+
+
+# -------- Task status COMPLETED → ensure entry in TaskStatusChangeLogs --------
+@receiver(post_save, sender=Task)
+def log_task_status_change_to_completed(sender, instance: Task, created, **kwargs):
+    """After Task save: if status is COMPLETED, create or update TaskStatusChangeLogs entry."""
+    try:
+        completed_status = TaskStatus.objects.filter(status_name__iexact="COMPLETED").first()
+    except Exception:
+        return
+    if not completed_status or not instance.status_id or instance.status_id != completed_status.pk:
+        return
+    try:
+        TaskStatusChangeLogs.objects.update_or_create(
+            task=instance,
+            defaults={"status_change_to": completed_status},
+        )
+    except Exception as e:
+        logger.warning("TaskStatusChangeLogs create/update failed for task %s: %s", instance.pk, e)

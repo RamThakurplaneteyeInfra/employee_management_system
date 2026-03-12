@@ -250,16 +250,15 @@ def _birthdaycounter_bulk_post_sync(body):
                 continue
             profile.birthday_counter += 1
             profile.save(update_fields=["birthday_counter"])
-            updated.append({"username": username, "birthday_counter": profile.birthday_counter})
+            updated.append({"username": username, "birthday_counter": profile.birthday_counter, "user_pk": user_obj.pk})
     if not updated:
         return {"error": "No valid users found or no profiles updated."}, 400
-    # Erase Redis GET cache for birthday_counter so all clients see updated counts (works with KEY_PREFIX e.g. "ems")
     try:
         from ems.cache_utils import invalidate_birthday_counter_cache
-        invalidate_birthday_counter_cache()
+        invalidate_birthday_counter_cache(user_ids=[u["user_pk"] for u in updated])
     except Exception:
         pass
-    return {"updated": updated, "invalidated_cache": True}, 200
+    return {"updated": [{"username": u["username"], "birthday_counter": u["birthday_counter"]} for u in updated], "invalidated_cache": True}, 200
 
 
 @csrf_exempt

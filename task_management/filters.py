@@ -132,25 +132,36 @@ def _get_all_TaskStatuses_sync(request: HttpRequest):
 
 async def get_all_TaskStatuses(request: HttpRequest):
     return await sync_to_async(_get_all_TaskStatuses_sync)(request)
-def _task_item_to_response(item, assigned_to=None):
-    """Build a consistent task response dict so Assigned_to is always present.
-    If assigned_to is provided (list of names), use it; else use item.get('Assigned_to') or [].
-    """
+def _task_item_to_response(item, assigned_to=None, completed_at_map=None):
+    """Build a consistent task response dict. Assigned_to is list of {name, role}. completed_At is IST last_edit when Status is COMPLETED else None."""
     if assigned_to is None:
         assigned_to = item.get("Assigned_to") if item.get("Assigned_to") is not None else []
     if not isinstance(assigned_to, list):
         assigned_to = list(assigned_to) if assigned_to else []
+    # Normalize to list of {name, role}
+    normalized = []
+    for x in assigned_to:
+        if isinstance(x, dict) and "name" in x:
+            normalized.append({"name": x.get("name", ""), "role": x.get("role")})
+        else:
+            normalized.append({"name": str(x) if x else "", "role": None})
+    task_id = item["Task_id"]
+    status = item.get("Status")
+    is_completed = status and str(status).upper() == "COMPLETED"
+    last_edit_dt = (completed_at_map or {}).get(task_id) if completed_at_map else None
+    completed_At = gmt_to_ist_str(last_edit_dt, "%d/%m/%Y %H:%M:%S") if is_completed and last_edit_dt else None
     return {
-        "Task_id": item["Task_id"],
+        "Task_id": task_id,
         "Title": item["Title"],
         "Description": item["Description"],
-        "Status": item["Status"],
+        "Status": status,
         "Created_by": item["Created_by"],
         "Report_to": item["Report_to"],
-        "Assigned_to": assigned_to,
+        "Assigned_to": normalized,
         "Due_date": item["Due_date"].strftime("%d/%m/%Y"),
         "Created_at": gmt_to_ist_str(item["Created_at"], "%d/%m/%Y %H:%M:%S"),
         "Task_type": item["Task_type"],
+        "completed_At": completed_At,
     }
 
 
@@ -167,6 +178,40 @@ def _get_assignee_names_by_task_id(task_ids):
     return {r["task_id"]: (r.get("names") or []) for r in rows}
 
 
+def _get_assignee_names_and_roles_by_task_id(task_ids):
+    """Return dict mapping task_id -> list of {name, role} for assignees (Profile.Name, Role.role_name)."""
+    if not task_ids:
+        return {}
+    rows = (
+        TaskAssignies.objects.filter(task_id__in=task_ids)
+        .select_related("assigned_to__accounts_profile__Role")
+        .order_by("task_id")
+    )
+    out = {}
+    for r in rows:
+        task_id = r.task_id
+        if task_id not in out:
+            out[task_id] = []
+        profile = getattr(r.assigned_to, "accounts_profile", None)
+        name = profile.Name if profile else getattr(r.assigned_to, "username", "")
+        role = profile.Role.role_name if profile and profile.Role else None
+        out[task_id].append({"name": name or "", "role": role})
+    return out
+
+
+def _get_completed_at_map(task_list):
+    """Return dict task_id -> last_edit datetime for tasks with Status COMPLETED (from TaskStatusChangeLogs)."""
+    completed_ids = [
+        item["Task_id"]
+        for item in task_list
+        if item.get("Status") and str(item["Status"]).upper() == "COMPLETED"
+    ]
+    if not completed_ids:
+        return {}
+    rows = TaskStatusChangeLogs.objects.filter(task_id__in=completed_ids).values("task_id", "last_edit")
+    return {r["task_id"]: r["last_edit"] for r in rows}
+
+
 # ==================== get_tasks_by_type ====================
 # endpoint for "Created_Tasks"-{{baseurl}}/tasks/viewTasks/?type=
 # endpoint for "Assigned_Reported"-{{baseurl}}/tasks/viewAssignedTasks/?type=
@@ -174,26 +219,57 @@ def _get_tasks_by_type_sync(request: HttpRequest, type: str = "all", self_create
     if type is None:
         type = "all"
     if type.lower() == "all" and self_created:
-        tasks=Task.objects.filter(created_by=request.user).select_related("status","type","created_by").annotate(Task_id=F('task_id'),Title=F('title'),
-                                    Description=F('description'),Status=F('status__status_name'),
-                                    Created_by=F('created_by__accounts_profile__Name'),Report_to=F("created_by__accounts_profile__Name"),Assigned_to=ArrayAgg("assignees__accounts_profile__Name", distinct=True),
-                                    Due_date=F('due_date'),Created_at=F('created_at'),
-                                    Task_type=F('type__type_name')).order_by("-created_at", "due_date").values('Task_id', 'Title', 'Description', 'Status','Created_by', 'Report_to', 'Due_date', 'Created_at', 'Task_type',"Assigned_to")
-        return [_task_item_to_response(item) for item in tasks]
+        tasks = (
+            Task.objects.filter(created_by=request.user)
+            .select_related("status", "type", "created_by")
+            .annotate(
+                Task_id=F("task_id"),
+                Title=F("title"),
+                Description=F("description"),
+                Status=F("status__status_name"),
+                Created_by=F("created_by__accounts_profile__Name"),
+                Report_to=F("created_by__accounts_profile__Name"),
+                Due_date=F("due_date"),
+                Created_at=F("created_at"),
+                Task_type=F("type__type_name"),
+            )
+            .order_by("-created_at", "due_date")
+            .values("Task_id", "Title", "Description", "Status", "Created_by", "Report_to", "Due_date", "Created_at", "Task_type")
+        )
+        task_list = list(tasks)
+        task_ids = [t["Task_id"] for t in task_list]
+        assignee_map = _get_assignee_names_and_roles_by_task_id(task_ids)
+        completed_at_map = _get_completed_at_map(task_list)
+        return [_task_item_to_response(item, assigned_to=assignee_map.get(item["Task_id"], []), completed_at_map=completed_at_map) for item in task_list]
 
     elif type and self_created:
         type_obj = _get_taskTypes_object_sync(type_name=type)
         if not type_obj:
             return [{"message": "Invalid task type"}]
-        tasks=Task.objects.filter(created_by=request.user,type=type_obj).select_related("status","type","created_by").annotate(Task_id=F('task_id'),Title=F('title'),
-                                    Description=F('description'),Status=F('status__status_name'),
-                                    Created_by=F('created_by__accounts_profile__Name'),Report_to=F("created_by__accounts_profile__Name"),Assigned_to=ArrayAgg("assignees__accounts_profile__Name", distinct=True),
-                                    Due_date=F('due_date'),Created_at=F('created_at'),
-                                    Task_type=F('type__type_name')).order_by("-created_at", "due_date").values('Task_id', 'Title', 'Description', 'Status','Created_by', 'Report_to', 'Due_date', 'Created_at', 'Task_type',"Assigned_to")
-        return [_task_item_to_response(item) for item in tasks]
+        tasks = (
+            Task.objects.filter(created_by=request.user, type=type_obj)
+            .select_related("status", "type", "created_by")
+            .annotate(
+                Task_id=F("task_id"),
+                Title=F("title"),
+                Description=F("description"),
+                Status=F("status__status_name"),
+                Created_by=F("created_by__accounts_profile__Name"),
+                Report_to=F("created_by__accounts_profile__Name"),
+                Due_date=F("due_date"),
+                Created_at=F("created_at"),
+                Task_type=F("type__type_name"),
+            )
+            .order_by("-created_at", "due_date")
+            .values("Task_id", "Title", "Description", "Status", "Created_by", "Report_to", "Due_date", "Created_at", "Task_type")
+        )
+        task_list = list(tasks)
+        task_ids = [t["Task_id"] for t in task_list]
+        assignee_map = _get_assignee_names_and_roles_by_task_id(task_ids)
+        completed_at_map = _get_completed_at_map(task_list)
+        return [_task_item_to_response(item, assigned_to=assignee_map.get(item["Task_id"], []), completed_at_map=completed_at_map) for item in task_list]
 
     elif type.lower() == "all" and not self_created:
-        # Assigned tasks: fetch tasks then assignee names in a separate query so Assigned_to is always in response
         tasks = (
             Task.objects.filter(assignees=request.user)
             .distinct()
@@ -214,8 +290,9 @@ def _get_tasks_by_type_sync(request: HttpRequest, type: str = "all", self_create
         )
         task_list = list(tasks)
         task_ids = [t["Task_id"] for t in task_list]
-        assignee_map = _get_assignee_names_by_task_id(task_ids)
-        return [_task_item_to_response(item, assigned_to=assignee_map.get(item["Task_id"], [])) for item in task_list]
+        assignee_map = _get_assignee_names_and_roles_by_task_id(task_ids)
+        completed_at_map = _get_completed_at_map(task_list)
+        return [_task_item_to_response(item, assigned_to=assignee_map.get(item["Task_id"], []), completed_at_map=completed_at_map) for item in task_list]
 
     elif type and not self_created:
         type_obj = _get_taskTypes_object_sync(type_name=type)
@@ -241,8 +318,9 @@ def _get_tasks_by_type_sync(request: HttpRequest, type: str = "all", self_create
         )
         task_list = list(tasks)
         task_ids = [t["Task_id"] for t in task_list]
-        assignee_map = _get_assignee_names_by_task_id(task_ids)
-        return [_task_item_to_response(item, assigned_to=assignee_map.get(item["Task_id"], [])) for item in task_list]
+        assignee_map = _get_assignee_names_and_roles_by_task_id(task_ids)
+        completed_at_map = _get_completed_at_map(task_list)
+        return [_task_item_to_response(item, assigned_to=assignee_map.get(item["Task_id"], []), completed_at_map=completed_at_map) for item in task_list]
 
     else:
         return [{"message": "Incorrect type for tasks"}]

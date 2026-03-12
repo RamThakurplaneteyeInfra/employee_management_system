@@ -42,7 +42,7 @@ This doc covers: user day entries (add/get/change/delete), monthly schedule (by 
   "date": "2026-03-15",
   "original_entry": "Entry note.",
   "product": "Product A",
-  "final_Status": null
+  // "final_Status": null
 }
 ```
 

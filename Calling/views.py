@@ -9,7 +9,7 @@ from datetime import timedelta
 from accounts.models import User, Profile
 from ems.verify_methods import *
 from ems.utils import gmt_to_ist_str
-from .models import Call, GroupCall, GroupCallParticipant
+from .models import Call, GroupCall, GroupCallParticipant,MissedCallCount
 
 # ==================== Voice/Video Call APIs ====================
 # Call lifecycle: pending -> (accepted | declined | ended)
@@ -605,6 +605,23 @@ def _get_active_calls_sync(user):
     ]
 
 
+def _get_missed_calls_count_sync(user):
+    """Return missed_call_count from MissedCallCount table for user (signal keeps it updated)."""
+    obj, _ = MissedCallCount.objects.get_or_create(
+        user=user,
+        defaults={"missed_call_count": 0},
+    )
+    return obj.missed_call_count
+
+
+def _reset_missed_calls_count_sync(user):
+    """Set missed_call_count to 0 for the current user."""
+    updated = MissedCallCount.objects.filter(user=user).update(missed_call_count=0)
+    if updated == 0:
+        MissedCallCount.objects.get_or_create(user=user, defaults={"missed_call_count": 0})
+    return True
+
+
 @login_required
 async def get_pending_calls(request: HttpRequest):
     if verifyGet(request):
@@ -620,6 +637,27 @@ async def get_active_calls(request: HttpRequest):
         return verifyGet(request)
     result = await sync_to_async(_get_active_calls_sync)(request.user)
     return JsonResponse(result, safe=False)
+
+
+@login_required
+async def get_missed_calls_count(request: HttpRequest):
+    """GET missed_call_count from MissedCallCount table for current user (signal increments on Call status=MISSED)."""
+    if verifyGet(request):
+        return verifyGet(request)
+    count = await sync_to_async(_get_missed_calls_count_sync)(request.user)
+    return JsonResponse({"missed_calls_count": count}, status=status.HTTP_200_OK)
+
+
+@csrf_exempt
+@login_required
+async def reset_missed_calls_count(request: HttpRequest):
+    """POST: set missed_call_count to 0 for the current user; invalidates GET missedCallsCount cache."""
+    if request.method != "POST":
+        return JsonResponse({"success": False, "error": "Method not allowed"}, status=status.HTTP_405_METHOD_NOT_ALLOWED)
+    await sync_to_async(_reset_missed_calls_count_sync)(request.user)
+    from ems.cache_utils import invalidate_missed_calls_count_cache
+    invalidate_missed_calls_count_cache(user_id=request.user.pk)
+    return JsonResponse({"success": True, "missed_calls_count": 0}, status=status.HTTP_200_OK)
 
 
 def _end_all_my_calls_sync(user):

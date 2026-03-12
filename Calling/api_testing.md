@@ -118,7 +118,58 @@ Other participants are notified via WebSocket (`screen_shared` event).
 
 ---
 
-## 7. Pending calls (incoming, not yet answered)
+## 6b. Stop screen share (1:1 or group)
+
+| Method | URL |
+|--------|-----|
+| PATCH  | `{{baseurl}}/messaging/stopScreenShare/` |
+
+**Body (JSON):** Send **either** `call_id` (1:1) **or** `group_call_id` (group), not both.
+
+1:1 example:
+```json
+{
+  "call_id": 123
+}
+```
+
+Group example:
+```json
+{
+  "group_call_id": 456
+}
+```
+
+**Success (200):** `{ "success": true, "is_screen_shared": false, "stopped_by_name": "<Full Name from Profile>" }`  
+Other participants are notified via WebSocket (`screen_share_stopped`).
+
+---
+
+## 7. Missed calls count (GET)
+
+| Method | URL |
+|--------|-----|
+| GET    | `{{baseurl}}/messaging/missedCallsCount/` |
+
+No body. Returns the current user’s missed-call count (stored in `MissedCallCount`; incremented by signal when a 1:1 call status becomes `missed`).
+
+**Success (200):** `{ "missed_calls_count": <int> }`
+
+---
+
+## 8. Reset missed calls count (POST)
+
+| Method | URL |
+|--------|-----|
+| POST   | `{{baseurl}}/messaging/resetMissedCallsCount/` |
+
+No body (or empty JSON). Sets the current user’s missed-call count to 0 and invalidates the GET missedCallsCount cache.
+
+**Success (200):** `{ "success": true, "missed_calls_count": 0 }`
+
+---
+
+## 9. Pending calls (incoming, not yet answered)
 
 | Method | URL |
 |--------|-----|
@@ -131,7 +182,7 @@ No body. Returns list of calls where current user is **receiver** and status is 
 
 ---
 
-## 8. Active calls (1:1)
+## 10. Active calls (1:1)
 
 | Method | URL |
 |--------|-----|
@@ -144,7 +195,7 @@ No body. Returns list of calls where current user is sender or receiver and stat
 
 ---
 
-## 9. End all my calls
+## 11. End all my calls
 
 | Method | URL |
 |--------|-----|
@@ -156,7 +207,7 @@ No body (or empty JSON). Ends all active 1:1 calls (pending/accepted) for the cu
 
 ---
 
-## 10. Initiate group call
+## 12. Initiate group call
 
 | Method | URL |
 |--------|-----|
@@ -166,33 +217,33 @@ No body (or empty JSON). Ends all active 1:1 calls (pending/accepted) for the cu
 ```json
 {
   "call_type": "video",
-  "invitees": ["user1", "user2"]
+  "user_ids": ["user1", "user2"]
 }
 ```
-`call_type`: `"audio"` or `"video"`. `invitees`: array of usernames.
+`call_type`: `"audio"` or `"video"`. `user_ids`: array of usernames to invite (at least one other user).
 
-**Success (201):** `{ "success": true, "call_id": <int> }`
+**Success (201):** `{ "success": true, "call_id": <int>, "creator": "<username>", "call_type": "...", "participant_usernames": ["user1", "user2"] }`
 
 ---
 
-## 11. Join group call
+## 13. Join group call
 
 | Method | URL |
 |--------|-----|
 | POST   | `{{baseurl}}/messaging/joinGroupCall/` |
 
-**Body (JSON):**
+**Body (JSON):** Use `call_id` (the group call id).
 ```json
 {
   "call_id": 456
 }
 ```
 
-**Success (200):** `{ "success": true, "call_id": <int> }`
+**Success (200):** `{ "success": true, "call_id": <int>, "creator": "...", "call_type": "...", "participant_usernames": [...] }`
 
 ---
 
-## 12. Leave group call
+## 14. Leave group call
 
 | Method | URL |
 |--------|-----|
@@ -209,7 +260,7 @@ No body (or empty JSON). Ends all active 1:1 calls (pending/accepted) for the cu
 
 ---
 
-## 13. End group call
+## 15. End group call
 
 | Method | URL |
 |--------|-----|
@@ -226,7 +277,7 @@ No body (or empty JSON). Ends all active 1:1 calls (pending/accepted) for the cu
 
 ---
 
-## 14. Active group calls
+## 16. Active group calls
 
 | Method | URL |
 |--------|-----|
@@ -239,7 +290,7 @@ No body. Returns list of **active** group calls where current user is creator or
 
 ---
 
-## 15. Call history
+## 17. Call history
 
 | Method | URL |
 |--------|-----|
@@ -258,20 +309,23 @@ No body. Returns combined history of 1:1 and group calls for the current user, s
 
 ## Quick reference
 
-| Purpose           | Method | URL |
-|-------------------|--------|-----|
-| Callable users    | GET    | `/messaging/callableUsers/` |
-| Initiate 1:1 call | POST   | `/messaging/initiateCall/` |
-| Accept call       | POST   | `/messaging/acceptCall/` |
-| Decline call      | POST   | `/messaging/declineCall/` |
-| End 1:1 call      | POST   | `/messaging/endCall/` |
-| Screen share      | PATCH  | `/messaging/screenShare/` |
-| Pending calls     | GET    | `/messaging/pendingCalls/` |
-| Active 1:1 calls  | GET    | `/messaging/activeCalls/` |
-| End all my calls  | POST   | `/messaging/endAllMyCalls/` |
-| Initiate group call | POST | `/messaging/initiateGroupCall/` |
-| Join group call   | POST   | `/messaging/joinGroupCall/` |
-| Leave group call  | POST   | `/messaging/leaveGroupCall/` |
-| End group call    | POST   | `/messaging/endGroupCall/` |
-| Active group calls| GET    | `/messaging/activeGroupCalls/` |
-| Call history      | GET    | `/messaging/callHistory/` |
+| Purpose              | Method | URL |
+|----------------------|--------|-----|
+| Callable users       | GET    | `/messaging/callableUsers/` |
+| Initiate 1:1 call    | POST   | `/messaging/initiateCall/` |
+| Accept call          | POST   | `/messaging/acceptCall/` |
+| Decline call         | POST   | `/messaging/declineCall/` |
+| End 1:1 call         | POST   | `/messaging/endCall/` |
+| Screen share         | PATCH  | `/messaging/screenShare/` |
+| Stop screen share    | PATCH  | `/messaging/stopScreenShare/` |
+| Missed calls count   | GET    | `/messaging/missedCallsCount/` |
+| Reset missed count   | POST   | `/messaging/resetMissedCallsCount/` |
+| Pending calls        | GET    | `/messaging/pendingCalls/` |
+| Active 1:1 calls     | GET    | `/messaging/activeCalls/` |
+| End all my calls     | POST   | `/messaging/endAllMyCalls/` |
+| Initiate group call  | POST   | `/messaging/initiateGroupCall/` |
+| Join group call      | POST   | `/messaging/joinGroupCall/` |
+| Leave group call     | POST   | `/messaging/leaveGroupCall/` |
+| End group call       | POST   | `/messaging/endGroupCall/` |
+| Active group calls   | GET    | `/messaging/activeGroupCalls/` |
+| Call history         | GET    | `/messaging/callHistory/` |

@@ -120,4 +120,23 @@ class GroupCallParticipant(models.Model):
     def __str__(self):
         return f"{self.user.username} in GroupCall #{self.group_call_id} ({self.status})"
 
+class MissedCallCount(models.Model):
+    """Stores missed-call count per user (receiver). Updated by GET missedCallsCount/; reset by POST resetMissedCallsCount/."""
+    user = models.OneToOneField(
+        User,
+        on_delete=models.CASCADE,
+        related_name="messaging_missed_call_count",
+        db_column="user_id",
+        to_field="username",
+        primary_key=True,
+    )
+    missed_call_count = models.IntegerField(default=0, db_column="missed_call_count")
+
+    class Meta:
+        db_table = 'messaging"."MissedCallCount'
+        verbose_name = "Missed call count"
+        verbose_name_plural = "Missed call counts"
+
+    def __str__(self):
+        return f"{self.user_id}: {self.missed_call_count}"
 # Create your models here.

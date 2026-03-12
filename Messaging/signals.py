@@ -7,7 +7,7 @@ or channel layer fails, so realtime messaging keeps working.
 """
 import logging
 from asgiref.sync import async_to_sync
-from django.db.models.signals import post_save, post_delete, pre_delete
+from django.db.models.signals import post_save, post_delete, pre_delete, pre_save
 from django.dispatch import receiver
 from django.utils import timezone
 from channels.layers import get_channel_layer
@@ -16,6 +16,10 @@ from ems.utils import gmt_to_ist_str
 
 from .models import GroupChats, GroupMessages, GroupMembers, IndividualMessages
 from notifications.models import Notification, notification_type
+from Calling.models import Call
+
+# Store previous Call status for post_save (detect transition to MISSED)
+_call_previous_status = {}
 
 logger = logging.getLogger(__name__)
 
@@ -282,3 +286,44 @@ def _notify_group_deleted_sync(sender, instance: GroupChats, **kwargs):
 def notify_group_deleted(sender, instance: GroupChats, **kwargs):
     """Receiver: GroupChats pre_delete → notify all members that the group was deleted (DB + WebSocket)."""
     _notify_group_deleted_sync(sender, instance, **kwargs)
+
+
+# -------- Call status MISSED: increment receiver's MissedCallCount (table in Calling app) --------
+def _increment_missed_call_count_for_receiver_sync(receiver_user):
+    """Get or create MissedCallCount for receiver_user and increment by 1."""
+    from Calling.models import MissedCallCount
+    obj, _ = MissedCallCount.objects.get_or_create(
+        user=receiver_user,
+        defaults={"missed_call_count": 0},
+    )
+    obj.missed_call_count += 1
+    obj.save(update_fields=["missed_call_count"])
+
+
+def _store_call_status_before_save(sender, instance, **kwargs):
+    """Store previous Call status so we only increment MissedCallCount when status becomes MISSED."""
+    if not instance.pk:
+        return
+    try:
+        old = Call.objects.get(pk=instance.pk)
+        _call_previous_status[instance.pk] = old.status
+    except Call.DoesNotExist:
+        pass
+
+
+def _increment_missed_call_count_on_missed(sender, instance, created, **kwargs):
+    """When a Call is saved with status=MISSED, increment the receiver's missed_call_count (create record if needed)."""
+    if instance.status != Call.MISSED or not instance.receiver_id:
+        _call_previous_status.pop(instance.pk, None)
+        return
+    prev = _call_previous_status.pop(instance.pk, None)
+    # Increment only when status became MISSED (new call with MISSED, or update from non-MISSED to MISSED)
+    if created or prev != Call.MISSED:
+        try:
+            _increment_missed_call_count_for_receiver_sync(instance.receiver)
+        except Exception as e:
+            logger.warning("MissedCallCount increment failed for receiver %s: %s", instance.receiver_id, e)
+
+
+pre_save.connect(_store_call_status_before_save, sender=Call)
+post_save.connect(_increment_missed_call_count_on_missed, sender=Call)

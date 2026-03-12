@@ -60,7 +60,7 @@ class Alert(models.Model):
     resolved_by = models.ForeignKey(
         User,
         on_delete=models.CASCADE,
-        null=False,
+        null=True,
         blank=True,
         related_name="closed_alerts",
         db_column="closed_by_id",

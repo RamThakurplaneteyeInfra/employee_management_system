@@ -38,10 +38,11 @@ class CacheGetMiddleware(MiddlewareMixin):
     def process_response(self, request, response):
         if request.path.startswith(CACHE_SKIP_PREFIXES):
             return response
-        # Invalidate GET cache immediately after any mutation so next GET sees updated data
+        # Invalidate GET cache for the logged-in user only so other users' cache is unaffected
         if request.method in MUTATION_METHODS and 200 <= response.status_code < 300:
+            user_id = getattr(request.user, "pk", None) if getattr(request.user, "is_authenticated", False) else None
             for prefix in get_path_prefixes_from_request(request):
-                invalidate_get_cache_for_prefix(prefix)
+                invalidate_get_cache_for_prefix(prefix, user_id=user_id)
         if request.method == "GET" and getattr(request, "_cache_key", None) is not None and response.status_code == 200:
             set_cached_response(request, response)
         return response

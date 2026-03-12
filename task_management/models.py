@@ -127,7 +127,7 @@ class TaskMessage(models.Model):
     message = models.TextField(verbose_name="message",null=False)
     created_at = models.DateTimeField(auto_now_add=True)
     # update_at=models.DateTimeField(auto_now=True)
-    seen=models.BooleanField(default=False)
+    # seen=models.BooleanField(default=False)
     
     class Meta:
         db_table='task_management"."taskmessaging'

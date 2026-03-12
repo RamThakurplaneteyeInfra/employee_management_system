@@ -13,15 +13,15 @@ DEFAULT_TIMEOUT = getattr(settings, "CACHE_GET_TIMEOUT", 300)
 
 
 def _build_get_cache_key(request):
-    """Build a cache key for this GET request (path + query + user). Path included for prefix invalidation."""
+    """Build a cache key for this GET request: get:<user_id>:<path_safe>:<hash>. User_id in key so invalidation can target one user."""
     path = request.path
-    # print("building the cache key")
     query = sorted(request.GET.items()) if request.GET else []
     query_str = "&".join(f"{k}={v}" for k, v in query)
-    user_id = request.user.pk if request.user.is_authenticated else "none"
-    raw = f"{query_str}:{user_id}"
+    user_id = request.user.pk if request.user.is_authenticated else "anon"
     path_safe = path.replace("/", ":").strip(":") or "root"
-    return f"{CACHE_KEY_PREFIX}:{path_safe}:{hashlib.md5(raw.encode()).hexdigest()}"
+    raw = query_str or ""
+    key_hash = hashlib.md5(raw.encode()).hexdigest()
+    return f"{CACHE_KEY_PREFIX}:{user_id}:{path_safe}:{key_hash}"
 
 
 def get_cached_response(request):
@@ -59,45 +59,52 @@ def get_cache_key_for_request(request):
     return _build_get_cache_key(request)
 
 
-def invalidate_get_cache_for_prefix(path_prefix):
+def invalidate_get_cache_for_prefix(path_prefix, user_id=None, user_ids=None):
     """
-    Invalidate all GET cache entries whose path contains path_prefix.
-    path_prefix: e.g. "accounts", "messaging", "tasks", "eventsapi", "notifications", "ActionableEntries"
+    Invalidate GET cache entries whose path contains path_prefix, optionally limited to specific user(s).
+    Key format: get:<user_id>:<path_safe>:<hash>
+    - path_prefix: e.g. "accounts", "tasks", "eventsapi:events:birthdaycounter"
+    - user_id: single user pk; only that user's cache for this prefix is invalidated.
+    - user_ids: list of user pks; only those users' caches are invalidated. If both user_id and user_ids are None, no keys are deleted (caller must pass affected users to avoid clearing other users' cache).
     """
     if not path_prefix:
         return
+    ids_to_invalidate = []
+    if user_id is not None:
+        ids_to_invalidate.append(user_id)
+    if user_ids:
+        ids_to_invalidate.extend(user_ids)
+    if not ids_to_invalidate:
+        return
     try:
         backend = getattr(cache, "_cache", None) or cache
-        if hasattr(backend, "delete_pattern"):
-            prefix_safe = path_prefix.replace("/", ":").strip(":")
-            # Key format is get:path_safe:hash; path_safe uses : instead of /
-            pattern = f"*{CACHE_KEY_PREFIX}:*{prefix_safe}*"
+        if not hasattr(backend, "delete_pattern"):
+            return
+        prefix_safe = path_prefix.replace("/", ":").strip(":")
+        for uid in set(ids_to_invalidate):
+            pattern = f"*{CACHE_KEY_PREFIX}:{uid}:*{prefix_safe}*"
             backend.delete_pattern(pattern)
     except Exception:
         pass
 
 
-def invalidate_birthday_counter_cache():
+def invalidate_birthday_counter_cache(user_id=None, user_ids=None):
     """
-    Invalidate all GET cache entries for the birthday counter API so all clients see fresh counts.
-    Uses a broad pattern so it works with Redis KEY_PREFIX (e.g. "ems") and path format.
-    Call this after bulk or single birthday_counter updates.
+    Invalidate GET cache entries for the birthday counter API, optionally limited to specific user(s).
+    Call after bulk or single birthday_counter updates. Pass user_ids of users whose counter changed
+    so only their cache is invalidated.
     """
-    try:
-        backend = getattr(cache, "_cache", None) or cache
-        # 1) Prefer delete_pattern: pattern is prefixed by backend (e.g. "ems:*get:*birthdaycounter*")
-        if hasattr(backend, "delete_pattern"):
-            backend.delete_pattern(f"*{CACHE_KEY_PREFIX}:*birthdaycounter*")
-        # 2) Fallback: raw Redis client (keys in Redis already include KEY_PREFIX)
-        if hasattr(backend, "get_master_client"):
-            client = backend.get_master_client()
-            if client:
-                # Match any Redis key containing "birthdaycounter"
-                keys = list(client.scan_iter(match="*birthdaycounter*", count=100))
-                if keys:
-                    client.delete(*keys)
-    except Exception:
-        pass
+    prefix = "eventsapi:events:birthdaycounter"
+    invalidate_get_cache_for_prefix(prefix, user_id=user_id, user_ids=user_ids)
+
+
+def invalidate_missed_calls_count_cache(user_id=None, user_ids=None):
+    """
+    Invalidate GET cache entries for the missed calls count API, optionally limited to specific user(s).
+    Call after resetMissedCallsCount so the next GET missedCallsCount returns fresh data.
+    """
+    prefix = "messaging:missedCallsCount"
+    invalidate_get_cache_for_prefix(prefix, user_id=user_id, user_ids=user_ids)
 
 
 def get_path_prefixes_from_request(request):
