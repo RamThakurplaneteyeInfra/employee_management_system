@@ -72,6 +72,7 @@ INSTALLED_APPS = [
     "channels",
     "accounts",
     "task_management",
+    "HR_Assessment",
     "Messaging",
     "Calling",
     "events",

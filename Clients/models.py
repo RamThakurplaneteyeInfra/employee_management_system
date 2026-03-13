@@ -126,6 +126,15 @@ class ClientConversation(models.Model):
         related_name="client_conversations",
         db_index=True,
     )
+    # Interaction channel (e.g. call, email, WhatsApp) for this conversation
+    medium = models.ForeignKey(
+        "ClientInteractionChannels",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="conversations",
+        db_column="interaction_channel_id",
+    )
 
     class Meta:
         db_table = 'clients"."client_conversation'
@@ -138,3 +147,16 @@ class ClientConversation(models.Model):
 
     def __str__(self):
         return f"Conversation {self.pk} for {self.client_id}"
+
+
+class ClientInteractionChannels(models.Model):
+    """Master list of client interaction channels/mediums (e.g. call, email, WhatsApp)."""
+    medium = models.CharField(max_length=100)
+
+    class Meta:
+        db_table = 'clients"."client_interaction_channels'
+        verbose_name = "client interaction channel"
+        verbose_name_plural = "client interaction channels"
+
+    def __str__(self):
+        return self.medium or str(self.pk)

@@ -8,8 +8,8 @@ from ems.verify_methods import verifyGet, verifyPost, verifyPut, verifyPatch, ve
 from ems.utils import gmt_to_ist_str
 from accounts.snippet import login_required, csrf_exempt
 from accounts.models import User
-from django.db.models import Prefetch
-from .models import ClientProfile, CurrentClientStage, ClientProfileMembers, ClientConversation
+from django.db.models import Prefetch, Q
+from .models import ClientProfile, CurrentClientStage, ClientProfileMembers, ClientConversation, ClientInteractionChannels
 from project.models import Project, Product
 
 
@@ -59,6 +59,15 @@ async def stage_list(request: HttpRequest):
 
 
 # ==================== Client Profile CRUD ====================
+def _user_can_access_profile(user, profile):
+    """True if user is the profile creator or a member of the profile."""
+    if not user or not profile:
+        return False
+    if profile.created_by_id == user.pk:
+        return True
+    return ClientProfileMembers.objects.filter(client_profile=profile, user=user).exists()
+
+
 def _get_user_display_name(u):
     """Return Profile.Name, or first_name + last_name, or username as fallback."""
     try:
@@ -79,6 +88,7 @@ def _note_to_dict(conv):
         "note": conv.note,
         "created_by": conv.created_by.username if conv.created_by else None,
         "created_at": gmt_to_ist_str(conv.created_at, "%d/%m/%Y %H:%M:%S") if conv.created_at else None,
+        "medium": getattr(conv.medium, "medium", None),
     }
 
 
@@ -105,17 +115,20 @@ def _profile_to_dict(c):
     }
 
 
-def _list_profiles_sync():
+def _list_profiles_sync(user):
+    """List only profiles the user is allowed to access (creator or member)."""
     conv_prefetch = Prefetch(
         "conversations",
-        queryset=ClientConversation.objects.select_related("created_by").order_by("-created_at"),
+        queryset=ClientConversation.objects.select_related("created_by", "medium").order_by("-created_at"),
     )
     members_prefetch = Prefetch(
         "members",
         queryset=User.objects.select_related("accounts_profile"),
     )
     qs = (
-        ClientProfile.objects.select_related("status", "Product", "created_by")
+        ClientProfile.objects.filter(Q(created_by=user) | Q(member_links__user=user))
+        .distinct()
+        .select_related("status", "Product", "created_by")
         .prefetch_related(members_prefetch, conv_prefetch)
         .order_by("-created_at")
     )
@@ -125,11 +138,11 @@ def _list_profiles_sync():
 @csrf_exempt
 @login_required
 async def profile_list_create(request: HttpRequest):
-    """GET /clientsapi/profiles/ - List. POST - Create."""
+    """GET /clientsapi/profiles/ - List (only profiles user created or is member of). POST - Create."""
     if request.method == "GET":
         if verifyGet(request):
             return verifyGet(request)
-        data = await sync_to_async(_list_profiles_sync)()
+        data = await sync_to_async(_list_profiles_sync)(request.user)
         return JsonResponse(data, safe=False)
     return await profile_create(request)
 
@@ -137,7 +150,7 @@ async def profile_list_create(request: HttpRequest):
 def _get_profile_sync(profile_id):
     conv_prefetch = Prefetch(
         "conversations",
-        queryset=ClientConversation.objects.select_related("created_by").order_by("-created_at"),
+        queryset=ClientConversation.objects.select_related("created_by", "medium").order_by("-created_at"),
     )
     members_prefetch = Prefetch(
         "members",
@@ -151,15 +164,17 @@ def _get_profile_sync(profile_id):
 @csrf_exempt
 @login_required
 async def profile_detail_update_delete(request: HttpRequest, profile_id: int):
-    """GET /profiles/<id>/ - Detail. PUT/PATCH - Update. DELETE - Delete."""
+    """GET /profiles/<id>/ - Detail. PUT/PATCH - Update. DELETE - Delete. Access: creator or member only."""
+    try:
+        c = await sync_to_async(_get_profile_sync)(profile_id)
+    except ClientProfile.DoesNotExist:
+        return JsonResponse({"error": "Client not found"}, status=status.HTTP_404_NOT_FOUND)
+    if not await sync_to_async(_user_can_access_profile)(request.user, c):
+        return JsonResponse({"error": "You do not have access to this client profile"}, status=status.HTTP_403_FORBIDDEN)
     if request.method == "GET":
         if verifyGet(request):
             return verifyGet(request)
-        try:
-            c = await sync_to_async(_get_profile_sync)(profile_id)
-            return JsonResponse(_profile_to_dict(c))
-        except ClientProfile.DoesNotExist:
-            return JsonResponse({"error": "Client not found"}, status=status.HTTP_404_NOT_FOUND)
+        return JsonResponse(_profile_to_dict(c))
     if request.method in ("PUT", "PATCH"):
         return await profile_update(request, profile_id)
     if request.method == "DELETE":
@@ -178,14 +193,17 @@ def _get_profile_members_sync(profile_id):
 
 @login_required
 async def profile_members(request: HttpRequest, profile_id: int):
-    """GET /clientsapi/profiles/<id>/members/ - Selected employees for this client."""
+    """GET /clientsapi/profiles/<id>/members/ - Selected employees for this client. Access: creator or member only."""
     if verifyGet(request):
         return verifyGet(request)
     try:
-        data = await sync_to_async(_get_profile_members_sync)(profile_id)
-        return JsonResponse(data, safe=False)
+        c = await sync_to_async(ClientProfile.objects.prefetch_related("members").get)(id=profile_id)
     except ClientProfile.DoesNotExist:
         return JsonResponse({"error": "Client not found"}, status=status.HTTP_404_NOT_FOUND)
+    if not await sync_to_async(_user_can_access_profile)(request.user, c):
+        return JsonResponse({"error": "You do not have access to this client profile"}, status=status.HTTP_403_FORBIDDEN)
+    data = await sync_to_async(_get_profile_members_sync)(profile_id)
+    return JsonResponse(data, safe=False)
 
 
 def _get_user_from_member(m):
@@ -315,7 +333,7 @@ def _update_profile_sync(profile_id, data):
 @csrf_exempt
 @login_required
 async def profile_update(request: HttpRequest, profile_id: int):
-    """PUT/PATCH /clientsapi/profiles/<id>/ - Update client lead."""
+    """PUT/PATCH /clientsapi/profiles/<id>/ - Update client lead. Access: creator or member only."""
     if request.method == "PUT":
         err = verifyPut(request)
     elif request.method == "PATCH":
@@ -329,10 +347,14 @@ async def profile_update(request: HttpRequest, profile_id: int):
     except json.JSONDecodeError:
         return JsonResponse({"error": "Invalid JSON"}, status=status.HTTP_400_BAD_REQUEST)
     try:
-        await sync_to_async(_update_profile_sync)(profile_id, data)
-        return JsonResponse({"message": "Client lead updated"}, status=status.HTTP_200_OK)
+        c = await sync_to_async(ClientProfile.objects.get)(id=profile_id)
     except ClientProfile.DoesNotExist:
         return JsonResponse({"error": "Client not found"}, status=status.HTTP_404_NOT_FOUND)
+    if not await sync_to_async(_user_can_access_profile)(request.user, c):
+        return JsonResponse({"error": "You do not have access to this client profile"}, status=status.HTTP_403_FORBIDDEN)
+    try:
+        await sync_to_async(_update_profile_sync)(profile_id, data)
+        return JsonResponse({"message": "Client lead updated"}, status=status.HTTP_200_OK)
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -340,20 +362,22 @@ async def profile_update(request: HttpRequest, profile_id: int):
 @csrf_exempt
 @login_required
 async def profile_delete(request: HttpRequest, profile_id: int):
-    """DELETE /clientsapi/profiles/<id>/ - Delete client lead."""
+    """DELETE /clientsapi/profiles/<id>/ - Delete client lead. Access: creator or member only."""
     if verifyDelete(request):
         return verifyDelete(request)
     try:
-        c = ClientProfile.objects.get(id=profile_id)
-        c.delete()
-        return JsonResponse({"message": "Client lead deleted"}, status=status.HTTP_200_OK)
+        c = await sync_to_async(ClientProfile.objects.get)(id=profile_id)
     except ClientProfile.DoesNotExist:
         return JsonResponse({"error": "Client not found"}, status=status.HTTP_404_NOT_FOUND)
+    if not await sync_to_async(_user_can_access_profile)(request.user, c):
+        return JsonResponse({"error": "You do not have access to this client profile"}, status=status.HTTP_403_FORBIDDEN)
+    await sync_to_async(c.delete)()
+    return JsonResponse({"message": "Client lead deleted"}, status=status.HTTP_200_OK)
 
 
 # ==================== Notes (Conversations) ====================
 def _list_conversations_sync(profile_id):
-    convs = ClientConversation.objects.filter(client_id=profile_id).select_related("created_by").order_by("-created_at")
+    convs = ClientConversation.objects.filter(client_id=profile_id).select_related("created_by", "medium").order_by("-created_at")
     return [_note_to_dict(c) for c in convs]
 
 
@@ -364,34 +388,32 @@ def _get_client_sync(profile_id):
 @csrf_exempt
 @login_required
 async def conversation_list_create(request: HttpRequest, profile_id: int):
-    """GET /profiles/<id>/conversations/ - List notes. POST - Add note."""
+    """GET /profiles/<id>/conversations/ - List notes. POST - Add note. Access: creator or member only."""
+    try:
+        client = await sync_to_async(_get_client_sync)(profile_id)
+    except ClientProfile.DoesNotExist:
+        return JsonResponse({"error": "Client not found"}, status=status.HTTP_404_NOT_FOUND)
+    if not await sync_to_async(_user_can_access_profile)(request.user, client):
+        return JsonResponse({"error": "You do not have access to this client profile"}, status=status.HTTP_403_FORBIDDEN)
     if request.method == "GET":
         if verifyGet(request):
             return verifyGet(request)
-        try:
-            await sync_to_async(_get_client_sync)(profile_id)
-        except ClientProfile.DoesNotExist:
-            return JsonResponse({"error": "Client not found"}, status=status.HTTP_404_NOT_FOUND)
         data = await sync_to_async(_list_conversations_sync)(profile_id)
         return JsonResponse(data, safe=False)
     if request.method == "POST":
         if verifyPost(request):
             return verifyPost(request)
         try:
-            client = await sync_to_async(_get_client_sync)(profile_id)
-        except ClientProfile.DoesNotExist:
-            return JsonResponse({"error": "Client not found"}, status=status.HTTP_404_NOT_FOUND)
-        try:
             data = load_data(request)
         except json.JSONDecodeError:
             return JsonResponse({"error": "Invalid JSON"}, status=status.HTTP_400_BAD_REQUEST)
-
-        def _create_many(client, note_list, user):
+        # client already fetched and access checked above
+        def _create_many(client, note_list, user, medium_obj):
             ids = []
             for note_text in note_list:
                 txt = str(note_text).strip() if note_text else ""
                 if txt:
-                    conv = ClientConversation.objects.create(client=client, note=txt, created_by=user)
+                    conv = ClientConversation.objects.create(client=client, note=txt, created_by=user, medium=medium_obj)
                     ids.append(conv.id)
             return ids
 
@@ -399,16 +421,30 @@ async def conversation_list_create(request: HttpRequest, profile_id: int):
             note_list = [n for n in data["notes"] if n]
             if not note_list:
                 return JsonResponse({"error": "notes array cannot be empty"}, status=status.HTTP_400_BAD_REQUEST)
-            ids = await sync_to_async(_create_many)(client, note_list, request.user)
+            # Optional channel medium name; match by full name (case-insensitive).
+            medium_name = str(data.get("medium", "")).strip() if data.get("medium") else None
+            medium_obj = None
+            if medium_name:
+                medium_obj = await sync_to_async(ClientInteractionChannels.objects.filter(medium__iexact=medium_name).first)()
+                if medium_obj is None:
+                    return JsonResponse({"error": "Invalid medium"}, status=status.HTTP_400_BAD_REQUEST)
+            ids = await sync_to_async(_create_many)(client, note_list, request.user, medium_obj)
             return JsonResponse({"ids": ids, "message": f"{len(ids)} note(s) added"}, status=status.HTTP_201_CREATED)
         note_text = data.get("note", "").strip()
         if not note_text:
             return JsonResponse({"error": "note or notes is required"}, status=status.HTTP_400_BAD_REQUEST)
 
-        def _create_one(client, note_text, user):
-            return ClientConversation.objects.create(client=client, note=note_text, created_by=user)
+        def _create_one(client, note_text, user, medium_obj):
+            return ClientConversation.objects.create(client=client, note=note_text, created_by=user, medium=medium_obj)
 
-        conv = await sync_to_async(_create_one)(client, note_text, request.user)
+        medium_name = str(data.get("medium", "")).strip() if data.get("medium") else None
+        medium_obj = None
+        if medium_name:
+            medium_obj = await sync_to_async(ClientInteractionChannels.objects.filter(medium__iexact=medium_name).first)()
+            if medium_obj is None:
+                return JsonResponse({"error": "Invalid medium"}, status=status.HTTP_400_BAD_REQUEST)
+
+        conv = await sync_to_async(_create_one)(client, note_text, request.user, medium_obj)
         return JsonResponse({"id": conv.id, "message": "Note added"}, status=status.HTTP_201_CREATED)
     return JsonResponse({"error": "Method not allowed"}, status=status.HTTP_405_METHOD_NOT_ALLOWED)
 
@@ -428,7 +464,13 @@ def _delete_note_sync(profile_id, note_id):
 @csrf_exempt
 @login_required
 async def conversation_update_delete(request: HttpRequest, profile_id: int, note_id: int):
-    """PATCH /profiles/<id>/conversations/<note_id>/ - Update note. DELETE - Delete note."""
+    """PATCH /profiles/<id>/conversations/<note_id>/ - Update note. DELETE - Delete note. Access: creator or member only."""
+    try:
+        profile = await sync_to_async(ClientProfile.objects.get)(id=profile_id)
+    except ClientProfile.DoesNotExist:
+        return JsonResponse({"error": "Client not found"}, status=status.HTTP_404_NOT_FOUND)
+    if not await sync_to_async(_user_can_access_profile)(request.user, profile):
+        return JsonResponse({"error": "You do not have access to this client profile"}, status=status.HTTP_403_FORBIDDEN)
     if request.method == "PATCH":
         err = verifyPatch(request)
         if err:

@@ -245,12 +245,14 @@ def user_login(req: HttpRequest):
         user_role = _get_user_role_sync(user)
         if not user_role:
             raise DatabaseError("Database Error 500")
+        profile = Profile.objects.filter(Employee_id=user).select_related("Department").first()
+        department = profile.Department.dept_name if profile and profile.Department else None
     except DatabaseError as e:
         return JsonResponse({"message": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     except Exception as e:
         return JsonResponse({"messege": str(e)}, status=status.HTTP_403_FORBIDDEN)
     else:
-        return JsonResponse({"messege": "You are logged in", "username": user.username, "Role": user_role}, status=status.HTTP_200_OK)
+        return JsonResponse({"messege": "You are logged in", "username": user.username, "Role": user_role, "department": department}, status=status.HTTP_200_OK)
 # ==================== employee_dashboard ====================
 # Get logged-in user's profile data.
 # URL: {{baseurl}}/accounts/employee/dashboard/
