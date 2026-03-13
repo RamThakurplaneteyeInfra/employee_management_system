@@ -51,9 +51,10 @@ class Task(models.Model):
         return f"task-{self.title}"
     
 class TaskAssignies(models.Model):
-    """Through model: links a task to an assigned user."""
+    """Through model: links a task to an assigned user; unseen_count = task messages not yet seen by this assignee."""
     task=models.ForeignKey(Task,db_column="task_id",null=False,on_delete=models.CASCADE,related_name="tasks")
     assigned_to=models.ForeignKey(User,db_column="assigned_to",null=False,on_delete=models.CASCADE,to_field="username",related_name="Tasks_assigned",db_index=True)
+    unseen_count = models.PositiveSmallIntegerField(default=0, db_column="unseen_count")
     class Meta:
         db_table='task_management"."tasksAssignee'
         verbose_name="taskAssignee"

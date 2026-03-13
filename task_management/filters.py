@@ -132,8 +132,8 @@ def _get_all_TaskStatuses_sync(request: HttpRequest):
 
 async def get_all_TaskStatuses(request: HttpRequest):
     return await sync_to_async(_get_all_TaskStatuses_sync)(request)
-def _task_item_to_response(item, assigned_to=None, completed_at_map=None):
-    """Build a consistent task response dict. Assigned_to is list of {name, role}. completed_At is IST last_edit when Status is COMPLETED else None."""
+def _task_item_to_response(item, assigned_to=None, completed_at_map=None, unseen_count=None):
+    """Build a consistent task response dict. Assigned_to is list of {name, role}. completed_At is IST last_edit when Status is COMPLETED else None. unseen_count is per-assignee task message count (0 for creator in viewTasks)."""
     if assigned_to is None:
         assigned_to = item.get("Assigned_to") if item.get("Assigned_to") is not None else []
     if not isinstance(assigned_to, list):
@@ -162,6 +162,7 @@ def _task_item_to_response(item, assigned_to=None, completed_at_map=None):
         "Created_at": gmt_to_ist_str(item["Created_at"], "%d/%m/%Y %H:%M:%S"),
         "Task_type": item["Task_type"],
         "completed_At": completed_At,
+        "unseen_count": unseen_count if unseen_count is not None else 0,
     }
 
 
@@ -197,6 +198,14 @@ def _get_assignee_names_and_roles_by_task_id(task_ids):
         role = profile.Role.role_name if profile and profile.Role else None
         out[task_id].append({"name": name or "", "role": role})
     return out
+
+
+def _get_unseen_count_map(task_ids, user):
+    """Return dict task_id -> unseen_count for the given user (from TaskAssignies). Used for viewTasks/viewAssignedTasks."""
+    if not task_ids or not user:
+        return {}
+    rows = TaskAssignies.objects.filter(task_id__in=task_ids, assigned_to=user).values("task_id", "unseen_count")
+    return {r["task_id"]: r["unseen_count"] for r in rows}
 
 
 def _get_completed_at_map(task_list):
@@ -240,7 +249,8 @@ def _get_tasks_by_type_sync(request: HttpRequest, type: str = "all", self_create
         task_ids = [t["Task_id"] for t in task_list]
         assignee_map = _get_assignee_names_and_roles_by_task_id(task_ids)
         completed_at_map = _get_completed_at_map(task_list)
-        return [_task_item_to_response(item, assigned_to=assignee_map.get(item["Task_id"], []), completed_at_map=completed_at_map) for item in task_list]
+        unseen_count_map = _get_unseen_count_map(task_ids, request.user)
+        return [_task_item_to_response(item, assigned_to=assignee_map.get(item["Task_id"], []), completed_at_map=completed_at_map, unseen_count=unseen_count_map.get(item["Task_id"], 0)) for item in task_list]
 
     elif type and self_created:
         type_obj = _get_taskTypes_object_sync(type_name=type)
@@ -267,7 +277,8 @@ def _get_tasks_by_type_sync(request: HttpRequest, type: str = "all", self_create
         task_ids = [t["Task_id"] for t in task_list]
         assignee_map = _get_assignee_names_and_roles_by_task_id(task_ids)
         completed_at_map = _get_completed_at_map(task_list)
-        return [_task_item_to_response(item, assigned_to=assignee_map.get(item["Task_id"], []), completed_at_map=completed_at_map) for item in task_list]
+        unseen_count_map = _get_unseen_count_map(task_ids, request.user)
+        return [_task_item_to_response(item, assigned_to=assignee_map.get(item["Task_id"], []), completed_at_map=completed_at_map, unseen_count=unseen_count_map.get(item["Task_id"], 0)) for item in task_list]
 
     elif type.lower() == "all" and not self_created:
         tasks = (
@@ -292,7 +303,8 @@ def _get_tasks_by_type_sync(request: HttpRequest, type: str = "all", self_create
         task_ids = [t["Task_id"] for t in task_list]
         assignee_map = _get_assignee_names_and_roles_by_task_id(task_ids)
         completed_at_map = _get_completed_at_map(task_list)
-        return [_task_item_to_response(item, assigned_to=assignee_map.get(item["Task_id"], []), completed_at_map=completed_at_map) for item in task_list]
+        unseen_count_map = _get_unseen_count_map(task_ids, request.user)
+        return [_task_item_to_response(item, assigned_to=assignee_map.get(item["Task_id"], []), completed_at_map=completed_at_map, unseen_count=unseen_count_map.get(item["Task_id"], 0)) for item in task_list]
 
     elif type and not self_created:
         type_obj = _get_taskTypes_object_sync(type_name=type)
@@ -320,7 +332,8 @@ def _get_tasks_by_type_sync(request: HttpRequest, type: str = "all", self_create
         task_ids = [t["Task_id"] for t in task_list]
         assignee_map = _get_assignee_names_and_roles_by_task_id(task_ids)
         completed_at_map = _get_completed_at_map(task_list)
-        return [_task_item_to_response(item, assigned_to=assignee_map.get(item["Task_id"], []), completed_at_map=completed_at_map) for item in task_list]
+        unseen_count_map = _get_unseen_count_map(task_ids, request.user)
+        return [_task_item_to_response(item, assigned_to=assignee_map.get(item["Task_id"], []), completed_at_map=completed_at_map, unseen_count=unseen_count_map.get(item["Task_id"], 0)) for item in task_list]
 
     else:
         return [{"message": "Incorrect type for tasks"}]

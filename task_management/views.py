@@ -189,8 +189,23 @@ async def delete_task(request: HttpRequest, task_id: int):
 # URL: {{baseurl}}/tasks/sendMessage/
 # Method: POST
 def _post_task_message_sync(task_id, user, message_text):
+    from django.db.models import F
+    from ems.cache_utils import invalidate_get_cache_for_prefix
+
     task = get_object_or_404(Task, task_id=task_id)
     TaskMessage.objects.create(task=task, sender=user, message=message_text)
+
+    # Increment unseen_count for all assignees except the sender
+    TaskAssignies.objects.filter(task=task).exclude(assigned_to=user).update(unseen_count=F("unseen_count") + 1)
+
+    # Invalidate cached task messages for this task_id for all affected users
+    user_ids = {task.created_by.pk}
+    user_ids.update(
+        TaskAssignies.objects.filter(task=task).values_list("assigned_to__pk", flat=True)
+    )
+    if user_ids:
+        prefix = f"tasks:getMessage:{task.task_id}"
+        invalidate_get_cache_for_prefix(prefix, user_ids=list(user_ids))
 
 
 @login_required
@@ -220,12 +235,15 @@ async def get_task_messages(request: HttpRequest, task_id: int):
     try:
         def _fetch(user):
             task = get_object_or_404(Task, task_id=task_id)
-            assignees = TaskAssignies.objects.filter(task=task_id)
-            for i in assignees:
-                if not (user != task.created_by or user != i.assigned_to):
-                    raise PermissionDenied("Not allowed")
+            assignees = TaskAssignies.objects.filter(task=task)
+            is_creator = user == task.created_by
+            is_assignee = any(i.assigned_to == user for i in assignees)
+            if not (is_creator or is_assignee):
+                raise PermissionDenied("Not allowed")
+            # Mark task messages as seen for this assignee (reset unseen_count)
+            TaskAssignies.objects.filter(task=task, assigned_to=user).update(unseen_count=0)
             messages = TaskMessage.objects.filter(task=task).select_related("sender__accounts_profile", "task").order_by("-created_at")
-            messages.update(seen=True)
+            # TaskMessage model has no 'seen' field (commented out in models.py); omit update(seen=True) to avoid 500
             def _name(s):
                 p = getattr(s, "accounts_profile", None)
                 return getattr(p, "Name", None) if p else _get_users_Name_sync(s)

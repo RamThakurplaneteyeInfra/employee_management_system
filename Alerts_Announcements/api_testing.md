@@ -8,7 +8,7 @@
 
 ## 1. Alert types (read-only)
 
-| Method | URL | Description |
+<!-- | Method | URL | Description |
 |--------|-----|-------------|
 | GET | `{{baseurl}}/alertsapi/alert-types/` | List all alert types |
 | GET | `{{baseurl}}/alertsapi/alert-types/<id>/` | Retrieve one alert type |
@@ -19,11 +19,11 @@
 
 **Success (200):** Array of `{ "id": 1, "type_name": "System" }, ...`
 
----
+--- -->
 
 ## 2. Alerts (CRUD)
 
-| Method | URL | Description |
+<!-- | Method | URL | Description |
 |--------|-----|-------------|
 | GET | `{{baseurl}}/alertsapi/alerts/` | List all alerts |
 | GET | `{{baseurl}}/alertsapi/alerts/<id>/` | Retrieve one alert |
@@ -98,14 +98,14 @@
 }
 ```
 
-Any subset of writable fields can be sent. `closed_by` in the request is ISO 8601; in the GET response it is returned as IST in **d/m/y H:M:S** format.
+Any subset of writable fields can be sent. `closed_by` in the request is ISO 8601; in the GET response it is returned as IST in **d/m/y H:M:S** format. -->
 
 ### DELETE – Delete alert
 
-**URL:** `{{baseurl}}/alertsapi/alerts/<id>/`  
+<!-- **URL:** `{{baseurl}}/alertsapi/alerts/<id>/`  
 **Method:** `DELETE`
 
-**Success (204):** No content.
+**Success (204):** No content. -->
 
 ---
 

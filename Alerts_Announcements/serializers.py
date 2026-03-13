@@ -96,20 +96,26 @@ class AnnouncementTypeSerializer(serializers.ModelSerializer):
 
 # -------- Announcements --------
 class AnnouncementSerializer(serializers.ModelSerializer):
+    # Required fields for POST: announcement, type, product, percentage.
+    announcement = serializers.CharField(required=True, allow_blank=False)
     type = serializers.SlugRelatedField(
         queryset=AnnouncementType.objects.all(),
         slug_field="type_name",
+        required=True,
     )
+    # created_by is always taken from the logged-in user in the view; do not allow clients to set it.
     created_by = serializers.SlugRelatedField(
-        queryset=User.objects.all(),
+        read_only=True,
         slug_field="username",
     )
     product = serializers.SlugRelatedField(
         queryset=Product.objects.all(),
         slug_field="name",
-        required=False,
-        allow_null=True,
+        required=True,
+        allow_null=False,
     )
+    percentage = serializers.IntegerField(required=True)
+    # GET helpers: full creator name and IST timestamp; type/product already returned as names via SlugRelatedField.
     creator_name = serializers.SerializerMethodField()
     created_at_ist = serializers.SerializerMethodField()
 
@@ -126,7 +132,7 @@ class AnnouncementSerializer(serializers.ModelSerializer):
             "created_at",
             "created_at_ist",
         ]
-        read_only_fields = ["created_at"]
+        read_only_fields = ["created_at", "created_by"]
 
     def get_creator_name(self, obj):
         if not obj.created_by_id:
@@ -135,3 +141,26 @@ class AnnouncementSerializer(serializers.ModelSerializer):
 
     def get_created_at_ist(self, obj):
         return gmt_to_ist_str(obj.created_at, "%d/%m/%Y %H:%M:%S") if obj.created_at else None
+
+    def validate(self, attrs):
+        """
+        Enforce required fields for POST:
+        - announcement: non-empty text
+        - type: required (AnnouncementType, by name)
+        - product: required (Product, by name)
+        - percentage: required (int)
+        """
+        announcement = attrs.get("announcement")
+        if not announcement or not str(announcement).strip():
+            raise serializers.ValidationError({"announcement": "This field is required."})
+
+        if attrs.get("type") is None:
+            raise serializers.ValidationError({"type": "This field is required."})
+
+        if attrs.get("product") is None:
+            raise serializers.ValidationError({"product": "This field is required."})
+
+        if attrs.get("percentage") is None:
+            raise serializers.ValidationError({"percentage": "This field is required."})
+
+        return attrs

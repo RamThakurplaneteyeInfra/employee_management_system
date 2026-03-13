@@ -158,7 +158,7 @@ def _get_messages_sync(request: HttpRequest, chat_id: str):
     items = []
     for m in messages:
         attachments = [_attachment_payload(a) for a in m.attachments.all()]
-        items.append({
+        item = {
             "id": m.id,
             "sender": _sender_name(m.sender),
             "message": _message_content_for_response(m.content),
@@ -166,7 +166,10 @@ def _get_messages_sync(request: HttpRequest, chat_id: str):
             "time": gmt_to_ist_time_str(m.created_at),
             "attachments": attachments,
             "_sort_at": m.created_at,
-        })
+        }
+        if hasattr(m, "seen"):
+            item["seen"] = m.seen
+        items.append(item)
     for a in standalone:
         items.append({
             "id": None,

@@ -7,6 +7,7 @@ or channel layer fails, so realtime messaging keeps working.
 """
 import logging
 from asgiref.sync import async_to_sync
+from django.db.models import F
 from django.db.models.signals import post_save, post_delete, pre_delete, pre_save
 from django.dispatch import receiver
 from django.utils import timezone
@@ -15,6 +16,7 @@ from accounts.filters import _get_users_Name_sync
 from ems.utils import gmt_to_ist_str
 
 from .models import GroupChats, GroupMessages, GroupMembers, IndividualMessages
+from .chat_ws_utils import build_message_payload_for_ws, chat_id_from_message
 from notifications.models import Notification, notification_type
 from Calling.models import Call
 
@@ -68,10 +70,106 @@ def _create_notification_for_groupmessage_sync(sender, instance: GroupMessages, 
             logger.warning("Group message WebSocket notification failed for %s: %s", m.participant.username, e)
 
 
+def _broadcast_new_chat_message_sync(instance, is_group):
+    """Broadcast new_message and chat_updated to chat_<chat_id> for Real-Time Chat WebSocket."""
+    channel_layer = get_channel_layer()
+    if not channel_layer:
+        return
+    chat_id = chat_id_from_message(instance)
+    if not chat_id:
+        return
+    try:
+        payload = build_message_payload_for_ws(instance, is_group)
+    except Exception as e:
+        logger.warning("Chat WS build_message_payload_for_ws failed: %s", e)
+        return
+    group_name = f"chat_{chat_id}"
+    created_at = instance.created_at
+    if created_at and timezone.is_naive(created_at):
+        created_at = timezone.make_aware(created_at, timezone.utc)
+    last_at_str = created_at.isoformat().replace("+00:00", "Z") if created_at else None
+    preview = (instance.content or "")[:100].replace("\n", " ")
+    try:
+        async_to_sync(channel_layer.group_send)(
+            group_name,
+            {"type": "chat.new_message", "chat_id": chat_id, "payload": payload},
+        )
+        async_to_sync(channel_layer.group_send)(
+            group_name,
+            {
+                "type": "chat.chat_updated",
+                "chat_id": chat_id,
+                "last_message_at": last_at_str,
+                "last_message_preview": preview,
+                "unseen_count": 0,
+            },
+        )
+    except Exception as e:
+        logger.warning("Chat WS group_send failed for %s: %s", group_name, e)
+
+
+def _broadcast_unseen_count_for_new_group_message(instance: GroupMessages):
+    """Increment GroupMembers.unseenmessages for all except sender; push unseen_count_updated per member."""
+    channel_layer = get_channel_layer()
+    if not channel_layer:
+        return
+    chat_id = instance.group.group_id
+    group_name = f"chat_{chat_id}"
+    sender = instance.sender
+    members = GroupMembers.objects.filter(groupchat=instance.group).exclude(participant=sender)
+    if not members.exists():
+        return
+    GroupMembers.objects.filter(groupchat=instance.group).exclude(participant=sender).update(
+        unseenmessages=F("unseenmessages") + 1,
+        seen=False,
+    )
+    try:
+        for gm in GroupMembers.objects.filter(groupchat=instance.group).exclude(participant=sender):
+            async_to_sync(channel_layer.group_send)(
+                group_name,
+                {
+                    "type": "chat.unseen_count_updated",
+                    "chat_id": chat_id,
+                    "unseen_count": gm.unseenmessages,
+                    "for_user": gm.participant_id,
+                },
+            )
+    except Exception as e:
+        logger.warning("Unseen count broadcast failed for group %s: %s", chat_id, e)
+
+
+def _broadcast_unseen_count_for_new_dm_message(instance: IndividualMessages):
+    """Notify the other participant of their unseen count (message-wise in IndividualMessages)."""
+    channel_layer = get_channel_layer()
+    if not channel_layer:
+        return
+    chat_id = instance.chat_id
+    group_name = f"chat_{chat_id}"
+    other = instance.chat.get_other_participant(user=instance.sender)
+    if not other:
+        return
+    count = IndividualMessages.objects.filter(chat=instance.chat, sender=instance.sender, seen=False).count()
+    try:
+        async_to_sync(channel_layer.group_send)(
+            group_name,
+            {
+                "type": "chat.unseen_count_updated",
+                "chat_id": chat_id,
+                "unseen_count": count,
+                "for_user": other.username,
+            },
+        )
+    except Exception as e:
+        logger.warning("Unseen count broadcast failed for DM %s: %s", chat_id, e)
+
+
 @receiver(post_save, sender=GroupMessages)
 def create_notification_for_groupmessage(sender, instance: GroupMessages, created, **kwargs):
     """Receiver: new GroupMessages → notify other group members (DB + WebSocket)."""
     _create_notification_for_groupmessage_sync(sender, instance, created, **kwargs)
+    if created:
+        _broadcast_new_chat_message_sync(instance, is_group=True)
+        _broadcast_unseen_count_for_new_group_message(instance)
 
 
 # -------- Private/DM message: notify the other participant --------
@@ -119,6 +217,9 @@ def _create_notification_for_chatmessage_sync(sender, instance: IndividualMessag
 def create_notification_for_chatmessage(sender, instance: IndividualMessages, created, **kwargs):
     """Receiver: new IndividualMessages → notify the other chat participant (DB + WebSocket)."""
     _create_notification_for_chatmessage_sync(sender, instance, created, **kwargs)
+    if created:
+        _broadcast_new_chat_message_sync(instance, is_group=False)
+        _broadcast_unseen_count_for_new_dm_message(instance)
 
 
 # -------- Added to group: notify the added user (not the creator) --------

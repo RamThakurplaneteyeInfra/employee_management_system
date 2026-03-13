@@ -15,6 +15,7 @@ from .filters import (
     get_messages,
     check_group_or_chat,
 )
+from .chat_ws_utils import mark_seen_sync
 from accounts.filters import _get_user_object_sync, _get_users_Name_sync, _get_user_role_sync
 from .utils import gmt_to_ist_str
 from .s3_utils import upload_file as s3_upload_file, get_file_url as s3_get_file_url
@@ -574,6 +575,41 @@ async def get_chats(request: HttpRequest, chat_id: str):
     if request_method:
         return request_method
     return await get_messages(request=request, chat_id=chat_id)
+
+
+# ==================== mark_seen (REST) ====================
+# POST /messaging/markSeen/<chat_id>/ with body { "message_ids": [101, 102] } or { "last_message_id": 103 }
+@csrf_exempt
+@login_required
+def mark_seen(request: HttpRequest, chat_id: str):
+    verify_method = verifyPost(request)
+    if verify_method:
+        return verify_method
+    data = load_data(request)
+    message_ids = data.get("message_ids")
+    last_message_id = data.get("last_message_id")
+    if message_ids is not None and not isinstance(message_ids, list):
+        message_ids = None
+    payload, err = mark_seen_sync(
+        request.user, chat_id,
+        message_ids=message_ids,
+        last_message_id=last_message_id,
+    )
+    if err:
+        return JsonResponse({"message": err}, status=status.HTTP_403_FORBIDDEN)
+    if payload:
+        from asgiref.sync import async_to_sync
+        from channels.layers import get_channel_layer
+        channel_layer = get_channel_layer()
+        if channel_layer:
+            try:
+                async_to_sync(channel_layer.group_send)(
+                    f"chat_{chat_id}",
+                    {"type": "chat.messages_seen", "chat_id": chat_id, "payload": payload},
+                )
+            except Exception:
+                pass
+    return JsonResponse({"status": "ok"}, status=status.HTTP_200_OK)
 
 
 # ==================== load_groups_and_chats ====================
