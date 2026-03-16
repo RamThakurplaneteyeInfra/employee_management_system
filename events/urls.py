@@ -7,6 +7,7 @@ from .views import (
     TourViewSet,
     HolidayViewSet,
     EventViewSet,
+    ReminderViewSet,
     RoomViewSet,
     BookingStatusViewset,
     MeetingViewSet,
@@ -20,6 +21,7 @@ router.register("bookslots", BookSlotViewSet, basename="bookslots")
 router.register("tours", TourViewSet, basename="tours")
 router.register("holidays", HolidayViewSet, basename="holidays")
 router.register("events", EventViewSet, basename="events")
+router.register("reminders", ReminderViewSet, basename="reminders")
 router.register("rooms", RoomViewSet, basename="rooms")
 router.register("status", BookingStatusViewset, basename="status")
 router.register("meetingpush",MeetingViewSet , basename="meetingpush")

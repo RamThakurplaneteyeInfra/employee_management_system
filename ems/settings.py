@@ -167,6 +167,15 @@ if REDIS_URL:
                 "CLIENT_CLASS": "django_redis.client.DefaultClient",
                 "KEY_PREFIX": "ems",
                 "IGNORE_EXCEPTIONS": True,
+                # Limit max connections from this Django process so we don't exhaust
+                # the Redis.org free/low-tier maxclients (prevents "max number of clients reached").
+                # With a single worker, this keeps our side well below the server cap.
+                "CONNECTION_POOL_KWARGS": {
+                    "max_connections": int(os.getenv("REDIS_MAX_CONNECTIONS", "20")),
+                },
+                # Short socket timeouts so dead connections are released quickly.
+                "SOCKET_CONNECT_TIMEOUT": float(os.getenv("REDIS_SOCKET_CONNECT_TIMEOUT", "5")),
+                "SOCKET_TIMEOUT": float(os.getenv("REDIS_SOCKET_TIMEOUT", "5")),
             },
         }
     }
@@ -186,7 +195,7 @@ if REDIS_URL:
 # List the schema that contains auth_user (and django_session) first, then other app schemas. No public.
 DB_SEARCH_PATH = os.getenv(
     "DB_SEARCH_PATH",
-    "login_details,alerts,clients,events,task_management,notifications,project,quatery_reports,messaging,team_farm,team_infra,team_interns,team_management",
+    "login_details,emp_assessment,alerts,clients,events,task_management,notifications,project,quatery_reports,messaging,team_farm,team_infra,team_interns,team_management",
 )
 
 DATABASES = {

@@ -99,3 +99,136 @@ Standalone endpoints (non-router) from `events/urls.py`:
 
 > Add detailed request/response samples and error cases here.
 
+---
+
+## 3. Reminders (`ReminderViewSet`)
+
+**Base URL:** `{{baseurl}}/eventsapi/reminders/`
+
+Endpoints:
+
+| Action   | Method | URL                                   |
+|----------|--------|----------------------------------------|
+| List     | GET    | `/eventsapi/reminders/`               |
+| Create   | POST   | `/eventsapi/reminders/`               |
+| Retrieve | GET    | `/eventsapi/reminders/<id>/`          |
+| Update   | PUT    | `/eventsapi/reminders/<id>/`          |
+| Partial  | PATCH  | `/eventsapi/reminders/<id>/`          |
+| Delete   | DELETE | `/eventsapi/reminders/<id>/`          |
+
+### 3.1 Create reminder (POST)
+
+- **URL:** `{{baseurl}}/eventsapi/reminders/`
+- **Method:** `POST`
+
+**Request body:**
+
+```json
+{
+  "title": "Call Cropeye client",
+  "date": "2026-03-20",
+  "time": "15:30:00",
+  "note": "Discuss trial extension and next steps."
+}
+```
+
+Notes:
+
+- **`title`**: required, non-empty string.
+- **`date`**: required `YYYY-MM-DD`.
+- **`time`**: optional `HH:MM:SS` (may be omitted or `null`).
+- **`note`**: optional text (may be `""` or `null`).
+- `created_by` is **not** accepted in the body – it is always set from the logged-in user.
+
+**Successful response (201 Created):**
+
+```json
+{
+  "id": 1,
+  "title": "Call Cropeye client",
+  "date": "2026-03-20",
+  "time": "15:30:00",
+  "note": "Discuss trial extension and next steps.",
+  "created_by": "Full Name of Creator",
+  "created_at": "20/03/2026 15:30:00"
+}
+```
+
+### 3.2 List reminders (GET)
+
+- **URL:** `{{baseurl}}/eventsapi/reminders/`
+- **Method:** `GET`
+
+Returns an array of reminder objects in the same shape as the create response:
+
+```json
+[
+  {
+    "id": 1,
+    "title": "Call Cropeye client",
+    "date": "2026-03-20",
+    "time": "15:30:00",
+    "note": "Discuss trial extension and next steps.",
+    "created_by": "Full Name of Creator",
+    "created_at": "20/03/2026 15:30:00"
+  },
+  {
+    "id": 2,
+    "title": "Team standup",
+    "date": "2026-03-21",
+    "time": null,
+    "note": null,
+    "created_by": "Full Name of Creator",
+    "created_at": "19/03/2026 09:00:00"
+  }
+]
+```
+
+### 3.3 Retrieve one reminder (GET)
+
+- **URL:** `{{baseurl}}/eventsapi/reminders/<id>/`
+- **Method:** `GET`
+
+Response body is the same shape as a single item from list/create.
+
+### 3.4 Update reminder (PUT)
+
+- **URL:** `{{baseurl}}/eventsapi/reminders/<id>/`
+- **Method:** `PUT`
+
+**Body must include all required fields** (`title`, `date`) plus any optional fields you want to keep:
+
+```json
+{
+  "title": "Updated reminder title",
+  "date": "2026-03-22",
+  "time": "16:00:00",
+  "note": "Updated note text."
+}
+```
+
+On success, the response body matches the GET shape.
+
+### 3.5 Partial update (PATCH)
+
+- **URL:** `{{baseurl}}/eventsapi/reminders/<id>/`
+- **Method:** `PATCH`
+
+You can send only the fields you want to change. Validation for required fields is **skipped** on PATCH:
+
+```json
+{
+  "note": "Moved to next week."
+}
+```
+
+The response returns the updated reminder (same shape as GET).
+
+### 3.6 Delete reminder (DELETE)
+
+- **URL:** `{{baseurl}}/eventsapi/reminders/<id>/`
+- **Method:** `DELETE`
+
+On success, DRF returns a `204 No Content` (empty body) or a simple message depending on your DRF configuration.
+
+

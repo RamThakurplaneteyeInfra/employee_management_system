@@ -183,7 +183,7 @@ class PlannedActions(models.Model):
     ...
 class SalesStatistics(models.Model):
     """Sales stats per GRP: sale, calls, trial, demand, conversion, etc."""
-    grp = models.ForeignKey(GRPS, on_delete=models.CASCADE, db_column="grp", null=False, verbose_name="grp")
+    # grp = models.ForeignKey(GRPS, on_delete=models.CASCADE, db_column="grp", null=False, verbose_name="grp")
     product = models.ForeignKey(
         "project.Product",
         on_delete=models.SET_NULL,
@@ -192,6 +192,7 @@ class SalesStatistics(models.Model):
         related_name="sales_statistics",
         db_column="product_id",
     )
+    date=models.DateField(auto_now_add=True)
     Sale=models.IntegerField(null=True)
     Calls=models.IntegerField(null=True)
     Trial=models.IntegerField(null=True)
@@ -205,10 +206,11 @@ class SalesStatistics(models.Model):
     Demo=models.IntegerField(null=True)
     Quote=models.IntegerField(null=True)
     Close=models.IntegerField(null=True)
-    Conversion_percent=models.DecimalField(decimal_places=2,null=False,max_digits=6)
+    Conversion_percent=models.DecimalField(decimal_places=2,null=False,max_digits=6,default=0)
     status=models.ForeignKey(TaskStatus,on_delete=models.CASCADE,db_column="status",null=False,verbose_name="status",)
 
     class Meta:
         db_table= 'quatery_reports"."SalesStatistics'
-        ordering=["grp"]
+        ordering=["-date"]
+        unique_together = [("product", "date")]
 # Create your models here.

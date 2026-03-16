@@ -19,4 +19,4 @@ class FunctionsEntriesAdmin(admin.ModelAdmin):
 
 @admin.register(SalesStatistics)
 class SalesStatisticsAdmin(admin.ModelAdmin):
-    list_display = ("id", "grp", "product", "status")
+    list_display = ("id", "product", "status")

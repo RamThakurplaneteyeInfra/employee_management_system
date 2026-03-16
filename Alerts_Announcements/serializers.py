@@ -103,11 +103,8 @@ class AnnouncementSerializer(serializers.ModelSerializer):
         slug_field="type_name",
         required=True,
     )
-    # created_by is always taken from the logged-in user in the view; do not allow clients to set it.
-    created_by = serializers.SlugRelatedField(
-        read_only=True,
-        slug_field="username",
-    )
+    # GET: created_by returns full name of creator (username not exposed).
+    created_by = serializers.SerializerMethodField()
     product = serializers.SlugRelatedField(
         queryset=Product.objects.all(),
         slug_field="name",
@@ -115,9 +112,8 @@ class AnnouncementSerializer(serializers.ModelSerializer):
         allow_null=False,
     )
     percentage = serializers.IntegerField(required=True)
-    # GET helpers: full creator name and IST timestamp; type/product already returned as names via SlugRelatedField.
-    creator_name = serializers.SerializerMethodField()
-    created_at_ist = serializers.SerializerMethodField()
+    # GET: created_at returns IST-formatted datetime only.
+    created_at = serializers.SerializerMethodField()
 
     class Meta:
         model = Announcement
@@ -125,31 +121,27 @@ class AnnouncementSerializer(serializers.ModelSerializer):
             "id",
             "announcement",
             "created_by",
-            "creator_name",
             "type",
             "product",
             "percentage",
             "created_at",
-            "created_at_ist",
         ]
-        read_only_fields = ["created_at", "created_by"]
+        read_only_fields = ["created_at"]
 
-    def get_creator_name(self, obj):
+    def get_created_by(self, obj):
         if not obj.created_by_id:
             return None
         return _get_users_Name_sync(obj.created_by)
 
-    def get_created_at_ist(self, obj):
+    def get_created_at(self, obj):
         return gmt_to_ist_str(obj.created_at, "%d/%m/%Y %H:%M:%S") if obj.created_at else None
 
     def validate(self, attrs):
         """
-        Enforce required fields for POST:
-        - announcement: non-empty text
-        - type: required (AnnouncementType, by name)
-        - product: required (Product, by name)
-        - percentage: required (int)
+        Enforce required fields only for POST/PUT (full payload). Skip for PATCH (partial update).
         """
+        if self.partial:
+            return attrs
         announcement = attrs.get("announcement")
         if not announcement or not str(announcement).strip():
             raise serializers.ValidationError({"announcement": "This field is required."})

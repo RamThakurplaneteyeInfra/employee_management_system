@@ -260,6 +260,97 @@ class EventSerializer(serializers.ModelSerializer):
     class Meta:
         model = Event
         fields = '__all__'
+
+
+class ReminderSerializer(serializers.ModelSerializer):
+    """
+    Reminder serializer.
+    - POST/PUT body: title, date, time (optional), note (optional).
+    - created_by is taken from the logged-in user (view), not from request body.
+    - GET response:
+        - created_by: full name of creator (no username)
+        - created_at: IST-formatted datetime (string)
+    """
+    # Write fields
+    title = serializers.CharField(required=True, allow_blank=False)
+    date = serializers.DateField(required=True)
+    time = serializers.TimeField(required=False, allow_null=True)
+    note = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+
+    # Read-only representation helpers
+    created_by = serializers.SerializerMethodField()
+    created_at = serializers.SerializerMethodField()
+    updated_at = serializers.SerializerMethodField()
+    last_update_at = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Reminder
+        fields = [
+            "id",
+            "title",
+            "date",
+            "time",
+            "note",
+            "created_by",
+            "created_at",
+            "updated_at",
+            "last_update_at",
+        ]
+        read_only_fields = ["created_at", "updated_at", "last_update_at", "created_by"]
+
+    def get_created_by(self, obj):
+        if not obj.created_by_id:
+            return None
+        return _get_users_Name_sync(obj.created_by)
+
+    def get_created_at(self, obj):
+        return gmt_to_ist_str(obj.created_at, "%d/%m/%Y %H:%M:%S") if obj.created_at else None
+
+    def get_updated_at(self, obj):
+        """
+        For responses (including PUT/PATCH), return null when there has been no update
+        after creation. Comparison is done at second precision so tiny microsecond
+        differences don't count as an update.
+        """
+        created = getattr(obj, "created_at", None)
+        updated = getattr(obj, "updated_at", None)
+        if not created or not updated:
+            return None
+        # Compare ignoring microseconds and timezone differences
+        c = created.replace(microsecond=0)
+        u = updated.replace(microsecond=0)
+        if c == u:
+            return None
+        return gmt_to_ist_str(updated, "%d/%m/%Y %H:%M:%S")
+
+    def get_last_update_at(self, obj):
+        """
+        For GET responses: if created_at == updated_at, return null.
+        Otherwise return IST-formatted updated_at string.
+        """
+        created = getattr(obj, "created_at", None)
+        updated = getattr(obj, "updated_at", None)
+        if not created or not updated:
+            return None
+        # If no changes after creation (second precision), treat as no last_update_at.
+        c = created.replace(microsecond=0)
+        u = updated.replace(microsecond=0)
+        if c == u:
+            return None
+        return gmt_to_ist_str(updated, "%d/%m/%Y %H:%M:%S")
+
+    def validate(self, attrs):
+        """
+        Enforce required fields only for POST/PUT (full payload). Skip for PATCH (partial update).
+        """
+        if self.partial:
+            return attrs
+        title = attrs.get("title")
+        if not title or not str(title).strip():
+            raise serializers.ValidationError({"title": "This field is required."})
+        if attrs.get("date") is None:
+            raise serializers.ValidationError({"date": "This field is required."})
+        return attrs
         
 class MeetingSerializer(serializers.ModelSerializer):
     """

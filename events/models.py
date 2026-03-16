@@ -134,6 +134,34 @@ class Event(models.Model):
 
     def __str__(self):
         return self.title
+
+
+class Reminder(models.Model):
+    """
+    Simple reminder attached to a user: title, date/time, optional note, and audit timestamps.
+    Stored in the events schema.
+    """
+    title = models.TextField(null=False)
+    date = models.DateField()
+    time = models.TimeField(null=True, blank=True)
+    note = models.TextField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    created_by = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="reminders",
+        db_column="created_by_id",
+    )
+
+    class Meta:
+        db_table = 'events"."Reminders'
+        verbose_name = "reminder"
+        verbose_name_plural = "reminders"
+        ordering = ["-date", "-created_at"]
+
+    def __str__(self):
+        return self.title or f"Reminder {self.pk}"
 class Meeting(models.Model):
     """
     Meeting booking: product (FK), type, duration (time minutes), room, active flag.

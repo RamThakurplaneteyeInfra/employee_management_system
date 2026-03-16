@@ -207,18 +207,21 @@ async def get_session_data(request: HttpRequest):
 # One device only: if user already has a live session, block login on another device.
 
 
-def _user_has_live_session(user):
-    """Return True if this user has any existing session (logged in on another device)."""
+def _logout_existing_sessions(user):
+    """
+    Expire all existing sessions for this user before creating a new one.
+    This enforces a single active session per user (single-device login).
+    """
     from django.contrib.sessions.models import Session
+
     user_id = str(user.pk)
     for s in Session.objects.all():
         try:
             data = s.get_decoded()
-            if data.get("_auth_user_id") == user_id:
-                return True
         except Exception:
             continue
-    return False
+        if data.get("_auth_user_id") == user_id:
+            s.delete()
 
 
 @csrf_exempt
@@ -235,12 +238,8 @@ def user_login(req: HttpRequest):
         user = authenticate(req, username=u, password=p)
         if not user:
             return JsonResponse({"messege": "Incorrect userID/Password,Try again"}, status=status.HTTP_400_BAD_REQUEST)
-        # One device only: if already logged in elsewhere, reject this login
-        # if _user_has_live_session(user):
-        #     return JsonResponse(
-        #         {"message": "Already logged in on another device. Log out there first or wait for the session to expire."},
-        #         status=status.HTTP_403_FORBIDDEN,
-        #     )
+        # One device only: expire any existing sessions for this user before creating a new one.
+        _logout_existing_sessions(user)
         login(req, user)
         user_role = _get_user_role_sync(user)
         if not user_role:

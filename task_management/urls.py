@@ -17,6 +17,7 @@ task_management=[path("createTask/",views.create_task,name="Tasks_management"),
     path("Taskcount/<slug:username>/",views.get_task_count_from_username,name="Tasks_management"),]
 
 task_messaging=[path("sendMessage/",views.post_task_message,name="sendMessage"),
-                path("getMessage/<int:task_id>/",views.get_task_messages,name="getMessages")]
+                path("getMessage/<int:task_id>/",views.get_task_messages,name="getMessages"),
+                path("markTaskMessagesSeen/<int:task_id>/",views.mark_task_messages_seen,name="mark_task_messages_seen")]
 
 urlpatterns+=task_filters+task_messaging+task_management

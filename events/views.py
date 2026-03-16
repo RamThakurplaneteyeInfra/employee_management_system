@@ -19,6 +19,7 @@ from .models import (
     tourmembers,
     Holiday,
     Event,
+    Reminder,
     Meeting,
 )
 from .serializers import *
@@ -166,6 +167,66 @@ class EventViewSet(ModelViewSet):
             return [IsAuthenticated(), IsAdminOrMDOrHR()]
         else:
             return [AllowAny()]
+
+
+# ==================== ReminderViewSet ====================
+# URL: {{baseurl}}/eventsapi/reminders/  | CRUD
+class ReminderViewSet(ModelViewSet):
+    """
+    CRUD for Reminders.
+    Request body:
+      - POST/PUT: title (required), date (required), time (optional), note (optional)
+    Response body:
+      - created_by: full name of creator
+      - created_at: IST-formatted datetime string
+    """
+    queryset = Reminder.objects.all().select_related("created_by__accounts_profile").order_by("-date", "-created_at")
+    serializer_class = ReminderSerializer
+    authentication_classes = [CsrfExemptSessionAuthentication]
+
+    def get_queryset(self):
+        """
+        Optionally filter reminders by month (query param ?month=1-12).
+        - If month is provided: filter by that month in the current year.
+        - If month is not provided: filter by the current month in the current year.
+        """
+        qs = super().get_queryset()
+        params = self.request.GET
+        today = date.today()
+        month_param = params.get("month")
+        try:
+            month = int(month_param) if month_param else today.month
+        except (TypeError, ValueError):
+            month = today.month
+        year = today.year
+        return qs.filter(date__month=month, date__year=year)
+
+    def get_permissions(self):
+        """
+        Assigns permissions based on the HTTP action.
+        """
+        if self.action in ["list", "retrieve"]:
+            # Any authenticated user can view reminders
+            return [IsAuthenticated()]
+        if self.action in ["create", "update", "partial_update", "destroy"]:
+            # Only authenticated users; upper-level role checks can be added later if needed
+            return [IsAuthenticated()]
+        return [AllowAny()]
+
+    def perform_create(self, serializer):
+        # Force created_by to be the logged-in user
+        serializer.save(created_by=self.request.user)
+
+    @action(detail=False, methods=["get"], url_path="today")
+    def today(self, request):
+        """
+        GET {{baseurl}}/eventsapi/reminders/today/ - reminders for the current day (today's date).
+        Ignores any month filter and always uses today's date.
+        """
+        today = date.today()
+        qs = Reminder.objects.all().select_related("created_by__accounts_profile").filter(date=today).order_by("-created_at")
+        serializer = self.get_serializer(qs, many=True)
+        return Response(serializer.data)
 
 
 # ==================== MeetingViewSet ====================

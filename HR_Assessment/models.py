@@ -12,7 +12,7 @@ class Question(models.Model):
     year = models.IntegerField(null=True, blank=True)
 
     class Meta:
-        db_table = "hr_assessment_questions"
+        db_table = 'emp_assessment"."hr_assessment_questions'
         verbose_name = "question"
         verbose_name_plural = "questions"
         ordering = ["-year", "-month", "id"]
@@ -33,7 +33,7 @@ class Answer(models.Model):
     score = models.IntegerField(null=True, blank=True)
 
     class Meta:
-        db_table = "hr_assessment_answers"
+        db_table = 'emp_assessment"."hr_assessment_answers'
         verbose_name = "answer"
         verbose_name_plural = "answers"
         ordering = ["question", "id"]

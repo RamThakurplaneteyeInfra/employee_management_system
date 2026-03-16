@@ -224,6 +224,33 @@ async def post_task_message(request: HttpRequest):
         return JsonResponse(str(e), status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+# ==================== mark_task_messages_seen ====================
+# Set unseen_count to 0 for the current user when they view task messages.
+# URL: {{baseurl}}/tasks/markTaskMessagesSeen/<task_id>/
+# Method: POST
+@login_required
+@csrf_exempt
+async def mark_task_messages_seen(request: HttpRequest, task_id: int):
+    if verifyPost(request):
+        return verifyPost(request)
+    try:
+        def _mark_seen(user):
+            task = get_object_or_404(Task, task_id=task_id)
+            assignees = TaskAssignies.objects.filter(task=task)
+            is_creator = user == task.created_by
+            is_assignee = any(i.assigned_to == user for i in assignees)
+            if not (is_creator or is_assignee):
+                raise PermissionDenied("Not allowed")
+            TaskAssignies.objects.filter(task=task, assigned_to=user).update(unseen_count=0)
+            return True
+        await sync_to_async(_mark_seen)(request.user)
+        return JsonResponse({"status": "ok", "unseen_count": 0}, status=status.HTTP_200_OK)
+    except PermissionDenied:
+        return JsonResponse({"message": "You are not authorised to access this task"}, status=status.HTTP_403_FORBIDDEN)
+    except Exception as e:
+        return JsonResponse({"message": str(e)}, status=status.HTTP_404_NOT_FOUND)
+
+
 # ==================== get_task_messages ====================
 # Fetch messages for a task.
 # URL: {{baseurl}}/tasks/getMessage/<task_id>/

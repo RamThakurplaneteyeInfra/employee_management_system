@@ -3,14 +3,62 @@ Client Lead API - Add Client Lead form.
 No database changes. Uses existing ClientProfile, CurrentClientStage, ClientProfileMembers.
 """
 import json
+from decimal import Decimal
+from django.utils import timezone
+from django.db.models import Prefetch, Q, F
 from ems.RequiredImports import sync_to_async, JsonResponse, status, HttpRequest
 from ems.verify_methods import verifyGet, verifyPost, verifyPut, verifyPatch, verifyDelete, load_data
 from ems.utils import gmt_to_ist_str
 from accounts.snippet import login_required, csrf_exempt
 from accounts.models import User
-from django.db.models import Prefetch, Q
 from .models import ClientProfile, CurrentClientStage, ClientProfileMembers, ClientConversation, ClientInteractionChannels
 from project.models import Project, Product
+from QuaterlyReports.models import SalesStatistics
+from task_management.models import TaskStatus
+
+
+# Medium names that map to SalesStatistics count fields (must match ClientInteractionChannels: Calls, Trial, Demand, Pitch)
+SALES_STAT_MEDIUM_FIELDS = {"calls": "Calls", "trial": "Trial", "demand": "Demand", "pitch": "Pitch"}
+
+
+def _increment_sales_stat_for_conversation_sync(client, medium_name):
+    """
+    When a conversation is added with a medium (Calls, Trial, Demand, Pitch), increment
+    the corresponding SalesStatistics count for the client's product and today's date.
+    Uses unique_together (product, date); creates row with status PENDING if missing.
+    """
+    if not medium_name or not isinstance(medium_name, str):
+        return
+    key = medium_name.strip().lower()
+    field_name = SALES_STAT_MEDIUM_FIELDS.get(key)
+    if not field_name:
+        return
+    # Resolve client's Product (Project) to project.Product by name
+    client_product = getattr(client, "Product", None)
+    if not client_product:
+        return
+    product = Product.objects.filter(name=client_product.name).first()
+    if not product:
+        return
+    today = timezone.now().date()
+    pending = TaskStatus.objects.filter(status_name__iexact="PENDING").first()
+    if not pending:
+        return
+    defaults = {
+        "status": pending,
+        "Conversion_percent": Decimal("0"),
+        "Calls": 0,
+        "Trial": 0,
+        "Demand": 0,
+        "Pitch": 0,
+    }
+    stat, _ = SalesStatistics.objects.get_or_create(
+        product=product,
+        date=today,
+        defaults=defaults,
+    )
+    update_kw = {field_name: F(field_name) + 1}
+    SalesStatistics.objects.filter(pk=stat.pk).update(**update_kw)
 
 
 def _product_list_sync():
@@ -429,6 +477,8 @@ async def conversation_list_create(request: HttpRequest, profile_id: int):
                 if medium_obj is None:
                     return JsonResponse({"error": "Invalid medium"}, status=status.HTTP_400_BAD_REQUEST)
             ids = await sync_to_async(_create_many)(client, note_list, request.user, medium_obj)
+            if medium_name:
+                await sync_to_async(_increment_sales_stat_for_conversation_sync)(client, medium_name)
             return JsonResponse({"ids": ids, "message": f"{len(ids)} note(s) added"}, status=status.HTTP_201_CREATED)
         note_text = data.get("note", "").strip()
         if not note_text:
@@ -445,6 +495,8 @@ async def conversation_list_create(request: HttpRequest, profile_id: int):
                 return JsonResponse({"error": "Invalid medium"}, status=status.HTTP_400_BAD_REQUEST)
 
         conv = await sync_to_async(_create_one)(client, note_text, request.user, medium_obj)
+        if medium_name:
+            await sync_to_async(_increment_sales_stat_for_conversation_sync)(client, medium_name)
         return JsonResponse({"id": conv.id, "message": "Note added"}, status=status.HTTP_201_CREATED)
     return JsonResponse({"error": "Method not allowed"}, status=status.HTTP_405_METHOD_NOT_ALLOWED)
 
