@@ -92,7 +92,6 @@ class tourmembers(models.Model):
         verbose_name="tourmember"
         unique_together = ("tour", "member")
         ordering=["tour"]
-
 class Holiday(models.Model):
     """Company holiday: date, name, and fixed vs unfixed type."""
     FIXED = "fixed"
@@ -128,14 +127,12 @@ class Event(models.Model):
     time = models.TimeField()
     
     class Meta:
-        db_table='event'
+        db_table='events"."event'
         verbose_name="Event"
         ordering=["date"]               
 
     def __str__(self):
         return self.title
-
-
 class Reminder(models.Model):
     """
     Simple reminder attached to a user: title, date/time, optional note, and audit timestamps.
@@ -183,7 +180,7 @@ class Meeting(models.Model):
     is_active=models.BooleanField(default=True,null=False)
     
     class Meta:
-        db_table='team_management"."MeetingPush'
+        db_table='events"."MeetingPush'
         ordering=["-created_at","is_active"]
     
     def __str__(self):
