@@ -1,8 +1,14 @@
-from accounts.models import User,Profile
+"""
+Task management models: task types, statuses, tasks, assignees, messages, logs.
+API: {{baseurl}}/tasks/ (createTask, viewTasks, viewAssignedTasks, etc.).
+"""
+from accounts.models import User, Profile
 from django.db import models
 from datetime import datetime
+
+
 class TaskTypes(models.Model):
-    """Task type (e.g. SOS, 1 Day, 10 Day, Monthly, Quaterly)."""
+    """Task type (e.g. SOS, 1 Day, 10 Day, Monthly, Quaterly); used in Task and getTaskTypes."""
     type_id=models.AutoField(primary_key=True,editable=False)
     type_name=models.CharField(unique=True,null=False,max_length=50)
     class Meta:

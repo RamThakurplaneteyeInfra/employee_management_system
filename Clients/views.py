@@ -67,9 +67,10 @@ def _product_list_sync():
 
 
 # ==================== Products (from database) ====================
+# URL: {{baseurl}}/clientsapi/products/  | GET
 @login_required
 async def product_list(request: HttpRequest):
-    """GET /clientsapi/products/ - Returns product list from database for dropdown."""
+    """GET /clientsapi/products/ — product list (id, name) for dropdown. Auth required."""
     if verifyGet(request):
         return verifyGet(request)
     data = await sync_to_async(_product_list_sync)()
@@ -77,6 +78,7 @@ async def product_list(request: HttpRequest):
 
 
 # ==================== Employees list ====================
+# URL: {{baseurl}}/clientsapi/employees/  | GET
 def _get_employees_sync():
     users = User.objects.all().values("id", "username")
     return list(users)
@@ -108,11 +110,14 @@ async def stage_list(request: HttpRequest):
 
 # ==================== Client Profile CRUD ====================
 def _user_can_access_profile(user, profile):
-    """True if user is the profile creator or a member of the profile."""
+    """True if user is the profile creator or a member of the profile. Uses prefetched members when available to avoid extra query."""
     if not user or not profile:
         return False
     if profile.created_by_id == user.pk:
         return True
+    prefetched = getattr(profile, "_prefetched_objects_cache", {}).get("members")
+    if prefetched is not None:
+        return any(m.pk == user.pk for m in prefetched)
     return ClientProfileMembers.objects.filter(client_profile=profile, user=user).exists()
 
 
@@ -230,7 +235,17 @@ async def profile_detail_update_delete(request: HttpRequest, profile_id: int):
     return JsonResponse({"error": "Method not allowed"}, status=status.HTTP_405_METHOD_NOT_ALLOWED)
 
 
+def _get_profile_with_members_sync(profile_id):
+    """Fetch profile with members and their profiles in one go. Use for both access check and member list."""
+    members_prefetch = Prefetch(
+        "members",
+        queryset=User.objects.select_related("accounts_profile"),
+    )
+    return ClientProfile.objects.select_related("created_by").prefetch_related(members_prefetch).get(id=profile_id)
+
+
 def _get_profile_members_sync(profile_id):
+    """List member display names for profile. Prefer using _get_profile_with_members_sync + c.members.all() to avoid duplicate query."""
     members_prefetch = Prefetch(
         "members",
         queryset=User.objects.select_related("accounts_profile"),
@@ -241,16 +256,16 @@ def _get_profile_members_sync(profile_id):
 
 @login_required
 async def profile_members(request: HttpRequest, profile_id: int):
-    """GET /clientsapi/profiles/<id>/members/ - Selected employees for this client. Access: creator or member only."""
+    """GET /clientsapi/profiles/<id>/members/ - Selected employees for this client. Access: creator or member only. Single query + prefetch."""
     if verifyGet(request):
         return verifyGet(request)
     try:
-        c = await sync_to_async(ClientProfile.objects.prefetch_related("members").get)(id=profile_id)
+        c = await sync_to_async(_get_profile_with_members_sync)(profile_id)
     except ClientProfile.DoesNotExist:
         return JsonResponse({"error": "Client not found"}, status=status.HTTP_404_NOT_FOUND)
     if not await sync_to_async(_user_can_access_profile)(request.user, c):
         return JsonResponse({"error": "You do not have access to this client profile"}, status=status.HTTP_403_FORBIDDEN)
-    data = await sync_to_async(_get_profile_members_sync)(profile_id)
+    data = [_get_user_display_name(u) for u in c.members.all()]
     return JsonResponse(data, safe=False)
 
 
@@ -430,7 +445,8 @@ def _list_conversations_sync(profile_id):
 
 
 def _get_client_sync(profile_id):
-    return ClientProfile.objects.get(id=profile_id)
+    """Fetch client profile. Optimized: select_related created_by, prefetch members for access check without extra queries."""
+    return ClientProfile.objects.select_related("created_by").prefetch_related("members").get(id=profile_id)
 
 
 @csrf_exempt

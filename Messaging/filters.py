@@ -137,9 +137,9 @@ def _get_messages_sync(request: HttpRequest, chat_id: str):
         GroupMembers.objects.filter(groupchat=group_obj, participant=request.user).update(seen=True, unseenmessages=0)
     else:
         try:
-            chat_obj = get_object_or_404(IndividualChats, chat_id=chat_id)
-        except Http404 as e:
-            return JsonResponse({"message": f"{e}"}, status=status.HTTP_403_FORBIDDEN)
+            chat_obj = IndividualChats.objects.select_related("participant1", "participant2").get(chat_id=chat_id)
+        except IndividualChats.DoesNotExist:
+            return JsonResponse({"message": "Chat not found"}, status=status.HTTP_403_FORBIDDEN)
         messages = (
             IndividualMessages.objects.filter(chat=chat_obj)
             .select_related("sender__accounts_profile")

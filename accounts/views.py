@@ -1,3 +1,11 @@
+"""
+Accounts API views. Base path: {{baseurl}}/accounts/
+- Session: login (POST), logout (GET), sessiondata (GET), home (GET).
+- Filters: getBranch, getRoles, getDesignations, getDepartmentsandFunctions, getTeamleads (GET, query params).
+- Employee: employee/dashboard (GET), employees (GET), updateUsername (POST).
+- Admin: updateProfile, createEmployeeLogin, viewEmployee, deleteEmployee, changePassword, changePhoto, FetchPhoto.
+- Leave: leave-applications (DRF ViewSet) + summary, view_history, approval, emergency.
+"""
 import logging
 
 from ems.RequiredImports import (
@@ -35,10 +43,9 @@ logger = logging.getLogger(__name__)
 
 
 # ==================== home ====================
-# Home page placeholder. Returns 204 No Content.
-# URL: {{baseurl}}/accounts/
-# Method: GET
+# URL: {{baseurl}}/accounts/  | Method: GET
 async def home(request: HttpRequest):
+    """GET /accounts/ — placeholder; returns 204 No Content."""
     return HttpResponse(status=204)
 
 # ==================== create_employee_login ====================
@@ -136,10 +143,10 @@ async def create_employee_login(request: HttpRequest):
 # URL: {{baseurl}}/accounts/employees/
 # Method: GET
 def _get_all_employees_sync():
-    """Sync helper: DB operations with transaction.atomic."""
+    """Sync helper: DB operations with transaction.atomic. Optimized: select_related for Teamlead profile to avoid N+1."""
     with transaction.atomic():
         profiles = Profile.objects.all().select_related(
-            "Role", "Designation", "Branch", "Department", "Employee_id", "Teamlead"
+            "Role", "Designation", "Branch", "Department", "Employee_id", "Teamlead", "Teamlead__accounts_profile"
         ).prefetch_related("functions").order_by("Name")
         result = []
         for p in profiles:
@@ -164,6 +171,7 @@ def _get_all_employees_sync():
                 "Date_of_birth": p.Date_of_birth,
                 "Email_id": p.Email_id,
                 "Number_of_days_from_joining": completed_years_and_days(start_date=p.Date_of_join),
+                "is_logged_in": getattr(p, "is_logged_in", False),
             })
         return result
 
@@ -211,9 +219,11 @@ def _logout_existing_sessions(user):
     """
     Expire all existing sessions for this user before creating a new one.
     This enforces a single active session per user (single-device login).
+    Also sets Profile.is_logged_in=False for that user.
     """
     from django.contrib.sessions.models import Session
 
+    Profile.objects.filter(Employee_id=user).update(is_logged_in=False)
     user_id = str(user.pk)
     for s in Session.objects.all():
         try:
@@ -241,6 +251,9 @@ def user_login(req: HttpRequest):
         # One device only: expire any existing sessions for this user before creating a new one.
         _logout_existing_sessions(user)
         login(req, user)
+        Profile.objects.filter(Employee_id=user).update(is_logged_in=True)
+        from ems.cache_utils import invalidate_get_all_employees_cache
+        invalidate_get_all_employees_cache()
         user_role = _get_user_role_sync(user)
         if not user_role:
             raise DatabaseError("Database Error 500")
@@ -261,13 +274,13 @@ def _employee_dashboard_sync(request: HttpRequest):
     user = request.user
     user_role = _get_user_role_sync(user=user)
     if user.is_superuser and user_role and user_role == "Admin":
-        profile = Profile.objects.select_related("Role").filter(Employee_id=user).annotate(role=F("Role__role_name")).values("Employee_id", "Email_id", "Date_of_birth", "Date_of_join", "Name", "Photo_link", "role")
+        profile = Profile.objects.select_related("Role").filter(Employee_id=user).annotate(role=F("Role__role_name")).values("Employee_id", "Email_id", "Date_of_birth", "Date_of_join", "Name", "Photo_link", "role", "is_logged_in")
         data = list(profile)
         for row in data:
             row["functions"] = []
         return data
     elif user.is_superuser and user_role and user_role == "MD":
-        profile = Profile.objects.select_related("Role").filter(Employee_id=user).annotate(role=F("Role__role_name")).values("Employee_id", "Email_id", "Date_of_birth", "Date_of_join", "Name", "Photo_link", "role")
+        profile = Profile.objects.select_related("Role").filter(Employee_id=user).annotate(role=F("Role__role_name")).values("Employee_id", "Email_id", "Date_of_birth", "Date_of_join", "Name", "Photo_link", "role", "is_logged_in")
         data = list(profile)
         for row in data:
             row["functions"] = []
@@ -286,6 +299,7 @@ def _employee_dashboard_sync(request: HttpRequest):
             "role": p.Role.role_name if p.Role else None,
             "department": p.Department.dept_name if p.Department else None,
             "functions": [f.function for f in p.functions.all()],
+            "is_logged_in": getattr(p, "is_logged_in", False),
         } for p in profiles]
 
 
@@ -305,9 +319,10 @@ async def employee_dashboard(request: HttpRequest):
 # URL: {{baseurl}}/accounts/logout/
 # Method: GET
 def _user_logout_sync(req):
-    """Sync helper: logout and session flush with transaction.atomic."""
+    """Sync helper: logout and session flush with transaction.atomic. Sets Profile.is_logged_in=False."""
     user_id = req.user.username
     with transaction.atomic():
+        Profile.objects.filter(Employee_id=req.user).update(is_logged_in=False)
         logout(req)
         req.session.flush()
     return user_id
@@ -430,9 +445,14 @@ async def changePassword(request: HttpRequest, u):
 # URL: {{baseurl}}/accounts/admin/viewEmployee/<username>/
 # Method: GET
 def _view_employee_sync(username):
-    """Sync helper: DB operations with transaction.atomic."""
+    """Sync helper: DB operations. Optimized: select_related for FKs + prefetch functions to avoid N+1."""
     user = get_object_or_404(User, username=username)
-    profile = Profile.objects.prefetch_related("functions").filter(Employee_id=user).first()
+    profile = (
+        Profile.objects.filter(Employee_id=user)
+        .select_related("Role", "Branch", "Department", "Designation", "Employee_id")
+        .prefetch_related("functions")
+        .first()
+    )
     if profile:
         with transaction.atomic():
             functions = [f.function for f in profile.functions.all()]
@@ -447,6 +467,7 @@ def _view_employee_sync(username):
             "Photo_link": profile.Photo_link if profile.Photo_link else None,
             "Role": profile.Role.role_name if profile.Role else None,
             "Functions": functions,
+            "is_logged_in": getattr(profile, "is_logged_in", False),
         }]
     return [{}]
 
@@ -488,12 +509,12 @@ async def delete_user_profile(request: HttpRequest, u):
 # URL: {{baseurl}}/accounts/getTeamleads/
 # Method: GET
 def _get_teamleads_sync(query_role):
-    """Sync helper: DB query for team leads by role."""
+    """Sync helper: DB query for team leads by role. Optimized: select_related Employee_id to avoid N+1."""
     allowed_roles = ["Employee", "Intern"]
     if query_role in allowed_roles:
         role = _get_role_object_sync(role="TeamLead")
-        teamleads = Profile.objects.filter(Role=role).order_by("Name")
-        return [{"Name": tl.Name, "Employee_id": tl.Employee_id.username} for tl in teamleads]
+        teamleads = Profile.objects.filter(Role=role).select_related("Employee_id").order_by("Name")
+        return [{"Name": tl.Name, "Employee_id": tl.Employee_id.username, "is_logged_in": getattr(tl, "is_logged_in", False)} for tl in teamleads]
     return [{}]
 
 

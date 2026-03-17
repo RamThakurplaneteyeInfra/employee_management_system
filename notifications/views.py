@@ -1,3 +1,11 @@
+"""
+Notifications API views. Base path: {{baseurl}}/notifications/
+- GET /today/ — list notifications for logged-in user (ordered by created_at).
+- GET /types/ — list notification types (AllowAny).
+- POST /read/<pk>/ — mark notification as read.
+- GET /cron/delete-seen-older-than-day/ — cron; X-CRON-KEY required.
+- GET /cron/delete-unseen-older-than-week/ — cron; X-CRON-KEY required.
+"""
 from datetime import timedelta
 
 from django.utils import timezone
@@ -19,9 +27,7 @@ from .Serializers import NotificationSerializer
 
 
 # ==================== get_notifications ====================
-# Fetch notifications for logged-in user.
-# URL: {{baseurl}}/notifications/notifications/
-# Method: GET
+# URL: {{baseurl}}/notifications/today/  | GET
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def get_notifications(request):
@@ -32,9 +38,7 @@ def get_notifications(request):
 
 
 # ==================== mark_as_read ====================
-# Mark a notification as read.
-# URL: {{baseurl}}/notifications/notifications/read/<pk>/
-# Method: POST
+# URL: {{baseurl}}/notifications/read/<pk>/  | POST
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
 def mark_as_read(request, pk):

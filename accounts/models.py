@@ -1,10 +1,16 @@
+"""
+Accounts app models: roles, branches, designations, departments, functions, profile, leave.
+Used by accounts views and leave-applications; Profile linked via OneToOne to User.
+"""
 from django.db import models
 from django.contrib.auth.models import User
 from django.core.validators import validate_email
 from datetime import timedelta
+
+
 # A model for "Roles" table
 class Roles(models.Model):
-    """User role (e.g. Admin, MD); used for permissions and counts."""
+    """User role (e.g. Admin, MD, HR); used for permissions and dropdowns."""
     role_id=models.AutoField(primary_key=True,auto_created=True)
     role_name=models.CharField(max_length=20,unique=True,null=True)
     total_count=models.IntegerField(default=0,null=False,verbose_name="count")
@@ -15,7 +21,7 @@ class Roles(models.Model):
         
 # A model for "Branches" table
 class Branch(models.Model):
-    """Office/branch location."""
+    """Office/branch location; used in Profile and dropdowns (getBranch)."""
     branch_id=models.SmallAutoField(primary_key=True,auto_created=True,verbose_name="id",editable=False)
     branch_name=models.CharField(max_length=25,unique=True,null=True,verbose_name="branch")
     class Meta:
@@ -25,7 +31,7 @@ class Branch(models.Model):
         
 # # A model for "Designations" table
 class Designation(models.Model):
-    """Job designation/title; used in profiles and counts."""
+    """Job designation/title; used in Profile and getDesignations dropdown."""
     designation=models.CharField(max_length=50,unique=True,null=True)
     total_count=models.IntegerField(default=0,null=False,verbose_name="count")
     class Meta:
@@ -79,6 +85,7 @@ class Profile(models.Model):
         verbose_name="functions",
     )
     birthday_counter=models.SmallIntegerField(default=0)
+    is_logged_in = models.BooleanField(default=False, help_text="True when user is logged in, False when logged out.")
     class Meta:
         verbose_name = "Employee Profile"
         verbose_name_plural = "Employees Profile"

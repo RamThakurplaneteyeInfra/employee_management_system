@@ -135,6 +135,50 @@ def invalidate_missed_calls_count_cache(user_id=None, user_ids=None):
     invalidate_get_cache_for_prefix(prefix, user_id=user_id, user_ids=user_ids)
 
 
+# Path prefix for GET accounts/employees/ (user-free: invalidate for all users when anyone logs in).
+GET_ALL_EMPLOYEES_PATH_PREFIX = "accounts:employees"
+
+# GET path prefixes that are invalidated for all users (and anon) when any mutation hits them (e.g. alerts GET is open to all).
+GLOBAL_INVALIDATE_GET_PREFIXES = frozenset({"alertsapi:alerts"})
+
+
+def invalidate_get_cache_for_prefix_all_users(path_prefix):
+    """
+    Invalidate GET cache for path_prefix for every user (and anon).
+    Use when the GET endpoint is open to all so any mutation should clear all cached responses.
+    """
+    if not path_prefix:
+        return
+    try:
+        backend = getattr(cache, "_cache", None) or cache
+        if not hasattr(backend, "delete_pattern"):
+            return
+        prefix_safe = path_prefix.replace("/", ":").strip(":")
+        pattern = f"*{CACHE_KEY_PREFIX}:*:{prefix_safe}*"
+        backend.delete_pattern(pattern)
+    except Exception:
+        pass
+
+
+def invalidate_get_all_employees_cache():
+    """
+    Invalidate GET cache for accounts/employees/ for all users (user-free).
+    Call on login so the next GET {{baseurl}}/accounts/employees/ returns fresh data for every user.
+    """
+    if not GET_ALL_EMPLOYEES_PATH_PREFIX:
+        return
+    try:
+        backend = getattr(cache, "_cache", None) or cache
+        if not hasattr(backend, "delete_pattern"):
+            return
+        prefix_safe = GET_ALL_EMPLOYEES_PATH_PREFIX.replace("/", ":").strip(":")
+        # Match get:<any_user_id>:accounts:employees:* so all users' cache for this endpoint is cleared
+        pattern = f"*{CACHE_KEY_PREFIX}:*:{prefix_safe}*"
+        backend.delete_pattern(pattern)
+    except Exception:
+        pass
+
+
 def invalidate_get_cache_for_messaging_scope(scope_id):
     """
     Invalidate all GET cache entries for messaging endpoints tied to this chat_id or group_id.
@@ -188,6 +232,10 @@ _MUTATION_PATH_TO_GET_PREFIXES = [
     ("accounts:admin:deleteEmployee", ["accounts:employees", "accounts:employee", "accounts:admin"]),
     ("accounts:admin:changePhoto", ["accounts:admin"]),
     ("accounts:updateUsername", ["accounts:employees", "accounts:employee"]),
+    # Alerts: POST/PUT/PATCH/DELETE on alerts invalidate GET alerts list/detail
+    ("alertsapi:alerts", ["alertsapi:alerts"]),
+    # Announcements: POST/PUT/PATCH/DELETE on announcements invalidate GET announcements list/detail
+    ("alertsapi:announcements", ["alertsapi:announcements"]),
     # events (birthday counter)
     ("eventsapi:events:birthdaycounter", ["eventsapi:events:birthdaycounter"]),
     # QuaterlyReports (root-mounted: addDayEntries, changeStatus, deleteEntry, ActionableEntries, etc.)

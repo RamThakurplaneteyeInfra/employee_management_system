@@ -1,9 +1,13 @@
+"""
+Notifications app models: notification_type and Notification.
+API: {{baseurl}}/notifications/today/, read/<pk>/, types/. WebSocket: /ws/notifications/.
+"""
 from django.db import models
 from accounts.models import User
 
-# Create your models here.
+
 class notification_type(models.Model):
-    """Category of notification (e.g. Group_message, Task_Created, Group_Deleted)."""
+    """Category of notification (e.g. Group_message, Task_Created, Group_Deleted); used in Notification."""
     type_name=models.CharField(verbose_name="notification_type_name", max_length=50)
     class Meta:
         db_table='notifications"."types'

@@ -9,11 +9,13 @@ from .cache_utils import (
     set_cached_response,
     get_cache_key_for_request,
     invalidate_get_cache_for_prefix,
+    invalidate_get_cache_for_prefix_all_users,
     get_path_prefixes_from_request,
+    GLOBAL_INVALIDATE_GET_PREFIXES,
 )
 
-# Do not cache these path prefixes (admin, static, notifications GETs, etc.)
-CACHE_SKIP_PREFIXES = ("/admin/", "/static/", "/media/", "/notifications/")
+# Do not cache these path prefixes (admin, static, notifications GETs, logout, etc.)
+CACHE_SKIP_PREFIXES = ("/admin/", "/static/", "/media/", "/notifications/", "/accounts/logout/")
 MUTATION_METHODS = ("POST", "PUT", "PATCH", "DELETE")
 
 
@@ -38,11 +40,14 @@ class CacheGetMiddleware(MiddlewareMixin):
     def process_response(self, request, response):
         if request.path.startswith(CACHE_SKIP_PREFIXES):
             return response
-        # Invalidate GET cache for the logged-in user only so other users' cache is unaffected
+        # Invalidate GET cache on mutation: per-user for most endpoints; all users for GLOBAL_INVALIDATE_GET_PREFIXES (e.g. alerts GET open to all)
         if request.method in MUTATION_METHODS and 200 <= response.status_code < 300:
             user_id = getattr(request.user, "pk", None) if getattr(request.user, "is_authenticated", False) else None
             for prefix in get_path_prefixes_from_request(request):
-                invalidate_get_cache_for_prefix(prefix, user_id=user_id)
+                if prefix in GLOBAL_INVALIDATE_GET_PREFIXES:
+                    invalidate_get_cache_for_prefix_all_users(prefix)
+                else:
+                    invalidate_get_cache_for_prefix(prefix, user_id=user_id)
         if request.method == "GET" and getattr(request, "_cache_key", None) is not None and response.status_code == 200:
             set_cached_response(request, response)
         return response

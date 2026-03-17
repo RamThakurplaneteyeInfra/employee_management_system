@@ -1,7 +1,12 @@
+"""
+Messaging app models: group chats, members, individual chats, messages, attachments.
+API: {{baseurl}}/messaging/ (createGroup, startChat, postMessages, getMessages, loadChats, etc.).
+"""
 from django.db import models
 from django.contrib.auth.models import User
 import random
 import string
+
 
 def generate_chat_id(length=8):
     chat_id="C"

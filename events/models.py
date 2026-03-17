@@ -6,11 +6,15 @@ from accounts.models import User
 # MASTER TABLES
 # ========================
 
+
 class Room(models.Model):
-    """Meeting room (name and active flag) for slot bookings."""
+    """
+    Meeting room (name and active flag) for slot bookings.
+    Used by BookSlot and Meeting; list via GET /eventsapi/rooms/.
+    """
     name = models.CharField(max_length=100, unique=True)
     is_active = models.BooleanField(default=True)
-    
+
     class Meta:
         db_table='events"."Rooms'
         verbose_name="Room"
@@ -18,8 +22,13 @@ class Room(models.Model):
 
     def __str__(self):
         return self.name
+
+
 class BookingStatus(models.Model):
-    """Status of a booking (e.g. confirmed, cancelled)."""
+    """
+    Status of a booking (e.g. Confirmed, Cancelled, Done).
+    Used by BookSlot.status; list via GET /eventsapi/status/.
+    """
     status_name = models.CharField(max_length=20, unique=True)
     is_active = models.BooleanField(default=True)
     
@@ -55,8 +64,13 @@ class BookSlot(models.Model):
         
     def __str__(self):
         return self.meeting_title
+
+
 class SlotMembers(models.Model):
-    """Through model: user participating in a booked slot."""
+    """
+    Through model linking BookSlot and User (members in a booked slot).
+    One row per (slot, member); unique_together enforced.
+    """
     slot = models.ForeignKey(BookSlot, on_delete=models.CASCADE, related_name="slotmembers")
     member = models.ForeignKey(User, on_delete=models.CASCADE, related_name="inslots")
     
@@ -65,8 +79,13 @@ class SlotMembers(models.Model):
         verbose_name="Slotmember"
         unique_together = ("slot", "member")
         ordering=["slot"]
+
+
 class Tour(models.Model):
-    """Tour event: name, location, duration, dates, creator, and members (M2M)."""
+    """
+    Tour event: name, location, duration, dates, creator, and members (M2M).
+    CRUD via /eventsapi/tours/.
+    """
     tour_name = models.CharField(max_length=255)
     location = models.CharField(max_length=255)
     duration_days = models.PositiveIntegerField()
@@ -84,8 +103,13 @@ class Tour(models.Model):
         ordering=["-starting_date"]
     def __str__(self):
         return self.tour_name
+
+
 class tourmembers(models.Model):
-    """Through model: user participating in a tour."""
+    """
+    Through model linking Tour and User (members on a tour).
+    unique_together (tour, member).
+    """
     tour = models.ForeignKey(Tour, on_delete=models.CASCADE, related_name="tourmembers")
     member = models.ForeignKey(User, on_delete=models.CASCADE, null=True, blank=True, related_name="intour")
     class Meta:
@@ -121,7 +145,10 @@ class Holiday(models.Model):
     def __str__(self):
         return f"{self.name}-{self.date}"
 class Event(models.Model):
-    """Generic event: title, motive, date, and time."""
+    """
+    Generic event: title, motive, date, and time.
+    CRUD via /eventsapi/events/; create/update/delete restricted to Admin/MD/HR.
+    """
     title = models.CharField(max_length=255, default="Untitled Event")
     motive = models.TextField(null=True)
     date = models.DateField()
@@ -160,9 +187,13 @@ class Reminder(models.Model):
 
     def __str__(self):
         return self.title or f"Reminder {self.pk}"
+
+
 class Meeting(models.Model):
     """
-    Meeting booking: product (FK), type, duration (time minutes), room, active flag.
+    Meeting push: product (FK), type, duration (minutes), room, active flag.
+    CRUD via /eventsapi/meetingpush/; cron delete-previous-days via custom action.
+    WebSocket may broadcast on product channel when product is set.
     """
     MEETING_TYPE_CHOICES = [("individual", "Individual"),("group", "Group Meeting"),]
 

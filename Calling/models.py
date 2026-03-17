@@ -1,7 +1,13 @@
+"""
+Calling app models: Call (1:1), GroupCall, GroupCallParticipant, MissedCallCount.
+API: {{baseurl}}/messaging/ (initiateCall, acceptCall, endCall, callHistory, etc.).
+"""
 from django.db import models
 from accounts.models import User
+
+
 class Call(models.Model):
-    """Model for audio/video calls between users."""
+    """1:1 audio/video call between sender and receiver; status: pending -> accepted/declined/ended/missed."""
     AUDIO = "audio"
     VIDEO = "video"
     CALL_TYPE_CHOICES = [(AUDIO, "Audio"), (VIDEO, "Video")]

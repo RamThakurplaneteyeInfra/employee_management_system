@@ -1,3 +1,10 @@
+"""
+Messaging API views. Base path: {{baseurl}}/messaging/
+- Groups: createGroup, showCreatedGroups, showGroupMembers, addUser, deleteUser, deleteGroup.
+- Chats: startChat, postMessages/<chat_id>, getMessages/<chat_id>, markSeen/<chat_id>, loadChats.
+- Attachments: uploadFile, addLink, attachments/<id> (DELETE), files/<id>/url (GET).
+All require login. Real-time: WebSocket /ws/chat/.
+"""
 import json
 from asgiref.sync import sync_to_async
 from django.db.models import F, Count
@@ -701,11 +708,11 @@ async def load_groups_and_chats(request: HttpRequest):
 # URL: {{baseurl}}/messaging/... (if configured)
 # Method: GET
 def _search_conversation_sync(user, search_name):
-    """Sync helper: DB query for profiles by name prefix."""
+    """Sync helper: DB query for profiles by name prefix. Returns list of dicts with Name and Employee_id for display."""
     if search_name:
-        profiles = Profile.objects.filter(Name__startswith=search_name).exclude(Employee_id=user).order_by("Name").values("Names")
+        profiles = Profile.objects.filter(Name__istartswith=search_name).exclude(Employee_id=user).order_by("Name").values("Name", "Employee_id")
     else:
-        profiles = Profile.objects.exclude(Employee_id=user).order_by("Name").values("Names")
+        profiles = Profile.objects.exclude(Employee_id=user).order_by("Name").values("Name", "Employee_id")
     return list(profiles)
 
 
@@ -765,10 +772,10 @@ async def update_group(request: HttpRequest, group_id: str):
 # URL: {{baseurl}}/messaging/showCreatedGroups/
 # Method: GET
 def _show_created_groups_sync(user):
-    """Sync helper: DB query for groups created by user."""
-    groups = GroupChats.objects.filter(created_by=user).order_by("-created_at").values()
+    """Sync helper: DB query for groups created by user. Uses only() to fetch only needed columns."""
+    groups = GroupChats.objects.filter(created_by=user).only("group_id", "participants", "group_name", "description", "created_at").order_by("-created_at")
     return [{"group_id": g.group_id, "total_participant": g.participants, "name": g.group_name,
-        "description": g.description, "created_at": gmt_to_ist_str(g.created_at, "%d/%m/%Y, %H:%M:%S")} for g in groups]
+        "description": g.description or "", "created_at": gmt_to_ist_str(g.created_at, "%d/%m/%Y, %H:%M:%S") if g.created_at else None} for g in groups]
 
 
 @login_required

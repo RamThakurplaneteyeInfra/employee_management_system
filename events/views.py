@@ -1,3 +1,15 @@
+"""
+Events API views. Base path: {{baseurl}}/eventsapi/
+- BookSlotViewSet: /bookslots/ (CRUD + today)
+- RoomViewSet: /rooms/
+- BookingStatusViewset: /status/
+- TourViewSet: /tours/
+- HolidayViewSet: /holidays/
+- EventViewSet: /events/
+- ReminderViewSet: /reminders/ (CRUD + today; private to creator)
+- MeetingViewSet: /meetingpush/ (CRUD + cron/delete-previous-days)
+- birthdaycounter: GET/POST /events/birthdaycounter/ and .../<username>/
+"""
 from django.utils import timezone
 from django.utils.crypto import constant_time_compare
 from django.conf import settings
@@ -29,13 +41,17 @@ from .serializers import *
 
 
 def holidays_ping(request):
-    """Test endpoint: GET /eventsapi/holidays-ping/ - plain Django, no DRF/auth/DB."""
+    """
+    GET /eventsapi/holidays-ping/ (if mounted). Test endpoint; no DRF, no auth, no DB.
+    Returns JSON: {"status": "ok", "message": "holidays route reachable"}.
+    """
     return JsonResponse({"status": "ok", "message": "holidays route reachable"})
 
 
 # ==================== BookSlotViewSet ====================
-# URL: {{baseurl}}/eventsapi/book-slots/  | CRUD
-# Queryset optimized: select_related for FKs, prefetch_related for slot members + profile to avoid N+1.
+# URL: {{baseurl}}/eventsapi/bookslots/  | List, Create, Retrieve, Update, Delete
+# Custom action: GET .../bookslots/today/ — slots for current date.
+# Queryset: select_related(room, status, created_by); prefetch slotmembers; filter by month/year via GET params.
 class BookSlotViewSet(ModelViewSet):
     queryset = (
         BookSlot.objects.all()
@@ -90,7 +106,8 @@ class BookSlotViewSet(ModelViewSet):
         return Response(serializer.data)
 
 # ==================== RoomViewSet ====================
-# URL: {{baseurl}}/eventsapi/rooms/  | CRUD
+# URL: {{baseurl}}/eventsapi/rooms/  | List, Create, Retrieve, Update, Delete
+# AllowAny; used for room dropdown and slot booking.
 class RoomViewSet(ModelViewSet):
     queryset = Room.objects.all()
     serializer_class = RoomSerializer
@@ -106,8 +123,8 @@ class BookingStatusViewset(ModelViewSet):
 
 
 # ==================== TourViewSet ====================
-# URL: {{baseurl}}/eventsapi/tours/  | CRUD
-# Optimized: prefetch tour members + profile, select_related creator profile to avoid N+1.
+# URL: {{baseurl}}/eventsapi/tours/  | List, Create, Retrieve, Update, Delete
+# IsAuthenticated. Queryset: prefetch tourmembers + profile; select_related creator.
 class TourViewSet(ModelViewSet):
     queryset = (
         Tour.objects.all()
@@ -126,8 +143,8 @@ class TourViewSet(ModelViewSet):
 
 
 # ==================== HolidayViewSet ====================
-# URL: {{baseurl}}/eventsapi/holidays/  | CRUD
-# Aligned with RoomViewSet (AllowAny) - other events endpoints work with this pattern
+# URL: {{baseurl}}/eventsapi/holidays/  | List, Create, Retrieve, Update, Delete
+# List/retrieve: IsAuthenticated. Create/update/delete: Admin, MD, or HR only.
 class HolidayViewSet(ModelViewSet):
     queryset = Holiday.objects.all().order_by("date")
     serializer_class = HolidaySerializer
@@ -148,7 +165,8 @@ class HolidayViewSet(ModelViewSet):
             return [AllowAny()]
 
 # ==================== EventViewSet ====================
-# URL: {{baseurl}}/eventsapi/events/  | CRUD
+# URL: {{baseurl}}/eventsapi/events/  | List, Create, Retrieve, Update, Delete
+# List/retrieve: IsAuthenticated. Create/update/delete: Admin, MD, or HR only.
 class EventViewSet(ModelViewSet):
     queryset = Event.objects.all()
     serializer_class = EventSerializer
@@ -170,10 +188,11 @@ class EventViewSet(ModelViewSet):
 
 
 # ==================== ReminderViewSet ====================
-# URL: {{baseurl}}/eventsapi/reminders/  | CRUD
+# URL: {{baseurl}}/eventsapi/reminders/  | List, Create, Retrieve, Update, Delete
+# Custom action: GET .../reminders/today/ — reminders for current date. Queryset filtered by creator (private).
 class ReminderViewSet(ModelViewSet):
     """
-    CRUD for Reminders.
+    CRUD for Reminders. Only the creator sees their own reminders (get_queryset filters by created_by).
     Request body:
       - POST/PUT: title (required), date (required), time (optional), note (optional)
     Response body:
@@ -236,8 +255,8 @@ class ReminderViewSet(ModelViewSet):
 
 
 # ==================== MeetingViewSet ====================
-# URL: {{baseurl}}/eventsapi/meetingpush/  | CRUD
-# Cron: {{baseurl}}/eventsapi/meetingpush/cron/delete-previous-days/  | GET (permissionless)
+# URL: {{baseurl}}/eventsapi/meetingpush/  | List, Create, Retrieve, Update, Delete
+# Custom action: GET .../meetingpush/cron/delete-previous-days/ (X-CRON-KEY header). List/retrieve: auth; create/update/delete: Admin/MD/HR.
 class MeetingViewSet(ModelViewSet):
     User = get_user_model()
     queryset = (
@@ -346,8 +365,9 @@ async def birthdaycounter(request: HttpRequest, username=None):
 @csrf_exempt
 def birthdaycounter_bulk(request: HttpRequest):
     """
-    POST with body {"users": ["username1", "username2", ...]}.
-    Increments birthday_counter on each user's Profile, then invalidates the GET birthday_counter cache for all users.
+    POST /eventsapi/events/birthdaycounter/ — body: {"users": ["username1", "username2", ...]}.
+    Increments Profile.birthday_counter for each valid username; invalidates birthday_counter cache.
+    Returns {"updated": [{"username", "birthday_counter"}], "invalidated_cache": true} or 400 on error.
     """
     if request.method != "POST":
         return JsonResponse({"error": "Method not allowed"}, status=status.HTTP_405_METHOD_NOT_ALLOWED)

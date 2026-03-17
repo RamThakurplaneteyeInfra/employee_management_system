@@ -1,10 +1,14 @@
+"""
+Admin panel models: AssetType, Asset, BillCategory, Bill, ExpenseTracker, Vendor.
+API: {{baseurl}}/adminapi/ (asset-types, assets, billCategory, bills, expenses, vendors, dashboard).
+"""
 from django.db import models
 from task_management.models import TaskStatus
-# from task_management.filters import get_default_task_status
+
 
 # 1️⃣ AssetType table (Hardware, Software)
 class AssetType(models.Model):
-    """Asset category (e.g. Hardware, Software)."""
+    """Asset category (e.g. Hardware, Software); used by Asset."""
     name = models.CharField(max_length=100,unique=True)
     created_at = models.DateTimeField(auto_now_add=True)
     

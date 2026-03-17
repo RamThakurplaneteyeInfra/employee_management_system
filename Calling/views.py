@@ -1,3 +1,10 @@
+"""
+Calling API views. Base path: {{baseurl}}/messaging/ (same prefix as Messaging).
+- 1:1: callableUsers, initiateCall, acceptCall, declineCall, endCall, screenShare, stopScreenShare.
+- 1:1 list/state: pendingCalls, activeCalls, missedCallsCount, resetMissedCallsCount, endAllMyCalls.
+- Group: initiateGroupCall, joinGroupCall, leaveGroupCall, endGroupCall, activeGroupCalls.
+- GET callHistory — combined individual + group call history. All require login.
+"""
 from django.shortcuts import render
 from django.db.models import Q
 from django.utils import timezone
@@ -9,7 +16,7 @@ from datetime import timedelta
 from accounts.models import User, Profile
 from ems.verify_methods import *
 from ems.utils import gmt_to_ist_str
-from .models import Call, GroupCall, GroupCallParticipant,MissedCallCount
+from .models import Call, GroupCall, GroupCallParticipant, MissedCallCount
 
 # ==================== Voice/Video Call APIs ====================
 # Call lifecycle: pending -> (accepted | declined | ended)
@@ -568,7 +575,8 @@ async def stop_screen_share(request: HttpRequest):
 
 
 def _get_pending_calls_sync(user):
-    calls = Call.objects.filter(receiver=user, status=Call.PENDING).order_by("-timestamp")
+    """Pending calls for user. Optimized: select_related sender, receiver to avoid N+1."""
+    calls = Call.objects.filter(receiver=user, status=Call.PENDING).select_related("sender", "receiver").order_by("-timestamp")
     return [
         {
             "call_id": c.id,
@@ -585,10 +593,11 @@ def _get_pending_calls_sync(user):
 
 def _get_active_calls_sync(user):
     """Return all active calls (pending or accepted) where user is sender or receiver.
-    Use call_id from response with POST /messaging/endCall/ (or /calling/endCall/ if mounted there) to clear stuck calls and fix 409."""
+    Optimized: select_related sender, receiver to avoid N+1."""
     calls = (
         Call.objects.filter(Q(sender=user) | Q(receiver=user))
         .filter(status__in=[Call.PENDING, Call.ACCEPTED])
+        .select_related("sender", "receiver")
         .order_by("-timestamp")
     )
     return [
@@ -1048,7 +1057,7 @@ async def end_group_call(request: HttpRequest):
 
 
 def _get_active_group_calls_sync(user):
-    """Return active group calls where user is creator or participant (invited or joined)."""
+    """Return active group calls where user is creator or participant. Uses single query + in-memory grouping to avoid N+1."""
     q = Q(group_call__status=GroupCall.ACTIVE) & (
         Q(group_call__creator=user) | Q(user=user)
     )
@@ -1057,6 +1066,10 @@ def _get_active_group_calls_sync(user):
         .select_related("group_call", "group_call__creator", "user")
         .order_by("-group_call__created_at")
     )
+    from collections import defaultdict
+    by_gc = defaultdict(list)
+    for p in participants:
+        by_gc[p.group_call_id].append(p)
     seen = set()
     out = []
     for p in participants:
@@ -1064,18 +1077,9 @@ def _get_active_group_calls_sync(user):
         if gc.id in seen:
             continue
         seen.add(gc.id)
-        joined = list(
-            GroupCallParticipant.objects.filter(
-                group_call=gc,
-                status=GroupCallParticipant.JOINED,
-            ).values_list("user__username", flat=True),
-        )
-        invited = list(
-            GroupCallParticipant.objects.filter(
-                group_call=gc,
-                status=GroupCallParticipant.INVITED,
-            ).values_list("user__username", flat=True),
-        )
+        parts = by_gc[gc.id]
+        joined = [p.user.username for p in parts if p.status == GroupCallParticipant.JOINED]
+        invited = [p.user.username for p in parts if p.status == GroupCallParticipant.INVITED]
         out.append({
             "call_id": gc.id,
             "creator": gc.creator.username,
@@ -1147,17 +1151,21 @@ def _display_name_map(usernames):
 
 
 def _get_call_history_sync(user):
-    """Fetch all calls (Call + GroupCall) for user, sort by timestamp desc, add initiator and initiator_name."""
+    """Fetch all calls (Call + GroupCall) for user, sort by timestamp desc. Batched display-name lookups to avoid N+1."""
     history = []
 
     # ---- Individual calls (Call) ----
-    calls = Call.objects.filter(Q(sender=user) | Q(receiver=user)).select_related("sender", "receiver")
+    calls = list(Call.objects.filter(Q(sender=user) | Q(receiver=user)).select_related("sender", "receiver"))
+    all_individual_usernames = set()
+    for c in calls:
+        all_individual_usernames.add(c.sender.username)
+        all_individual_usernames.add(c.receiver.username)
+    name_map_individual = _display_name_map(list(all_individual_usernames)) if all_individual_usernames else {}
     for c in calls:
         initiator_user = c.sender
         initiator = user == c.sender
-        name_map = _display_name_map([c.sender.username, c.receiver.username])
-        initiator_name = name_map.get(initiator_user.username, initiator_user.username)
-        participant_names = [name_map.get(c.sender.username, c.sender.username), name_map.get(c.receiver.username, c.receiver.username)]
+        initiator_name = name_map_individual.get(initiator_user.username, initiator_user.username)
+        participant_names = [name_map_individual.get(c.sender.username, c.sender.username), name_map_individual.get(c.receiver.username, c.receiver.username)]
         history.append({
             "sort_at": c.timestamp,
             "call_kind": "individual",
@@ -1174,20 +1182,22 @@ def _get_call_history_sync(user):
         })
 
     # ---- Group calls (GroupCall) ----
-    creator_calls = GroupCall.objects.filter(creator=user).prefetch_related("participants__user")
-    group_participation = GroupCallParticipant.objects.filter(user=user).values_list("group_call_id", flat=True)
-    group_call_ids = set(creator_calls.values_list("id", flat=True)) | set(group_participation)
-    group_calls = GroupCall.objects.filter(id__in=group_call_ids).select_related("creator").prefetch_related("participants__user")
-
+    group_participation = set(GroupCallParticipant.objects.filter(user=user).values_list("group_call_id", flat=True))
+    creator_ids = set(GroupCall.objects.filter(creator=user).values_list("id", flat=True))
+    group_call_ids = creator_ids | group_participation
+    group_calls = list(GroupCall.objects.filter(id__in=group_call_ids).select_related("creator").prefetch_related("participants__user")) if group_call_ids else []
+    all_group_usernames = set()
+    for gc in group_calls:
+        all_group_usernames.add(gc.creator.username)
+        for p in gc.participants.all():
+            all_group_usernames.add(p.user.username)
+    name_map_group = _display_name_map(list(all_group_usernames)) if all_group_usernames else {}
     for gc in group_calls:
         initiator_user = gc.creator
         initiator = user == gc.creator
-        participant_usernames = list(
-            GroupCallParticipant.objects.filter(group_call=gc).values_list("user__username", flat=True)
-        )
-        name_map = _display_name_map(participant_usernames) if participant_usernames else {}
-        initiator_name = name_map.get(gc.creator.username, gc.creator.username)
-        participant_names = [name_map.get(u, u) for u in participant_usernames]
+        participant_usernames = [p.user.username for p in gc.participants.all()]
+        initiator_name = name_map_group.get(gc.creator.username, gc.creator.username)
+        participant_names = [name_map_group.get(u, u) for u in participant_usernames]
         history.append({
             "sort_at": gc.created_at,
             "call_kind": "group",

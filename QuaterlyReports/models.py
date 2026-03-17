@@ -1,12 +1,15 @@
+# Quaterly Reports models: quarters, monthly heads, user entries, functions/goals, actionable entries, share chain.
+# API: {{baseurl}}/getMonthlySchedule/, addDayEntries/, ActionableEntries/, etc. (mounted at root).
 # from django.db import models
 from accounts.models import *
 from ems.verify_methods import *
 from task_management.models import TaskStatus
 from task_management.filters import get_taskStatus_object
-from django.core.validators import MinValueValidator,MaxValueValidator
+from django.core.validators import MinValueValidator, MaxValueValidator
+
 
 class Quaters(models.Model):
-    """Quarter definition: label and start/end month range."""
+    """Quarter definition: label and start/end month range; used in financial year logic."""
     quater=models.CharField(max_length=20,null=False,primary_key=True)
     start_month=models.IntegerField(null=True)
     end_month=models.IntegerField(null=True)

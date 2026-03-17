@@ -1,3 +1,8 @@
+"""
+Project API views. Base path: {{baseurl}}/projectapi/
+- GET /products/ — list all products (id, name, description). Auth required.
+- POST /products/create/ — create a product (name required; description optional). Auth required.
+"""
 from django.http import JsonResponse
 from django.views.decorators.http import require_GET, require_POST
 from asgiref.sync import sync_to_async

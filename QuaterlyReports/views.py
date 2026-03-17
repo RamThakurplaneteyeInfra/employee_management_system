@@ -1,3 +1,10 @@
+"""
+Quaterly Reports API views. Base path: {{baseurl}}/ (mounted at root).
+- getMonthlySchedule (GET), addDayEntries (POST), getUserEntries (GET), changeStatus (PATCH), deleteEntry (DELETE).
+- addMeetingHeadSubhead (POST), get_functions_and_actionable_goals (GET).
+- ActionableEntries (GET/POST), ActionableEntriesByID (GET/PUT/PATCH/DELETE), .../share/ (POST).
+- ActionableEntriesCoAuthor, ActionableEntriesSharedWith (list + detail). EntryPermission applied.
+"""
 from django.http import Http404
 from ems.RequiredImports import (
     sync_to_async,
@@ -132,7 +139,7 @@ async def get_entries(request: HttpRequest):
             return JsonResponse({"message": f"{e}"}, status=status.HTTP_400_BAD_REQUEST)
     except PermissionDenied as e:
             print(e)
-            return JsonResponse({"message":"you are not authorised to access other users records"},status=status.HTTP_403_FORBIDDEN)
+            return JsonResponse({"message":"you are not authorised to access other users records"},status=status.HTTP_400_BAD_REQUEST)
     except Exception as e:
             print(e)
             return JsonResponse({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -189,7 +196,7 @@ async def delete_entry(request: HttpRequest, user_entry_id: int):
     try:
         await sync_to_async(_delete_entry_sync)(user_entry_id, request.user)
     except PermissionDenied:
-        return JsonResponse({"message": "you are not authorised to access other users records"}, status=status.HTTP_403_FORBIDDEN)
+        return JsonResponse({"message": "you are not authorised to access other users records"}, status=status.HTTP_400_BAD_REQUEST)
     except Http404:
         return JsonResponse({"message": "Entry not found"}, status=status.HTTP_404_NOT_FOUND)
     return JsonResponse({"message": "entry deleted successfully"}, status=status.HTTP_200_OK)
@@ -285,11 +292,22 @@ async def add_meeting_head_subhead(request: HttpRequest):
 # URL: {{baseurl}}/get_functions_and_actionable_goals/?function_name=<name>
 # Method: GET
 def _get_functions_goals_sync(function_name):
-    function_obj = Functions.objects.prefetch_related('functionsgoals_set__actionablegoals_set').get(function__iexact=function_name)
+    """Fetch function with goals and actionable goals. Prefetch with select_related(grp) to avoid N+1 on a_goal.grp.grp."""
+    actionables_prefetch = Prefetch(
+        "actionablegoals_set",
+        queryset=ActionableGoals.objects.select_related("grp"),
+    )
+    function_obj = (
+        Functions.objects
+        .prefetch_related(Prefetch("functionsgoals_set", queryset=FunctionsGoals.objects.prefetch_related(actionables_prefetch)))
+        .get(function__iexact=function_name)
+    )
     functional_goals_list = []
     for f_goal in function_obj.functionsgoals_set.all():
-        actionable_goals = [{"actionable_id": a_goal.id, "purpose": a_goal.purpose, "grp_id": a_goal.grp.grp}
-            for a_goal in f_goal.actionablegoals_set.all()]
+        actionable_goals = [
+            {"actionable_id": a_goal.id, "purpose": a_goal.purpose, "grp_id": a_goal.grp.grp if a_goal.grp else None}
+            for a_goal in f_goal.actionablegoals_set.all()
+        ]
         functional_goals_list.append({"functional_id": f_goal.id, "main_goal": f_goal.Maingoal, "actionable_goals": actionable_goals})
     return {"function": function_obj.function, "functional_goals": functional_goals_list}
 
@@ -397,7 +415,7 @@ def entry_list_create(request: HttpRequest):
             return _create_entry(request=request)
 
     except PermissionDenied as e:
-        return Response({"message": str(e)}, status=status.HTTP_403_FORBIDDEN)
+        return Response({"message": str(e)}, status=status.HTTP_400_BAD_REQUEST)
     except DatabaseError as e:
         return JsonResponse({"message": f"{e}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     except Exception as e:
@@ -457,7 +475,7 @@ def _entry_detail_ops(request, id):
                     last_has_completed = _last_share_has_completed(entry)
                     # Only the last user (by shared_time) can set COMPLETED first; after that, any share-chain user can set their own to COMPLETED.
                     if not last_has_completed and last and last.id != my_share.id:
-                        return Response({"error": "Only the last person in the share chain can set status to Completed first. After that, others may mark their status as Completed."}, status=status.HTTP_403_FORBIDDEN)
+                        return Response({"error": "Only the last person in the share chain can set status to Completed first. After that, others may mark their status as Completed."}, status=status.HTTP_304_NOT_MODIFIED)
                 try:
                     st = TaskStatus.objects.get(status_name__iexact=str(new_status_name).strip())
                     share_data["individual_status"] = st
@@ -486,7 +504,7 @@ def _entry_detail_ops(request, id):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
     elif request.method == "DELETE":
         if entry.Creator_id != request.user.username:
-            return Response({"error": "Only creator can delete this entry"}, status=status.HTTP_403_FORBIDDEN)
+            return Response({"error": "Only creator can delete this entry"}, status=status.HTTP_400_BAD_REQUEST)
         entry.delete()
         return Response({"message": "entry deleted successfully"}, status=status.HTTP_202_ACCEPTED)
 
@@ -515,7 +533,7 @@ def _share_further_sync(entry_id, request_user, share_with_username, note):
         return {"error": "No further sharing when entry final status is Completed", "status_code": status.HTTP_400_BAD_REQUEST}
     my_share = entry.share_chain.filter(shared_with=request_user).first()
     if not my_share:
-        return {"error": "Only someone in the share chain can pass the entry further", "status_code": status.HTTP_403_FORBIDDEN}
+        return {"error": "Only someone in the share chain can pass the entry further", "status_code": status.HTTP_400_BAD_REQUEST}
     try:
         new_user = User.objects.get(username=share_with_username)
     except User.DoesNotExist:
@@ -649,7 +667,7 @@ def shared_with_entry_detail(request, id):
         if not entry.share_chain.filter(shared_with=request.user).exists():
             return Response({"error": "Entry not found or you are not in the share chain"}, status=status.HTTP_404_NOT_FOUND)
         if not entry.approved_by_coauthor:
-            return Response({"error": "Entry not visible until co-author approves"}, status=status.HTTP_403_FORBIDDEN)
+            return Response({"error": "Entry not visible until co-author approves"}, status=status.HTTP_400_BAD_REQUEST)
         if request.method == "GET":
             return Response(FunctionsEntriesSerializer(entry).data)
         my_share = entry.share_chain.get(shared_with=request.user)
@@ -664,7 +682,7 @@ def shared_with_entry_detail(request, id):
                 last_has_completed = _last_share_has_completed(entry)
                 # Only the last user (by shared_time) can set COMPLETED first; after that, any share-chain user can set their own to COMPLETED.
                 if not last_has_completed and last and last.id != my_share.id:
-                    return Response({"error": "Only the last person in the share chain can set status to Completed first. After that, others may mark their status as Completed."}, status=status.HTTP_403_FORBIDDEN)
+                    return Response({"error": "Only the last person in the share chain can set status to Completed first. After that, others may mark their status as Completed."}, status=status.HTTP_400_BAD_REQUEST)
             try:
                 st = TaskStatus.objects.get(status_name__iexact=new_status_name)
                 my_share.individual_status = st

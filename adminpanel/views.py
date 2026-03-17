@@ -1,3 +1,8 @@
+"""
+Admin panel API views. Base path: {{baseurl}}/adminapi/
+- ViewSets (CRUD): asset-types, assets, billCategory, bills, expenses, vendors. AdminPermission.
+- GET /dashboard/ — summary counts/amounts for assets, bills, expenses, vendors.
+"""
 from rest_framework import viewsets
 from rest_framework.decorators import api_view
 from django.db.models import Count, Sum
@@ -6,8 +11,6 @@ from .permissions import AdminPermission
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from .models import AssetType, Asset, BillCategory, Bill, ExpenseTracker, Vendor
-# # # # # #  baseurl="http://localhost:8000"  # # # # # # # # # # # #
-# Base path: {{baseurl}}/adminapi/
 
 from .serializers import (
     AssetTypeSerializer, 
@@ -23,7 +26,7 @@ from .serializers import (
 
 
 # ==================== AssetTypeViewSet ====================
-# URL: {{baseurl}}/adminapi/asset-types/  | CRUD
+# URL: {{baseurl}}/adminapi/asset-types/  | List, Create, Retrieve, Update, Delete
 class AssetTypeViewSet(viewsets.ModelViewSet):
     queryset = AssetType.objects.all()
     serializer_class = AssetTypeSerializer

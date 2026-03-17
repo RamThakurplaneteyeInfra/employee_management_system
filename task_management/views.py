@@ -1,3 +1,14 @@
+"""
+Task management API views. Base path: {{baseurl}}/tasks/
+- home (GET), createTask (POST), updateTask (PATCH), changeStatus (PATCH), deleteTask (DELETE).
+- viewTasks, viewAssignedTasks (GET; optional ?type=), Taskcount/<username> (GET).
+- Filters: getNamesfromRoleandDesignation, getTaskTypes, getTaskStatuses (GET).
+- Messaging: sendMessage (POST), getMessage/<task_id> (GET), markTaskMessagesSeen/<task_id> (POST).
+"""
+from django.db.models import Prefetch
+from django.shortcuts import get_object_or_404
+from django.http import Http404
+
 from ems.RequiredImports import sync_to_async
 from accounts.filters import _get_user_role_sync, _get_users_Name_sync
 from ems.utils import gmt_to_ist_date_str, gmt_to_ist_time_str
@@ -17,11 +28,10 @@ from ems.verify_methods import *
 
 
 # ==================== home ====================
-# Tasks home page.
-# URL: {{baseurl}}/tasks/
-# Method: GET
+# URL: {{baseurl}}/tasks/  | GET
 @login_required
 async def home(request: HttpRequest):
+    """GET /tasks/ — tasks landing; returns JSON message. Auth required."""
     verify_method=verifyGet(request)
     if verify_method:
         return verify_method
@@ -224,6 +234,19 @@ async def post_task_message(request: HttpRequest):
         return JsonResponse(str(e), status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+def _get_task_with_assignees_sync(task_id: int):
+    """Fetch task with assignees prefetched (select_related assigned_to) to avoid N+1 on permission check."""
+    qs = (
+        Task.objects.filter(task_id=task_id)
+        .select_related("created_by")
+        .prefetch_related(Prefetch("tasks", queryset=TaskAssignies.objects.select_related("assigned_to")))
+    )
+    task = qs.first()
+    if task is None:
+        raise Http404("Task not found")
+    return task
+
+
 # ==================== mark_task_messages_seen ====================
 # Set unseen_count to 0 for the current user when they view task messages.
 # URL: {{baseurl}}/tasks/markTaskMessagesSeen/<task_id>/
@@ -235,8 +258,8 @@ async def mark_task_messages_seen(request: HttpRequest, task_id: int):
         return verifyPost(request)
     try:
         def _mark_seen(user):
-            task = get_object_or_404(Task, task_id=task_id)
-            assignees = TaskAssignies.objects.filter(task=task)
+            task = _get_task_with_assignees_sync(task_id)
+            assignees = task.tasks.all()
             is_creator = user == task.created_by
             is_assignee = any(i.assigned_to == user for i in assignees)
             if not (is_creator or is_assignee):
@@ -247,6 +270,8 @@ async def mark_task_messages_seen(request: HttpRequest, task_id: int):
         return JsonResponse({"status": "ok", "unseen_count": 0}, status=status.HTTP_200_OK)
     except PermissionDenied:
         return JsonResponse({"message": "You are not authorised to access this task"}, status=status.HTTP_403_FORBIDDEN)
+    except Http404:
+        return JsonResponse({"message": "Task not found"}, status=status.HTTP_404_NOT_FOUND)
     except Exception as e:
         return JsonResponse({"message": str(e)}, status=status.HTTP_404_NOT_FOUND)
 
@@ -261,8 +286,8 @@ async def get_task_messages(request: HttpRequest, task_id: int):
         return verifyGet(request)
     try:
         def _fetch(user):
-            task = get_object_or_404(Task, task_id=task_id)
-            assignees = TaskAssignies.objects.filter(task=task)
+            task = _get_task_with_assignees_sync(task_id)
+            assignees = task.tasks.all()
             is_creator = user == task.created_by
             is_assignee = any(i.assigned_to == user for i in assignees)
             if not (is_creator or is_assignee):
@@ -270,7 +295,6 @@ async def get_task_messages(request: HttpRequest, task_id: int):
             # Mark task messages as seen for this assignee (reset unseen_count)
             TaskAssignies.objects.filter(task=task, assigned_to=user).update(unseen_count=0)
             messages = TaskMessage.objects.filter(task=task).select_related("sender__accounts_profile", "task").order_by("-created_at")
-            # TaskMessage model has no 'seen' field (commented out in models.py); omit update(seen=True) to avoid 500
             def _name(s):
                 p = getattr(s, "accounts_profile", None)
                 return getattr(p, "Name", None) if p else _get_users_Name_sync(s)
@@ -281,7 +305,6 @@ async def get_task_messages(request: HttpRequest, task_id: int):
                     "message": m.message,
                     "date": gmt_to_ist_date_str(m.created_at),
                     "time": gmt_to_ist_time_str(m.created_at),
-                    # "seen": m.seen,
                 }
                 for m in messages
             ]
@@ -289,6 +312,8 @@ async def get_task_messages(request: HttpRequest, task_id: int):
         return JsonResponse(data, safe=False)
     except PermissionDenied:
         return JsonResponse({"message": "you are not authorised to accessed this task conversation"}, status=status.HTTP_403_FORBIDDEN)
+    except Http404:
+        return JsonResponse({"message": "Task not found"}, status=status.HTTP_404_NOT_FOUND)
 
 
 # ==================== get_task_count_from_username ====================

@@ -1,12 +1,14 @@
+"""
+Project app models: Product (used by clients, events, QuaterlyReports), Project, ProjectParticipant.
+Product API: {{baseurl}}/projectapi/products/ and .../products/create/.
+"""
 from django.db import models
 from accounts.models import User
 from task_management.models import TaskStatus
 
-# Create your models here.
-
 
 class Product(models.Model):
-    """Product: unique name and description. Same schema pattern as Project (name, description, timestamps)."""
+    """Product: unique name and description. Referenced by clients, events meeting push, QuaterlyReports."""
     name = models.CharField(max_length=255, unique=True)
     description = models.TextField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
