@@ -1,158 +1,240 @@
-# Clients APIs – Testing reference
+# Clients API – Testing reference
 
-Base prefix: `{{baseurl}}/clients/` (or whichever prefix you mount `Clients/urls.py` under).
-
-Use this file to document all executable APIs in the `Clients` app (client profiles, stages, conversations).
-
----
-
-## 1. Client stages
-
-Endpoints to list or manage `Current_client_stage` entries.
-
-> Add URLs, methods, and sample responses for stage listing and any admin operations.
+**Base prefix:** `{{baseurl}}/clientsapi/`  
+**Auth:** All endpoints require a logged-in user (session/cookie).  
+**Access:** Profile and conversation endpoints are restricted to the profile **creator** or **members** only.
 
 ---
 
-## 2. Client profiles
+## 1. Products
 
-Endpoints for `ClientProfile`:
-
-- Create / update / delete client profiles.
-- List and filter by `status`, `Product`, `created_by`, etc.
-
-> Document base URLs, request bodies, and typical responses.
+**url:** `{{baseurl}}/clientsapi/products/`  
+**method:** GET  
+**body:** None  
+**sample_response:**
+```json
+[
+  { "id": 1, "name": "Product A" },
+  { "id": 2, "name": "Product B" }
+]
+```
+**notes:** Returns all products (id, name) for dropdowns. No query params.
 
 ---
 
-## 3. Client conversations (notes + interaction channels)
+## 2. Employees
 
-Endpoints for `ClientConversation` and `ClientInteractionChannels`:
+**url:** `{{baseurl}}/clientsapi/employees/`  
+**method:** GET  
+**body:** None  
+**sample_response:**
+```json
+[
+  { "id": 1, "username": "user1" },
+  { "id": 2, "username": "user2" }
+]
+```
+**notes:** All users (id, username) for employee checkboxes.
 
-- Add conversation notes for a client, optionally tagged with an interaction **medium**.
-- List conversations for a given client, including the selected **medium**.
+---
 
-### 3.1 Interaction channels (seeded master data)
+## 3. Stages
 
-The following interaction channels are pre-seeded in `ClientInteractionChannels.medium`:
+**url:** `{{baseurl}}/clientsapi/stages/`  
+**method:** GET  
+**body:** None  
+**sample_response:**
+```json
+[
+  { "id": 1, "name": "Leads" },
+  { "id": 2, "name": "Qualified" }
+]
+```
+**notes:** Pipeline stages for status dropdown.
 
-- `Calls`
-- `Trial`
-- `Demand`
-- `Pitch`
+---
 
-You don’t need an explicit API to create them; they are inserted by migration. The client should **treat these as a fixed set of allowed values** for now.
+## 4. Profiles – List and create
 
-### 3.2 List conversations for a client
+**url:** `{{baseurl}}/clientsapi/profiles/`  
+**method:** GET  
+**body:** None  
+**sample_response:**
+```json
+[
+  {
+    "id": 1,
+    "company_name": "Acme Corp",
+    "client_name": "John Doe",
+    "client_contact": "",
+    "representative_contact_number": "",
+    "representative_name": "",
+    "motive": "",
+    "gst_number": "",
+    "status_id": 1,
+    "status_name": "Leads",
+    "product_id": 1,
+    "product_name": "Product A",
+    "created_by": "admin",
+    "members": ["Full Name 1"],
+    "notes": [],
+    "created_at": "16/03/2026 12:00:00",
+    "updated_at": "16/03/2026 12:00:00"
+  }
+]
+```
+**notes:** Returns only profiles where the current user is **creator** or **member**. No query params.
 
-- **URL:** `{{baseurl}}/clients/profiles/<profile_id>/conversations/`
-- **Method:** `GET`
+---
 
-**Example response:**
+**url:** `{{baseurl}}/clientsapi/profiles/`  
+**method:** POST  
+**body:**
+```json
+{
+  "company_name": "Acme Corp",
+  "client_name": "John Doe",
+  "client_contact": "",
+  "representative_contact_number": "",
+  "representative_name": "",
+  "motive": "Sales lead",
+  "gst_number": "",
+  "status_id": 1,
+  "product_name": "Product A",
+  "members": ["user1", "user2"]
+}
+```
+**sample_response:**
+```json
+{ "id": 1, "message": "Client lead created" }
+```
+**notes:** `company_name` and `client_name` are required. `members` is optional array of usernames. Created by = logged-in user. 201 on success.
 
+---
+
+## 5. Profile – Detail, update, delete
+
+**url:** `{{baseurl}}/clientsapi/profiles/<profile_id>/`  
+**method:** GET  
+**body:** None  
+**sample_response:** Same shape as one item in the list (see §4).  
+**notes:** 403 if user is not creator or member. 404 if profile not found.
+
+---
+
+**url:** `{{baseurl}}/clientsapi/profiles/<profile_id>/`  
+**method:** PUT or PATCH  
+**body:**
+```json
+{
+  "company_name": "Acme Corp Updated",
+  "client_name": "John Doe",
+  "representative_name": "Jane",
+  "members": ["user1"]
+}
+```
+**sample_response:**
+```json
+{ "message": "Client lead updated" }
+```
+**notes:** 403 if not creator/member. Partial fields allowed for PATCH.
+
+---
+
+**url:** `{{baseurl}}/clientsapi/profiles/<profile_id>/`  
+**method:** DELETE  
+**body:** None  
+**sample_response:**
+```json
+{ "message": "Client lead deleted" }
+```
+**notes:** 403 if not creator/member. 404 if profile not found.
+
+---
+
+## 6. Profile members
+
+**url:** `{{baseurl}}/clientsapi/profiles/<profile_id>/members/`  
+**method:** GET  
+**body:** None  
+**sample_response:**
+```json
+["Full Name 1", "Full Name 2"]
+```
+**notes:** 403 if not creator/member. Returns display names of members.
+
+---
+
+## 7. Conversations – List and create
+
+**url:** `{{baseurl}}/clientsapi/profiles/<profile_id>/conversations/`  
+**method:** GET  
+**body:** None  
+**sample_response:**
 ```json
 [
   {
     "id": 101,
-    "note": "Had an introductory call with the client.",
+    "note": "Had an introductory call.",
     "created_by": "john_doe",
     "created_at": "09/03/2026 15:30:00",
     "medium": "Calls"
-  },
-  {
-    "id": 102,
-    "note": "Shared trial account details.",
-    "created_by": "john_doe",
-    "created_at": "09/03/2026 16:00:00",
-    "medium": "Trial"
   }
 ]
 ```
+**notes:** 403 if not creator/member. `medium` is full name (Calls, Trial, Demand, Pitch) or null.
 
-Notes:
+---
 
-- `medium` is always returned as the **full name** of the interaction channel (e.g. `"Calls"`, `"Trial"`, `"Demand"`, `"Pitch"`), or `null` if no medium was set.
-
-### 3.3 Add conversations for a client
-
-- **URL:** `{{baseurl}}/clients/profiles/<profile_id>/conversations/`
-- **Method:** `POST`
-
-You can either send a **single note** or an array of **multiple notes**. In both cases, you can pass an optional `medium` field with the **full channel name**.
-
-#### 3.3.1 Single note
-
-**Request body:**
-
+**url:** `{{baseurl}}/clientsapi/profiles/<profile_id>/conversations/`  
+**method:** POST  
+**body (single note):**
 ```json
 {
-  "note": "Explained pricing and discount structure.",
+  "note": "Explained pricing.",
   "medium": "Pitch"
 }
 ```
-
-- `note` (string, required): Conversation text.
-- `medium` (string, optional): One of `"Calls"`, `"Trial"`, `"Demand"`, `"Pitch"`. Case-insensitive match.
-
-**Example success response:**
-
+**body (multiple notes):**
 ```json
 {
-  "id": 123,
-  "message": "Note added"
-}
-```
-
-If `medium` is provided but does not match any existing channel, the API returns:
-
-```json
-{
-  "error": "Invalid medium"
-}
-```
-
-#### 3.3.2 Multiple notes in one request
-
-**Request body:**
-
-```json
-{
-  "notes": [
-    "Initial discovery call done.",
-    "Shared trial link with the client."
-  ],
+  "notes": ["Note 1", "Note 2"],
   "medium": "Trial"
 }
 ```
-
-- `notes` (array of strings, required): At least one non-empty note.
-- `medium` (string, optional): Same rules as above (full name, case-insensitive).
-
-**Example success response:**
-
+**sample_response (single):**
 ```json
-{
-  "ids": [201, 202],
-  "message": "2 note(s) added"
-}
+{ "id": 123, "message": "Note added" }
 ```
-
-If `notes` is empty, the API returns:
-
+**sample_response (multiple):**
 ```json
-{
-  "error": "notes array cannot be empty"
-}
+{ "ids": [201, 202], "message": "2 note(s) added" }
 ```
+**notes:** `note` or `notes` required. `medium` optional: one of Calls, Trial, Demand, Pitch (case-insensitive). Invalid medium returns 400. 403 if not creator/member. POSTing with medium updates SalesStatistics for client product and today.
 
-If `medium` is invalid, you get the same `"Invalid medium"` error as for the single-note POST.
+---
 
-### 3.4 Update / delete a conversation
+## 8. Conversation – Update and delete
 
-- **URL:** `{{baseurl}}/clients/profiles/<profile_id>/conversations/<note_id>/`
-- **Methods:**
-  - `PATCH` – update `note`
-  - `DELETE` – delete conversation
+**url:** `{{baseurl}}/clientsapi/profiles/<profile_id>/conversations/<note_id>/`  
+**method:** PATCH  
+**body:**
+```json
+{ "note": "Updated note text." }
+```
+**sample_response:**
+```json
+{ "message": "Note updated" }
+```
+**notes:** 403 if not creator/member. Only `note` is updatable.
 
-Currently only the `note` text is updatable via `PATCH`; `medium` is not exposed for update.
+---
 
+**url:** `{{baseurl}}/clientsapi/profiles/<profile_id>/conversations/<note_id>/`  
+**method:** DELETE  
+**body:** None  
+**sample_response:**
+```json
+{ "message": "Note deleted" }
+```
+**notes:** 403 if not creator/member. 404 if note not found.

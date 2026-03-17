@@ -186,11 +186,12 @@ class ReminderViewSet(ModelViewSet):
 
     def get_queryset(self):
         """
-        Optionally filter reminders by month (query param ?month=1-12).
+        Only reminders created by the logged-in user (private to creator).
+        Optionally filter by month (query param ?month=1-12).
         - If month is provided: filter by that month in the current year.
         - If month is not provided: filter by the current month in the current year.
         """
-        qs = super().get_queryset()
+        qs = super().get_queryset().filter(created_by=self.request.user)
         params = self.request.GET
         today = date.today()
         month_param = params.get("month")
@@ -221,10 +222,15 @@ class ReminderViewSet(ModelViewSet):
     def today(self, request):
         """
         GET {{baseurl}}/eventsapi/reminders/today/ - reminders for the current day (today's date).
-        Ignores any month filter and always uses today's date.
+        Only returns reminders created by the logged-in user.
         """
         today = date.today()
-        qs = Reminder.objects.all().select_related("created_by__accounts_profile").filter(date=today).order_by("-created_at")
+        qs = (
+            Reminder.objects.filter(created_by=request.user)
+            .select_related("created_by__accounts_profile")
+            .filter(date=today)
+            .order_by("-created_at")
+        )
         serializer = self.get_serializer(qs, many=True)
         return Response(serializer.data)
 

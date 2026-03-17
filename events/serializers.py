@@ -31,11 +31,13 @@ class BookSlotSerializer(serializers.ModelSerializer):
     created_at = serializers.SerializerMethodField()
     member_details = serializers.SerializerMethodField()
     creater_details = serializers.SerializerMethodField()
+    notes = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+
     class Meta:
         model = BookSlot
         fields = [
             'id', 'meeting_title', 'date', 'start_time', 'end_time', 
-            'room', 'description', 'meeting_type', 'status',"members",
+            'room', 'description', 'meeting_type', 'status', 'notes', "members",
             'created_at','member_details',"creater_details","created_by"
         ]
 
@@ -129,6 +131,18 @@ class BookSlotSerializer(serializers.ModelSerializer):
             if SlotMembers.objects.filter(slot__in=overlapping, member=member).exists():
                 raise serializers.ValidationError(
                     {"members": f"User {member.username} already has a slot in this time frame."}
+                )
+
+        # When changing status to "Done", notes are required (from payload and/or slot object).
+        new_status = attrs.get("status")
+        if new_status is not None and str(getattr(new_status, "status_name", "") or "").strip().lower() == "done":
+            # Accept notes from payload or, on update, from the existing slot object
+            notes_from_payload = attrs.get("notes")
+            notes_from_slot = getattr(self.instance, "notes", None) if self.instance else None
+            notes_value = notes_from_payload if (notes_from_payload is not None and (not isinstance(notes_from_payload, str) or notes_from_payload.strip())) else notes_from_slot
+            if notes_value is None or (isinstance(notes_value, str) and not notes_value.strip()):
+                raise serializers.ValidationError(
+                    {"notes": "Notes cannot be null while changing status to 'Done'."}
                 )
 
         return attrs

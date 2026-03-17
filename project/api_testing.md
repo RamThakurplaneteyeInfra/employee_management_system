@@ -1,16 +1,37 @@
-# Project APIs – Testing reference
+# Project API – Testing reference
 
-Base prefix: `{{baseurl}}/project/` (adjust to how `project/urls.py` is included).
-
-Use this file to document all executable APIs in the `project` app (products, projects, etc.).
+**Base prefix:** `{{baseurl}}/projectapi/`  
+**Auth:** All endpoints require a logged-in user.  
+**Content-Type:** `application/json` for POST body.
 
 ---
 
-## 1. Products / projects
+## 1. Products – List
 
-> List all URLs from `project/urls.py` here, grouped by resource (e.g., Product, Project, Milestones).
-> For each:
-> - Add HTTP method(s)
-> - Request body schema
-> - Sample success and error responses
+**url:** `{{baseurl}}/projectapi/products/`  
+**method:** GET  
+**body:** None  
+**sample_response:**
+```json
+[
+  { "id": 1, "name": "Product A", "description": "Description for A" },
+  { "id": 2, "name": "Product B", "description": "" }
+]
+```
+**notes:** All products ordered by name. Used by QuaterlyReports and Clients.
 
+---
+
+## 2. Products – Create
+
+**url:** `{{baseurl}}/projectapi/products/create/`  
+**method:** POST  
+**body:**
+```json
+{ "name": "Product C", "description": "Optional description" }
+```
+**sample_response:**
+```json
+{ "id": 3, "name": "Product C", "description": "Optional description" }
+```
+**notes:** `name` required; `description` optional. 201 on success. 400 if name missing; 409 if a product with this name already exists.

@@ -1,60 +1,86 @@
-# Alerts & Announcements – API testing reference (Postman)
+# Alerts & Announcements API – Testing reference
 
-**Base URL:** `{{baseurl}}/alertsapi/`  
-**Auth:** All endpoints require a **logged-in user** (session/cookie).  
+**Base prefix:** `{{baseurl}}/alertsapi/`  
+**Auth:** All endpoints require a logged-in user (session/cookie).  
 **Content-Type:** `application/json` for POST/PUT/PATCH bodies.
 
 ---
 
 ## 1. Alert types (read-only)
 
-<!-- | Method | URL | Description |
-|--------|-----|-------------|
-| GET | `{{baseurl}}/alertsapi/alert-types/` | List all alert types |
-| GET | `{{baseurl}}/alertsapi/alert-types/<id>/` | Retrieve one alert type |
+### List alert types
 
-### GET – List alert types
+**url:** `{{baseurl}}/alertsapi/alert-types/`  
+**method:** GET  
+**body:** None  
+**sample_response:**
+```json
+[
+  { "id": 1, "type_name": "System" },
+  { "id": 2, "type_name": "Security" }
+]
+```
+**notes:** All alert types for dropdowns. No query params.
 
-**URL:** `{{baseurl}}/alertsapi/alert-types/`
+---
 
-**Success (200):** Array of `{ "id": 1, "type_name": "System" }, ...`
+### Retrieve alert type
 
---- -->
+**url:** `{{baseurl}}/alertsapi/alert-types/<id>/`  
+**method:** GET  
+**body:** None  
+**sample_response:**
+```json
+{ "id": 1, "type_name": "System" }
+```
+**notes:** 404 if id not found.
+
+---
 
 ## 2. Alerts (CRUD)
 
-<!-- | Method | URL | Description |
-|--------|-----|-------------|
-| GET | `{{baseurl}}/alertsapi/alerts/` | List all alerts |
-| GET | `{{baseurl}}/alertsapi/alerts/<id>/` | Retrieve one alert |
-| POST | `{{baseurl}}/alertsapi/alerts/` | Create an alert |
-| PUT | `{{baseurl}}/alertsapi/alerts/<id>/` | Full update |
-| PATCH | `{{baseurl}}/alertsapi/alerts/<id>/` | Partial update |
-| DELETE | `{{baseurl}}/alertsapi/alerts/<id>/` | Delete an alert |
+### List alerts
 
-### GET – List alerts
+**url:** `{{baseurl}}/alertsapi/alerts/`  
+**method:** GET  
+**body:** None  
+**sample_response:**
+```json
+[
+  {
+    "id": 1,
+    "alert_title": "Server maintenance scheduled",
+    "alert_type": "System",
+    "alert_severity": "high",
+    "creator_name": "Admin User",
+    "details": "Maintenance window 2–4 AM IST.",
+    "created_at": "09/03/2026 14:30:00",
+    "close_at": null,
+    "resolved_by_name": null,
+    "closed_by": null,
+    "status": "PENDING"
+  }
+]
+```
+**notes:** Datetime fields in IST (d/m/y H:M:S). `alert_creator` and `resolved_by` usernames not in response; `creator_name` and `resolved_by_name` are full names.
 
-**URL:** `{{baseurl}}/alertsapi/alerts/`
+---
 
-**Success (200):** Array of alert objects. Each includes (all datetime fields in IST, format **d/m/y H:M:S**):
+### Retrieve alert
 
-- `id`, `alert_title`, `alert_type` (type name), `alert_severity` (`"high"` \| `"medium"` \| `"low"`)
-- `creator_name` (full name from Profile; `alert_creator` username not in response)
-- `details`
-- `created_at` (IST, e.g. `09/03/2026 14:30:00`)
-- `close_at` (IST; null if not closed)
-- `resolved_by_name` (full name or null; `resolved_by` username not in response)
-- `closed_by` (IST formatted, e.g. `15/03/2026 10:30:00`)
-- `status` (status name, e.g. PENDING)
+**url:** `{{baseurl}}/alertsapi/alerts/<id>/`  
+**method:** GET  
+**body:** None  
+**sample_response:** Same shape as one item in list above.  
+**notes:** 404 if id not found.
 
-### POST – Create alert
+---
 
-**URL:** `{{baseurl}}/alertsapi/alerts/`  
-**Method:** `POST`  
-**Headers:** `Content-Type: application/json`
+### Create alert
 
-**Body (example):**
-
+**url:** `{{baseurl}}/alertsapi/alerts/`  
+**method:** POST  
+**body:**
 ```json
 {
   "alert_title": "Server maintenance scheduled",
@@ -66,29 +92,31 @@
   "status": "PENDING"
 }
 ```
+**sample_response:**
+```json
+{
+  "id": 1,
+  "alert_title": "Server maintenance scheduled",
+  "alert_type": "System",
+  "alert_severity": "high",
+  "creator_name": "Admin User",
+  "details": "Maintenance window 2–4 AM IST.",
+  "created_at": "09/03/2026 14:30:00",
+  "close_at": null,
+  "resolved_by_name": null,
+  "closed_by": null,
+  "status": "PENDING"
+}
+```
+**notes:** `alert_title`, `alert_type`, `alert_severity`, `resolved_by`, `closed_by` required. `alert_type` must match existing alert type name. `alert_severity`: high | medium | low. `closed_by` ISO 8601. `alert_creator` set from logged-in user. 201 on success.
 
-| Key | Type | Required | Description |
-|-----|------|----------|-------------|
-| alert_title | string | Yes | Title of the alert |
-| alert_type | string | Yes | **Alert type name** (must exist in alert_types, e.g. `"System"`) |
-| alert_severity | string | Yes | One of: `"high"`, `"medium"`, `"low"` |
-| resolved_by | string | Yes | **Username** of user who resolved/closed the alert (must exist) |
-| closed_by | string | Yes | **DateTime** when closed; ISO 8601 (e.g. `"2026-03-15T10:30:00"` or `"2026-03-15T16:00:00+05:30"`) |
-| details | string | No | Additional details |
-| status | string | No | **Task status name** (e.g. `"PENDING"`, `"INPROCESS"`, `"COMPLETED"`); optional |
+---
 
-**Note:** `alert_creator` is set automatically from the logged-in user and is not in the request body or GET response.
+### Update alert (PUT / PATCH)
 
-**Success (201):** Created alert object (same shape as GET list/detail: `created_at`, `close_at`, `closed_by` in IST d/m/y H:M:S; no `alert_creator` or `resolved_by` in response).
-
-### PATCH – Update alert (e.g. close or resolve)
-
-**URL:** `{{baseurl}}/alertsapi/alerts/<id>/`  
-**Method:** `PATCH`  
-**Headers:** `Content-Type: application/json`
-
-**Body (example – close/resolve):**
-
+**url:** `{{baseurl}}/alertsapi/alerts/<id>/`  
+**method:** PUT or PATCH  
+**body:**
 ```json
 {
   "close_at": "2026-03-15T10:30:00",
@@ -97,62 +125,94 @@
   "status": "COMPLETED"
 }
 ```
+**sample_response:** Full alert object (same shape as list/retrieve).  
+**notes:** PATCH accepts partial fields. Request datetimes ISO 8601; response datetimes IST d/m/y H:M:S. 404 if id not found.
 
-Any subset of writable fields can be sent. `closed_by` in the request is ISO 8601; in the GET response it is returned as IST in **d/m/y H:M:S** format. -->
+---
 
-### DELETE – Delete alert
+### Delete alert
 
-<!-- **URL:** `{{baseurl}}/alertsapi/alerts/<id>/`  
-**Method:** `DELETE`
-
-**Success (204):** No content. -->
+**url:** `{{baseurl}}/alertsapi/alerts/<id>/`  
+**method:** DELETE  
+**body:** None  
+**sample_response:** 204 No Content.  
+**notes:** 404 if id not found.
 
 ---
 
 ## 3. Announcement types (read-only)
 
-| Method | URL | Description |
-|--------|-----|-------------|
-| GET | `{{baseurl}}/alertsapi/announcement-types/` | List all announcement types |
-| GET | `{{baseurl}}/alertsapi/announcement-types/<id>/` | Retrieve one announcement type |
+### List announcement types
 
-### GET – List announcement types
+**url:** `{{baseurl}}/alertsapi/announcement-types/`  
+**method:** GET  
+**body:** None  
+**sample_response:**
+```json
+[
+  { "id": 1, "type_name": "Product" },
+  { "id": 2, "type_name": "General" }
+]
+```
+**notes:** All announcement types. No query params.
 
-**URL:** `{{baseurl}}/alertsapi/announcement-types/`
+---
 
-**Success (200):** Array of `{ "id": 1, "type_name": "Product" }, ...`
+### Retrieve announcement type
+
+**url:** `{{baseurl}}/alertsapi/announcement-types/<id>/`  
+**method:** GET  
+**body:** None  
+**sample_response:**
+```json
+{ "id": 1, "type_name": "Product" }
+```
+**notes:** 404 if id not found.
 
 ---
 
 ## 4. Announcements (CRUD)
 
-| Method | URL | Description |
-|--------|-----|-------------|
-| GET | `{{baseurl}}/alertsapi/announcements/` | List all announcements |
-| GET | `{{baseurl}}/alertsapi/announcements/<id>/` | Retrieve one announcement |
-| POST | `{{baseurl}}/alertsapi/announcements/` | Create an announcement |
-| PUT | `{{baseurl}}/alertsapi/announcements/<id>/` | Full update |
-| PATCH | `{{baseurl}}/alertsapi/announcements/<id>/` | Partial update |
-| DELETE | `{{baseurl}}/alertsapi/announcements/<id>/` | Delete an announcement |
+### List announcements
 
-### GET – List announcements
+**url:** `{{baseurl}}/alertsapi/announcements/`  
+**method:** GET  
+**body:** None  
+**sample_response:**
+```json
+[
+  {
+    "id": 1,
+    "announcement": "New product launch next week.",
+    "created_by": "admin",
+    "creator_name": "Admin User",
+    "type": "Product",
+    "product": "Product A",
+    "percentage": 15,
+    "created_at": "2026-03-09T09:00:00Z",
+    "created_at_ist": "09/03/2026 14:30:00"
+  }
+]
+```
+**notes:** `type` and `product` are type/product names. `created_at_ist` in IST d/m/y H:M:S.
 
-**URL:** `{{baseurl}}/alertsapi/announcements/`
+---
 
-**Success (200):** Array of announcement objects. Each includes:
+### Retrieve announcement
 
-- `id`, `announcement` (text), `created_by` (username), `creator_name` (full name)
-- `type` (type name), `product` (product name or null), `percentage` (int or null)
-- `created_at`, `created_at_ist` (IST formatted)
+**url:** `{{baseurl}}/alertsapi/announcements/<id>/`  
+**method:** GET  
+**body:** None  
+**sample_response:** Same shape as one item in list above.  
+**notes:** 404 if id not found.
 
-### POST – Create announcement
+---
 
-**URL:** `{{baseurl}}/alertsapi/announcements/`  
-**Method:** `POST`  
-**Headers:** `Content-Type: application/json`
+### Create announcement
 
-**Body (example):**
-
+**url:** `{{baseurl}}/alertsapi/announcements/`  
+**method:** POST  
+**body:**
 ```json
 {
   "announcement": "New product launch next week.",
@@ -161,47 +221,31 @@ Any subset of writable fields can be sent. `closed_by` in the request is ISO 860
   "percentage": 15
 }
 ```
+**sample_response:** Created announcement object (same shape as list/retrieve).  
+**notes:** `announcement` and `type` required. `type` must match announcement type name. `product` optional, must match Product.name. `created_by` set from logged-in user. 201 on success.
 
-| Key | Type | Required | Description |
-|-----|------|----------|-------------|
-| announcement | string | Yes | Announcement text |
-| type | string | Yes | **Announcement type name** (must exist in announcement_types) |
-| product | string | No | **Product name** (must exist in Product table); omit or null for none |
-| percentage | int | No | Optional percentage (e.g. discount) |
+---
 
-**Note:** `created_by` is set automatically to the logged-in user.
+### Update announcement (PUT / PATCH)
 
-**Success (201):** Created announcement object (same shape as list/detail).
-
-### PATCH – Update announcement
-
-**URL:** `{{baseurl}}/alertsapi/announcements/<id>/`  
-**Method:** `PATCH`  
-**Headers:** `Content-Type: application/json`
-
-**Body (example):**
-
+**url:** `{{baseurl}}/alertsapi/announcements/<id>/`  
+**method:** PUT or PATCH  
+**body:**
 ```json
 {
   "announcement": "Updated announcement text.",
   "percentage": 20
 }
 ```
-
-### DELETE – Delete announcement
-
-**URL:** `{{baseurl}}/alertsapi/announcements/<id>/`  
-**Method:** `DELETE`
-
-**Success (204):** No content.
+**sample_response:** Full announcement object (same shape as list/retrieve).  
+**notes:** PATCH accepts partial fields. 404 if id not found.
 
 ---
 
-## Summary
+### Delete announcement
 
-| Resource | List | Retrieve | Create | Update | Delete |
-|----------|------|----------|--------|--------|--------|
-| Alert types | `GET /alertsapi/alert-types/` | `GET /alertsapi/alert-types/<id>/` | — | — | — |
-| Alerts | `GET /alertsapi/alerts/` | `GET /alertsapi/alerts/<id>/` | `POST /alertsapi/alerts/` | `PUT/PATCH /alertsapi/alerts/<id>/` | `DELETE /alertsapi/alerts/<id>/` |
-| Announcement types | `GET /alertsapi/announcement-types/` | `GET /alertsapi/announcement-types/<id>/` | — | — | — |
-| Announcements | `GET /alertsapi/announcements/` | `GET /alertsapi/announcements/<id>/` | `POST /alertsapi/announcements/` | `PUT/PATCH /alertsapi/announcements/<id>/` | `DELETE /alertsapi/announcements/<id>/` |
+**url:** `{{baseurl}}/alertsapi/announcements/<id>/`  
+**method:** DELETE  
+**body:** None  
+**sample_response:** 204 No Content.  
+**notes:** 404 if id not found.

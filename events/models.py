@@ -41,6 +41,7 @@ class BookSlot(models.Model):
     description = models.TextField(blank=True, null=True)
     meeting_type = models.CharField(max_length=20,choices=MEETING_TYPE_CHOICES)
     status = models.ForeignKey(BookingStatus,on_delete=models.CASCADE,related_name="slotstatus",null=True,blank=True)
+    notes = models.TextField(blank=True, null=True, help_text="Optional; required when status is set to Done.")
     created_at = models.DateTimeField(auto_now_add=True)
     created_by=models.ForeignKey(User,on_delete=models.CASCADE,related_name="slotcreater",null=True)
     members=models.ManyToManyField(User,through="Slotmembers")

@@ -1,964 +1,423 @@
-# Accounts APIs – Testing reference
+# Accounts API – Testing reference
 
-> This file documents all executable APIs under the `accounts/` namespace, including core accounts endpoints and leave management.
+**Base prefix:** `{{baseurl}}/accounts/`  
+**Auth:** Most endpoints require a logged-in user (session/cookie); login/logout and some filters are unauthenticated. Admin-only endpoints noted.  
+**Content-Type:** `application/json` for JSON bodies; `application/x-www-form-urlencoded` or `multipart/form-data` for form-based endpoints.
 
 ---
 
-## Core Accounts APIs
-
-(Moved from project-level `api_testing.md`.)
-
-<!-- BEGIN: original api_testing.md content -->
-1. ## Login
-
-##### URL-{{base URL}}/accounts/login/
-
-response-{
-
-    "message": "You are logged in",
-
-    "username": "0001",
-
-    "Role": "Admin"
-
-}
-
-
-
-## 2\. Get Employee
-
-##### URL-{{base BASE}}/accounts/employee/dashboard/
-
-response-[
-
-    {
-
-        "Employee\_id": "0001",
-
-        "Email\_id": "admin@planetfarm.ai",
-
-        "Date\_of\_birth": "2020-02-02",
-
-        "Date\_of\_join": "2020-02-04",
-
-        "Name": "Jadhav",
-
-        "Photo\_link": "",
-
-        "role": "Admin"
-
-    }
-
-]
-
-
-
-## 3.AllEmployees
-
-##### URL-{{base URL}}/accounts/employees/
-
-response-[
-
-    {
-
-        "Employee\_id": "2000",
-
-        "Name": "Tushar Patil",
-
-        "Role": "MD",
-
-        "Branch": null,
-
-        "Designation": null,
-
-        "Date\_of\_birth": "1995-01-01",
-
-        "Date\_of\_join": "2026-01-20",
-
-        "Number\_of\_days\_from\_joining": "0 years 3 days",
-
-        "Email\_id": "Tushar@gmail.com",
-
-        "Photo\_link": "/media/profile\_images/Screenshot\_2025-10-29\_154813.png",
-
-        "teamlead": null,
-
-        "function": null
-
-    },
-
-    {
-
-        "Employee\_id": "20011",
-
-        "Name": "tejraj D",
-
-        "Role": "TeamLead",
-
-        "Branch": "Farm Core",
-
-        "Designation": "Precision Agriculture Manager",
-
-        "Date\_of\_birth": "1999-02-02",
-
-        "Date\_of\_join": "2025-01-01",
-
-        "Number\_of\_days\_from\_joining": "1 years 22 days",
-
-        "Email\_id": "Tejarj@gmail.com",
-
-        "Photo\_link": "/media/profile\_images/Tejraj\_Dhongade.jfif",
-
-        "department": "Sales",
-
-        "Teamleader": null,
-
-        "function": "IP"
-
-    },
-
-    {
-
-        "Employee\_id": "3000",
-
-        "Name": "Snighdha",
-
-        "Role": "TeamLead",
-
-        "Branch": "Technology",
-
-        "Designation": "Software Developer",
-
-        "Date\_of\_birth": "2020-02-02",
-
-        "Date\_of\_join": "2020-12-01",
-
-        "Number\_of\_days\_from\_joining": "5 years 53 days",
-
-        "Email\_id": "dummy@nashik.com",
-
-        "Photo\_link": "/media/profile\_images/vendor.jpg",
-
-        "department": "Production",
-
-        "Teamleader": null,
-
-        "function": "IP"
-
-    },
-
-    {
-
-        "Employee\_id": "3001",
-
-        "Name": "siddhi borse",
-
-        "Role": "Employee",
-
-        "Branch": "Farm Core",
-
-        "Designation": "Digital Marketing Manager",
-
-        "Date\_of\_birth": "2001-01-02",
-
-        "Date\_of\_join": "2025-01-02",
-
-        "Number\_of\_days\_from\_joining": "1 years 21 days",
-
-        "Email\_id": "siddhi@gmail.com",
-
-        "Photo\_link": "/media/profile\_images/Siddhi\_Borase.jfif",
-
-        "department": "Sales",
-
-        "Teamleader": null,
-
-        "function": "IP"
-
-    },
-
-    {
-
-        "Employee\_id": "9000",
-
-        "Name": "Himalaya",
-
-        "Role": "Intern",
-
-        "Branch": "Farm Tech",
-
-        "Designation": "Software Developer",
-
-        "Date\_of\_birth": "2020-02-02",
-
-        "Date\_of\_join": "2020-12-12",
-
-        "Number\_of\_days\_from\_joining": "5 years 42 days",
-
-        "Email\_id": "dummy@gmail.com",
-
-        "Photo\_link": "/media/profile\_images/IMG\_0395.jpg",
-
-        "department": "Business Strategy",
-
-        "Teamleader": "Snighdha",
-
-        "function": "HC"
-
-    },
-
-    {
-
-        "Employee\_id": "00110011",
-
-        "Name": "abcdefg",
-
-        "Role": "MD",
-
-        "Branch": null,
-
-        "Designation": null,
-
-        "Date\_of\_birth": "2002-11-10",
-
-        "Date\_of\_join": "2002-11-10",
-
-        "Number\_of\_days\_from\_joining": "23 years 74 days",
-
-        "Email\_id": "user@planeteye",
-
-        "Photo\_link": "/media/profile\_images/Screenshot\_2025-05-29\_182812.png",
-
-        "teamlead": null,
-
-        "function": null
-
-    }
-
-]
-
-
-
-## 4.ChangePassword
-
-##### URL-{{base URL}}/accounts/admin/changePassword/[slug:u](slug:u)/
-
-path parameter- username(u)
-
-body-{"new\_password":"123"}
-
-response-
-
-{"message": "Password is changed to 123"}
-
-
-
-## 5.CreateLogin
-
-##### URL-{{base URL}}/accounts/admin/createEmployeeLogin/
-
-response-
-
-{
-
-    "message": "user profile created successfully"
-
-}
-
-
-
-## 6.GetBranches
-
-##### URL-{{base URL}}/accounts/getBranch/?Role=
-
-response-
-
-[
-
-    {
-
-        "branch\_name": "Farm Core"
-
-    },
-
-    {
-
-        "branch\_name": "Farm Tech"
-
-    },
-
-    {
-
-        "branch\_name": "Infra Core"
-
-    },
-
-    {
-
-        "branch\_name": "Infra Tech"
-
-    },
-
-    {
-
-        "branch\_name": "Technology"
-
-    }
-
-]
-
-
-
-## 7.GetDepartments\&Functions
-
-##### URL-{{base URL}}/accounts/getDepartmentsandFunctions/?Role=
-
-response-
-
-
-
-{
-
-    "Departments": [
-
-        "Accounts\&Finance",
-
-        "Business Strategy",
-
-        "HR",
-
-        "Legal\&Document",
-
-        "Marketing",
-
-        "NPC",
-
-        "NPD",
-
-        "Production",
-
-        "Purchase",
-
-        "R\&D",
-
-        "Sales",
-
-        "Vigil"
-
-    ],
-
-    "functions": [
-
-        "NPD",
-
-        "MMR",
-
-        "RG",
-
-        "HC",
-
-        "IP"
-
-    ]
-
-}
-
-
-
-## 8.GetRoles
-
-##### URL-{{base URL}}/accounts/getRoles/
-
-response-
-
-[
-
-    {
-
-        "role\_name": "MD"
-
-    },
-
-    {
-
-        "role\_name": "Intern"
-
-    },
-
-    {
-
-        "role\_name": "TeamLead"
-
-    },
-
-    {
-
-        "role\_name": "Employee"
-
-    }
-
-]
-
-
-
-## 9.GetDesignations
-
-##### URL-{{base URL}}/accounts/getDesignations/?Role=
-
-response-
-
-[
-
-    {
-
-        "designation": "Software Developer"
-
-    },
-
-    {
-
-        "designation": "Python Developer"
-
-    },
-
-    {
-
-        "designation": "AI/ML Developer"
-
-    },
-
-    {
-
-        "designation": "Web Developer"
-
-    },
-
-    {
-
-        "designation": "Backend Developer"
-
-    },
-
-    {
-
-        "designation": "Precision Agriculture Manager"
-
-    },
-
-    {
-
-        "designation": "Digital Marketing Manager"
-
-    },
-
-    {
-
-        "designation": "Project Supervisor"
-
-    },
-
-    {
-
-        "designation": "Designer Engineer"
-
-    },
-
-    {
-
-        "designation": "Site Engineer"
-
-    },
-
-    {
-
-        "designation": "Field Officer"
-
-    }
-
-]
-
-
-
-## 10.GetTeamleads
-
-##### URL-{{base URL}}/accounts/getTeamleads/?Role
-
-response-
-
-[
-
-    {
-
-        "Name": "Snighdha",
-
-        "Employee\_id": "3000"
-
-    },
-
-    {
-
-        "Name": "tejraj D",
-
-        "Employee\_id": "20011"
-
-    }
-
-]
-
-
-
-## 11.DeleteUser
-
-##### URL-{{base URL}}/accounts/admin/deleteEmployee/[slug:u](slug:u)/
-
-path parameter-username(u)
-
-response-
-
-{"message": "user deleted successfully"}
-
-
-
-## 12.UpdateUser
-
-##### URL-{{base URL}}/accounts/admin/updateProfile/[slug:username](slug:username)/
-
-path parameter- username
-
-response-
-
-
-
-
-
-## 13.Logout
-
-##### URL-{{base URL}}/accounts/logout/
-
-response-
-
-{
-
-    "message": "Logout successfully 0001"
-
-}
-<!-- END: original api_testing.md content -->
+## 1. Session and home
+
+### home
+
+**url:** `{{baseurl}}/accounts/`  
+**method:** GET  
+**body:** None  
+**sample_response:** 204 No Content.  
+**notes:** Placeholder home; no body.
 
 ---
 
-## Leave Management APIs
+### login
 
-(Moved from project-level `leave_api_testing.md`.)
-
-<!-- BEGIN: leave_api_testing.md content -->
-# Leave APIs – Testing reference
-
-Base URL: `http://localhost:8000` (or your server).  
-All endpoints under `/accounts/leave-applications/` require **logged-in user** (session/cookie auth).  
-Use the same session as for other accounts APIs (e.g. after `POST /accounts/login/`).
-
-**Input rule (every leave API):** Request bodies use **character/string** for all FK-like fields (never PKs).  
-- **Approval fields (PATCH/PUT):** `"Approved"`, `"Pending"`, `"Rejected"`.  
-- **leave_type (POST create, POST emergency, PATCH/PUT draft):** `"Full_day"` or `"Half_day"`.  
-- **applicant (POST emergency only):** username string.
-
-**Response rule:** Every leave API response returns **strings** for FK-backed data (no FK ids).  
-- `applicant_name`, `team_lead_name` from Profile; `leave_type_name`; `team_lead_approval_status`, `hr_approval_status`, `md_approval_status`, `admin_approval_status`.
-
----
-
-
-## 1. Create leave application (self)
-
-Apply for leave as the logged-in user. Remaining-leaves balance is validated. Approval chain is set by role (TeamLead → HR → MD, or Admin → HR → MD, etc.). `team_lead` is auto-filled from Profile. **Input:** `leave_type` as string (`"Full_day"` / `"Half_day"`). **Response:** strings only (no FK ids).
-
-| Field    | Value |
-|----------|--------|
-| **Method** | `POST` |
-| **URL**    | `{{baseurl}}/accounts/leave-applications/` |
-
-**Headers**
-
-- `Content-Type: application/json`
-
-**Body** – raw JSON
-
+**url:** `{{baseurl}}/accounts/login/`  
+**method:** POST  
+**body:**
+```json
+{ "username": "0001", "password": "your_password" }
+```
+**sample_response:**
 ```json
 {
-  "start_date": "2026-03-20",
-  "duration_of_days": 2,
-  "leave_subject": "Personal leave",
-  "reason": "Family event.",
+  "messege": "You are logged in",
+  "username": "0001",
+  "Role": "Admin",
+  "department": "Engineering"
+}
+```
+**notes:** Creates session; single-device: any existing session for this user is expired first. 400 if username/password missing or invalid.
+
+---
+
+### logout
+
+**url:** `{{baseurl}}/accounts/logout/`  
+**method:** GET  
+**body:** None  
+**sample_response:**
+```json
+{ "messege": "Logout successfully 0001" }
+```
+**notes:** Logged-in user only; session flushed.
+
+---
+
+### sessiondata
+
+**url:** `{{baseurl}}/accounts/sessiondata/`  
+**method:** GET  
+**body:** None  
+**sample_response:**
+```json
+{
+  "expiray-age": 1209600,
+  "expiray-date": "2026-03-23T...",
+  "accessed": true,
+  "is_empty": false
+}
+```
+**notes:** Logged-in user only. Session expiry and metadata.
+
+---
+
+## 2. Filters (dropdowns)
+
+### getBranch
+
+**url:** `{{baseurl}}/accounts/getBranch/`  
+**method:** GET  
+**body:** None  
+**query params:** Optional `Role` — if MD or Admin returns `[{}]`; otherwise all branches.  
+**sample_response:**
+```json
+[{ "branch_name": "Mumbai" }, { "branch_name": "Delhi" }]
+```
+**notes:** Used for branch dropdown by role.
+
+---
+
+### getRoles
+
+**url:** `{{baseurl}}/accounts/getRoles/`  
+**method:** GET  
+**body:** None  
+**sample_response:**
+```json
+[{ "role_name": "Admin" }, { "role_name": "MD" }, { "role_name": "Employee" }]
+```
+**notes:** All roles except role_id=1.
+
+---
+
+### getDesignations
+
+**url:** `{{baseurl}}/accounts/getDesignations/`  
+**method:** GET  
+**body:** None  
+**query params:** Optional `Role`.  
+**sample_response:**
+```json
+[{ "designation": "Developer" }, { "designation": "Manager" }]
+```
+**notes:** All designations (or filtered by role if supported).
+
+---
+
+### getDepartmentsandFunctions
+
+**url:** `{{baseurl}}/accounts/getDepartmentsandFunctions/`  
+**method:** GET  
+**body:** None  
+**query params:** Optional `Role` — if Admin or MD returns empty Departments/functions.  
+**sample_response:**
+```json
+{
+  "Departments": ["Engineering", "HR"],
+  "functions": ["Development", "Testing"]
+}
+```
+**notes:** Used for department and function dropdowns.
+
+---
+
+### getTeamleads
+
+**url:** `{{baseurl}}/accounts/getTeamleads/`  
+**method:** GET  
+**body:** None  
+**query params:** Optional `Role` — one of Employee, Intern to get team leads; otherwise returns `[{}]`.  
+**sample_response:**
+```json
+[{ "Name": "Lead One", "Employee_id": "lead1" }]
+```
+**notes:** Team leads for assignment dropdown. 404 if invalid.
+
+---
+
+## 3. Employee (self and list)
+
+### employee dashboard
+
+**url:** `{{baseurl}}/accounts/employee/dashboard/`  
+**method:** GET  
+**body:** None  
+**sample_response:**
+```json
+[
+  {
+    "Employee_id": "0001",
+    "Email_id": "admin@example.com",
+    "Date_of_birth": "2020-02-02",
+    "Date_of_join": "2020-02-04",
+    "Name": "Jadhav",
+    "Photo_link": null,
+    "role": "Admin",
+    "designation": null,
+    "branch": null,
+    "department": null,
+    "functions": []
+  }
+]
+```
+**notes:** Logged-in user's profile. Admin/MD get minimal fields; others get designation, branch, department, functions.
+
+---
+
+### employees (all)
+
+**url:** `{{baseurl}}/accounts/employees/`  
+**method:** GET  
+**body:** None  
+**sample_response:** Array of employee objects with Employee_id, Name, Role, Branch, Designation, Date_of_birth, Date_of_join, Number_of_days_from_joining, Email_id, etc.  
+**notes:** All employees; ordered by Name.
+
+---
+
+### updateUsername
+
+**url:** `{{baseurl}}/accounts/updateUsername/<username>/`  
+**method:** POST  
+**body:** Form: `new_username=<new_value>`.  
+**sample_response:** Plain text "username updated".  
+**notes:** Updates user's username. 400/500 on error.
+
+---
+
+## 4. Admin-only (profile and user management)
+
+### updateProfile
+
+**url:** `{{baseurl}}/accounts/admin/updateProfile/<username>/`  
+**method:** POST  
+**body:** JSON or form: Name, Role, Email_id, Designation, Date_of_join, Date_of_birth, Branch, Department, Teamlead, Functions (array). Required: Name, Role, Email_id, Date_of_join, Date_of_birth.  
+**sample_response:**
+```json
+{ "messege": "user details update successfully" }
+```
+**notes:** Admin only. 404 if user not found; 400 if validation fails.
+
+---
+
+### createEmployeeLogin
+
+**url:** `{{baseurl}}/accounts/admin/createEmployeeLogin/`  
+**method:** POST  
+**body:** Form or multipart: Employee_id, password, Name, Role, Email_id, Designation, Date_of_join, Date_of_birth, Branch (optional), Photo_link (file, optional), Department, Teamlead, Functions (list). Role required; Branch/Designation/Department/Teamlead/Functions optional per logic.  
+**sample_response:**
+```json
+{ "messege": "user profile created successfully" }
+```
+**notes:** Admin only. Creates User and Profile. 400/404/500 on error.
+
+---
+
+### viewEmployee
+
+**url:** `{{baseurl}}/accounts/admin/viewEmployee/<username>/`  
+**method:** GET  
+**body:** None  
+**sample_response:**
+```json
+[
+  {
+    "Employee_id": "0001",
+    "Email_id": "admin@example.com",
+    "Designation": "Developer",
+    "Date_of_birth": "2020-02-02",
+    "Date_of_join": "2020-02-04",
+    "Branch": "Mumbai",
+    "Name": "Jadhav",
+    "Photo_link": null,
+    "Role": "Admin",
+    "Functions": ["Dev", "QA"]
+  }
+]
+```
+**notes:** Admin only. 404 if user not found.
+
+---
+
+### deleteEmployee
+
+**url:** `{{baseurl}}/accounts/admin/deleteEmployee/<username>/`  
+**method:** DELETE  
+**body:** None  
+**sample_response:**
+```json
+{ "message": "user deleted successfully" }
+```
+**notes:** Admin only. 404 if user not found.
+
+---
+
+### changePassword
+
+**url:** `{{baseurl}}/accounts/admin/changePassword/<username>/`  
+**method:** PATCH  
+**body:**
+```json
+{ "new_password": "new_secret" }
+```
+**sample_response:**
+```json
+{ "messege": "Password is changed to new_secret" }
+```
+**notes:** Admin only. 404 if user not found; 400 if password empty.
+
+---
+
+### changePhoto
+
+**url:** `{{baseurl}}/accounts/admin/changePhoto/<username>/`  
+**method:** POST  
+**body:** Multipart: `Photo_link` (file).  
+**sample_response:**
+```json
+{ "messege": "Jadhav's Photo updated successfully" }
+```
+**notes:** Admin only. 400 if no file; 404 if user not found.
+
+---
+
+### FetchPhoto
+
+**url:** `{{baseurl}}/accounts/admin/FetchPhoto/<username>/`  
+**method:** GET  
+**body:** None  
+**sample_response:** Image bytes with appropriate Content-Type, or `{"image": null}` if no photo.  
+**notes:** Admin only. 404 if user not found.
+
+---
+
+## 5. Leave applications (DRF ViewSet)
+
+**Base:** `{{baseurl}}/accounts/leave-applications/`
+
+### List leave applications
+
+**url:** `{{baseurl}}/accounts/leave-applications/`  
+**method:** GET  
+**body:** None  
+**sample_response:** Array of leave application objects (id, applicant_name, team_lead_name, alternative_name, start_date, duration_of_days, leave_subject, reason, note, leave_type_name, half_day_slots, team_lead_approval_status, hr_approval_status, md_approval_status, admin_approval_status, is_emergency, application_date, approved_by_MD_at).  
+**notes:** Authenticated. Names from Profile; no FK ids in response.
+
+---
+
+### Retrieve leave application
+
+**url:** `{{baseurl}}/accounts/leave-applications/<id>/`  
+**method:** GET  
+**body:** None  
+**sample_response:** Single leave application (same shape as list).  
+**notes:** 404 if not found.
+
+---
+
+### Create leave application (regular)
+
+**url:** `{{baseurl}}/accounts/leave-applications/`  
+**method:** POST  
+**body:**
+```json
+{
   "leave_type": "Full_day",
-  "half_day_slots": null,
-  "is_emergency": false
-}
-```
-
-| Key               | Type    | Required | Description |
-|-------------------|---------|----------|-------------|
-| start_date        | string  | Yes      | Date (YYYY-MM-DD). |
-| duration_of_days  | integer | Conditional | For **Full_day**: required, ≥ 1. For **Half_day**: optional (defaults to 1). |
-| leave_subject      | string  | Yes      | Short subject. |
-| reason            | string  | Yes      | Leave reason. |
-| leave_type        | string  | Yes      | `"Full_day"` or `"Half_day"`. |
-| half_day_slots    | string  | Conditional | For **Half_day**: required, `"First_Half"` or `"Second_Half"`. For Full_day: omit or null. |
-| is_emergency      | boolean | No       | Default `false`. |
-
-**Success response** – `201 Created` (no FK ids; user names from Profile)
-
-```json
-{
-  "id": 1,
-  "applicant_name": "John Doe",
-  "team_lead_name": "Jane Smith",
   "start_date": "2026-03-20",
   "duration_of_days": 2,
-  "leave_subject": "Personal leave",
-  "reason": "Family event.",
-  "leave_type_name": "Full_day",
+  "leave_subject": "Personal",
+  "reason": "Family event",
+  "note": "",
   "half_day_slots": null,
-  "team_lead_approval_status": "Pending",
-  "hr_approval_status": "Pending",
-  "md_approval_status": "Pending",
-  "admin_approval_status": null,
-  "is_emergency": false,
-  "application_date": "2026-03-10",
-  "approved_by_MD_at": null
+  "alternative": "colleague_username"
 }
 ```
-
-**Error examples**
-
-- `400` – Validation (e.g. missing field, invalid date).
-- `400` – `{"non_field_errors": ["Insufficient leave balance. Remaining: 2, requested: 5."]}`
+**sample_response:** Created application (same shape as list). 201.  
+**notes:** Applicant = logged-in user. leave_type by name (e.g. Full_day, Half_day). Full_day: validates remaining leaves; Half_day: validates half_day_slots. Approval hierarchy set by role (Team lead → HR/Admin → MD). MD applicant auto-approved and used_leaves incremented.
 
 ---
 
-## 2. Create emergency leave (HR only)
+### Emergency leave (HR only)
 
-HR creates leave on behalf of any user. Emergency leaves are limited to **10% of the user's total_leaves** (tracked in `LeaveSummary.emergency_leaves` as used emergency days). Each emergency day also counts as **used_leaves** and reduces `remaining_leaves`. For emergency requests, team lead, HR, and MD approvals are all set to **Approved** by default (they can still be updated later via PATCH/PUT).
-
-| Field    | Value |
-|----------|--------|
-| **Method** | `POST` |
-| **URL**    | `{{baseurl}}/accounts/leave-applications/emergency/` |
-
-**Headers**
-
-- `Content-Type: application/json`
-
-**Body** – raw JSON
-
+**url:** `{{baseurl}}/accounts/leave-applications/emergency/`  
+**method:** POST  
+**body:**
 ```json
 {
-  "applicant": "john_doe",
-  "start_date": "2026-03-22",
+  "applicant": "username",
+  "leave_type": "Full_day",
+  "start_date": "2026-03-20",
   "duration_of_days": 1,
   "leave_subject": "Emergency",
-  "reason": "Medical.",
-  "leave_type": "Full_day",
-  "half_day_slots": null,
-  "note": "Severe medical emergency."
+  "reason": "Medical",
+  "note": ""
 }
 ```
-
-| Key               | Type   | Required | Description |
-|-------------------|--------|----------|-------------|
-| applicant         | string | Yes      | **Username** (auth_user) of the employee on whose behalf leave is created. |
-| start_date        | string | Yes      | YYYY-MM-DD. |
-| duration_of_days  | int    | Yes      | ≥ 1. |
-| leave_subject     | string | Yes      | Subject. |
-| reason            | string | Yes      | Reason. |
-| leave_type        | string | Yes      | `"Full_day"` or `"Half_day"` (character, not PK). |
-| half_day_slots    | string | No       | `"First_Half"` / `"Second_Half"` or null. |
-| note              | string | No       | Optional note from HR describing the emergency leave. |
-
-**Success response** – `201 Created` (same shape as in section 1: no FK ids, `applicant_name` / `team_lead_name` from Profile, with `is_emergency: true`; approvals default to `"Approved"`).
-
-**Error examples**
-
-- `403` – User is not HR.
-- `400` – Validation errors.
+**sample_response:** Created emergency application (same shape). 201.  
+**notes:** HR only. Emergency quota (10% of total_leaves) enforced; all approvers set to Approved; used_leaves and emergency_leaves updated.
 
 ---
 
-## 3. My leave summary (balance)
+### Update leave application
 
-Logged-in user’s leave balance from the LeaveSummary table: `total_leaves`, `used_leaves`, `remaining_leaves`, and emergency usage.
+**url:** `{{baseurl}}/accounts/leave-applications/<id>/`  
+**method:** PUT or PATCH  
+**body:** Allowed fields per LeaveApplicationUpdateSerializer (e.g. team_lead_approval, HR_approval, admin_approval, MD_approval, approved_by_MD_at).  
+**sample_response:** Updated application.  
+**notes:** Role-based: team lead can set team_lead_approval; HR can set HR_approval; Admin can set admin_approval; MD can set MD_approval and approved_by_MD_at. When MD approves non-emergency, used_leaves incremented. 404 if not found.
 
-| Field    | Value |
-|----------|--------|
-| **Method** | `GET` |
-| **URL**    | `{{baseurl}}/accounts/leave-applications/summary/` |
+---
 
-**Headers**
+### Delete leave application
 
-- Session cookie.
+**url:** `{{baseurl}}/accounts/leave-applications/<id>/`  
+**method:** DELETE  
+**body:** None  
+**sample_response:** 204 No Content.  
+**notes:** 404 if not found.
 
-**Body**
+---
 
-- None.
+### Leave summary
 
-**Success response** – `200 OK`
-
+**url:** `{{baseurl}}/accounts/leave-applications/summary/`  
+**method:** GET  
+**body:** None  
+**sample_response:**
 ```json
 {
-  "total_leaves": 20,
-  "used_leaves": 3,
-  "remaining_leaves": 17,
-  "emergency_leaves": 1
+  "total_leaves": 24,
+  "used_leaves": 5,
+  "remaining_leaves": 19,
+  "remaining_emergency_leave": 2
 }
 ```
-
-If the user has no LeaveSummary row, one is created with `total_leaves: 0`, `used_leaves: 0`, `remaining_leaves: 0`, `emergency_leaves: 0`.
-
----
-
-## 4. View history (my applications)
-
-Logged-in user’s own leave applications.
-
-| Field    | Value |
-|----------|--------|
-| **Method** | `GET` |
-| **URL**    | `{{baseurl}}/accounts/leave-applications/view_history/` |
-
-**Headers**
-
-- None beyond session cookie.
-
-**Body**
-
-- None.
-
-**Success response** – `200 OK` (no FK ids; user names from Profile)
-
-```json
-[
-  {
-    "id": 1,
-    "applicant_name": "John Doe",
-    "team_lead_name": "Jane Smith",
-    "start_date": "2026-03-20",
-    "duration_of_days": 2,
-    "leave_subject": "Personal leave",
-    "reason": "Family event.",
-    "leave_type_name": "Full_day",
-    "half_day_slots": null,
-    "team_lead_approval_status": "Pending",
-    "hr_approval_status": "Pending",
-    "md_approval_status": "Pending",
-    "admin_approval_status": null,
-    "is_emergency": false,
-    "application_date": "2026-03-10",
-    "approved_by_MD_at": null
-  }
-]
-```
+**notes:** Logged-in user's LeaveSummary balance.
 
 ---
 
-## 5. Approval tab (Team lead + HR / Admin / MD – single API)
+### View history (my applications)
 
-Single endpoint for all approval tasks. Returns leave applications by role and hierarchy:
-
-- **Team lead**: **all** leave applications where `team_lead` = current user (irrespective of approval status).
-- **HR**: **all** applications that have been **approved by team lead** (`team_lead_approval` = Approved), regardless of HR’s own status (history + pending).
-- **Admin**: **all** applications that have been **approved by team lead** (`team_lead_approval` = Approved), regardless of admin’s own status.
-- **MD**: **all** applications that have been **approved by HR or Admin** (`HR_approval` = Approved or `admin_approval` = Approved), regardless of MD’s own status.
-
-If the user has multiple roles (e.g. team lead and HR), the list is the union of the above (no duplicate rows).
-
-| Field    | Value |
-|----------|--------|
-| **Method** | `GET` |
-| **URL**    | `{{baseurl}}/accounts/leave-applications/approval/` 
-
-**Headers**
-
-- Session cookie.
-
-**Body**
-
-- None.
-
-**Success response** – `200 OK` (no FK ids; user names from Profile)
-
-```json
-[
-  {
-    "id": 1,
-    "applicant_name": "John Doe",
-    "team_lead_name": "Jane Smith",
-    "start_date": "2026-03-20",
-    "duration_of_days": 2,
-    "leave_subject": "Personal leave",
-    "reason": "Family event.",
-    "leave_type_name": "Full_day",
-    "half_day_slots": null,
-    "team_lead_approval_status": "Pending",
-    "hr_approval_status": "Pending",
-    "md_approval_status": "Pending",
-    "admin_approval_status": null,
-    "is_emergency": false,
-    "application_date": "2026-03-10",
-    "approved_by_MD_at": null
-  }
-]
-```
-
-MD sees the same full structure (all fields at MD level).
+**url:** `{{baseurl}}/accounts/leave-applications/view_history/`  
+**method:** GET  
+**body:** None  
+**sample_response:** Array of leave applications where applicant = current user.  
+**notes:** Same shape as list.
 
 ---
 
-## 6. List all leave applications
+### Approval tab
 
-<!-- | Field    | Value |
-|----------|--------|
-| **Method** | `GET` |
-| **URL**    | `{{baseurl}}/accounts/leave-applications/` |
-
-**Success response** – `200 OK`: array of leave application objects (same structure as above: no FK ids, `applicant_name` / `team_lead_name` from Profile). -->
-
----
-
-## 7. Retrieve one leave application
-
-<!-- | Field    | Value |
-|----------|--------|
-| **Method** | `GET` |
-| **URL**    | `{{baseurl}}/accounts/leave-applications/<id>/` |
-
-**Example:** `GET {{baseurl}}/accounts/leave-applications/1/`
-
-**Success response** – `200 OK`: single leave application object (same format: no FK ids, `applicant_name` / `team_lead_name` from Profile).
-
-**Error:** `404` if not found. -->
-
----
-
-## 8. Update leave application (PATCH)
-
-Used to approve/reject (Team lead, HR, Admin, MD) or to edit draft (applicant). Only allowed fields are applied per role.
-
-| Field    | Value |
-|----------|--------|
-| **Method** | `PATCH` |
-| **URL**    | `{{baseurl}}/accounts/leave-applications/<id>/` |
-
-**Headers**
-
-- `Content-Type: application/json`
-
-**Body** – raw JSON (partial; only send fields you are allowed to change)
-
-**Team lead** – set own approval (use status **name**, not PK):
-
-```json
-{
-  "team_lead_approval": "Rejected"
-}
-```
-
-(Allowed values: `"Approved"`, `"Pending"`, `"Rejected"`.)
-
-**HR** – set HR approval:
-
-```json
-{
-  "HR_approval": "Approved"
-}
-```
-
-**Admin** – set admin approval:
-
-```json
-{
-  "admin_approval": "Pending"
-}
-```
-
-**MD** – set MD approval (and sets `approved_by_MD_at` when Approved):
-
-```json
-{
-  "MD_approval": "Approved"
-}
-```
-
-**Applicant** – edit draft (only if no approval is yet Approved). Use **string** for `leave_type` (not PK):
-
-```json
-{
-  "start_date": "2026-03-21",
-  "duration_of_days": 3,
-  "leave_subject": "Updated subject",
-  "reason": "Updated reason.",
-  "leave_type": "Full_day",
-  "half_day_slots": null
-}
-```
-
-**Success response** – `200 OK`: full leave application object (same format: no FK ids, `applicant_name` / `team_lead_name` from Profile).
-
-**Error examples**
-
-- `403` – Not allowed to change this field or application.
-- `400` – `{"non_field_errors": ["Cannot edit application after an approval has been granted."]}` (applicant editing after approval).
-- `400` – `{"non_field_errors": ["Insufficient leave balance..."]}` when applicant increases duration.
-
----
-
-## 9. Update leave application (PUT)
-
-Same URL as PATCH; send full allowed payload. Same role rules and response shape as section 8.
-
-| Field    | Value |
-|----------|--------|
-| **Method** | `PUT` |
-| **URL**    | `{{baseurl}}/accounts/leave-applications/<id>/` |
-
----
-
-## 10. Delete leave application
-
-Applicant can delete own application only if MD has not approved it.
-
-| Field    | Value |
-|----------|--------|
-| **Method** | `DELETE` |
-| **URL**    | `{{baseurl}}/accounts/leave-applications/<id>/` |
-
-**Success response** – `204 No Content` (no body).
-
-**Error examples**
-
-- `403` – `{"detail": "You may only delete your own leave application."}`
-- `403` – `{"detail": "Cannot delete an application that has been approved by MD."}`
-
----
-
-## Quick reference
-
-| Purpose              | Method | URL |
-|----------------------|--------|-----|
-| Apply for leave      | POST   | `/accounts/leave-applications/` |
-| Emergency leave (HR) | POST   | `/accounts/leave-applications/emergency/` |
-| My leave summary     | GET    | `/accounts/leave-applications/summary/` |
-| My history           | GET    | `/accounts/leave-applications/view_history/` |
-| Approval (team lead / HR / Admin / MD) | GET | `/accounts/leave-applications/approval/` |
-| List all             | GET    | `/accounts/leave-applications/` |
-| Get one              | GET    | `/accounts/leave-applications/<id>/` |
-| Update               | PATCH  | `/accounts/leave-applications/<id>/` |
-| Update               | PUT    | `/accounts/leave-applications/<id>/` |
-| Delete               | DELETE | `/accounts/leave-applications/<id>/` |
-
-**Input rule (all leave APIs):** Send **strings** for any FK-like field (no PKs).  
-- **Approval (PATCH/PUT):** `"Approved"`, `"Pending"`, `"Rejected"`.  
-- **leave_type (POST create, POST emergency, PATCH/PUT draft):** `"Full_day"` or `"Half_day"`.  
-- **applicant (POST emergency):** username string.  
-
-**Response rule:** All leave responses return **strings** for FKs (e.g. `applicant_name`, `team_lead_name`, `leave_type_name`, `*_approval_status`); no FK ids in the body.
-<!-- END: leave_api_testing.md content -->
-
+**url:** `{{baseurl}}/accounts/leave-applications/approval/`  
+**method:** GET  
+**body:** None  
+**sample_response:** Array of leave applications for current user's approval queue.  
+**notes:** Team lead: entries where team_lead = user. HR: entries with team_lead_approval = Approved. Admin: same. MD: entries with HR_approval = Approved or admin_approval = Approved.
