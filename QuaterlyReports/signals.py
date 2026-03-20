@@ -21,6 +21,7 @@ from .models import FunctionsEntries, FunctionsEntriesShare
 from notifications.models import Notification, notification_type
 from accounts.filters import _get_users_Name_sync
 from ems.utils import gmt_to_ist_str
+from ems.channel_groups import user_group_name
 
 User = get_user_model()
 # Username of the MD user who receives notifications for new entries, approvals, and creator updates.
@@ -61,7 +62,7 @@ def _send_notification_and_ws(from_user, recipient, msg, category, title, extra=
             ws_extra = dict(extra or {})
             ws_extra["time"] = gmt_to_ist_str(notification_obj.created_at, "%d/%m/%Y, %H:%M:%S")
             async_to_sync(channel_layer.group_send)(
-                f"user_{recipient.username}",
+                user_group_name(recipient.username),
                 {
                     "type": "send_notification",
                     "category": category,

@@ -14,6 +14,7 @@ from django.utils import timezone
 from channels.layers import get_channel_layer
 from accounts.filters import _get_users_Name_sync
 from ems.utils import gmt_to_ist_str
+from ems.channel_groups import user_group_name
 
 from .models import GroupChats, GroupMessages, GroupMembers, IndividualMessages
 from .chat_ws_utils import build_message_payload_for_ws, chat_id_from_message
@@ -56,7 +57,7 @@ def _create_notification_for_groupmessage_sync(sender, instance: GroupMessages, 
             else:
                 extra_time = gmt_to_ist_str(timezone.now(), "%d/%m/%Y, %H:%M:%S")
             async_to_sync(channel_layer.group_send)(
-                f"user_{m.participant.username}",
+                user_group_name(m.participant.username),
                 {
                     "type": "send_notification",
                     "category": "Group_message",
@@ -199,7 +200,7 @@ def _create_notification_for_chatmessage_sync(sender, instance: IndividualMessag
         else:
             extra_time = gmt_to_ist_str(timezone.now(), "%d/%m/%Y, %H:%M:%S")
         async_to_sync(channel_layer.group_send)(
-            f"user_{other.username}",
+            user_group_name(other.username),
             {
                 "type": "send_notification",
                 "category": "Private_message",
@@ -254,7 +255,7 @@ def _notify_added_to_group_sync(sender, created, instance: GroupMembers, **kwarg
         else:
             extra_time = gmt_to_ist_str(timezone.now(), "%d/%m/%Y, %H:%M:%S")
         async_to_sync(channel_layer.group_send)(
-            f"user_{added_user.username}",
+            user_group_name(added_user.username),
             {
                 "type": "send_notification",
                 "title": "Added to a New Group",
@@ -314,7 +315,7 @@ def _notify_removed_from_group_sync(sender, instance: GroupMembers, **kwargs):
         else:
             extra_time = gmt_to_ist_str(timezone.now(), "%d/%m/%Y, %H:%M:%S")
         async_to_sync(channel_layer.group_send)(
-            f"user_{removed_user.username}",
+            user_group_name(removed_user.username),
             {
                 "type": "send_notification",
                 "title": "Removed from the group",
@@ -367,7 +368,7 @@ def _notify_group_deleted_sync(sender, instance: GroupChats, **kwargs):
             else:
                 extra_time = gmt_to_ist_str(timezone.now(), "%d/%m/%Y, %H:%M:%S")
             async_to_sync(channel_layer.group_send)(
-                f"user_{gm.participant.username}",
+                user_group_name(gm.participant.username),
                 {
                     "type": "send_notification",
                     "title": "Group deleted",

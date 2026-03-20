@@ -13,6 +13,7 @@ import json
 import logging
 
 from channels.generic.websocket import AsyncWebsocketConsumer
+from ems.channel_groups import call_group_name, group_call_group_name
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +35,7 @@ class CallConsumer(AsyncWebsocketConsumer):
             )
             await self.close(code=4001)
             return
-        self.room_name = f"call_{user.username}"
+        self.room_name = call_group_name(user.username)
         await self.channel_layer.group_add(self.room_name, self.channel_name)
         self.group_call_rooms = set()  # group_call_{id} names for leave on disconnect
         await self.accept()
@@ -67,7 +68,7 @@ class CallConsumer(AsyncWebsocketConsumer):
             if call_id is not None:
                 try:
                     call_id = int(call_id)
-                    group_name = f"group_call_{call_id}"
+                    group_name = group_call_group_name(call_id)
                     await self.channel_layer.group_add(group_name, self.channel_name)
                     self.group_call_rooms.add(group_name)
                 except (TypeError, ValueError):
@@ -78,7 +79,7 @@ class CallConsumer(AsyncWebsocketConsumer):
             if call_id is not None:
                 try:
                     call_id = int(call_id)
-                    group_name = f"group_call_{call_id}"
+                    group_name = group_call_group_name(call_id)
                     await self.channel_layer.group_discard(group_name, self.channel_name)
                     self.group_call_rooms.discard(group_name)
                 except (TypeError, ValueError):
@@ -106,7 +107,7 @@ class CallConsumer(AsyncWebsocketConsumer):
         try:
             if msg_type == "webrtc_offer":
                 await self.channel_layer.group_send(
-                    f"call_{target}",
+                    call_group_name(target),
                     {
                         "type": "webrtc_signal",
                         "payload": data,
@@ -115,7 +116,7 @@ class CallConsumer(AsyncWebsocketConsumer):
                 )
             elif msg_type == "webrtc_answer":
                 await self.channel_layer.group_send(
-                    f"call_{target}",
+                    call_group_name(target),
                     {
                         "type": "webrtc_signal",
                         "payload": data,
@@ -124,7 +125,7 @@ class CallConsumer(AsyncWebsocketConsumer):
                 )
             elif msg_type == "ice_candidate":
                 await self.channel_layer.group_send(
-                    f"call_{target}",
+                    call_group_name(target),
                     {
                         "type": "webrtc_signal",
                         "payload": data,
@@ -137,7 +138,7 @@ class CallConsumer(AsyncWebsocketConsumer):
                     user.username, target,
                 )
                 await self.channel_layer.group_send(
-                    f"call_{target}",
+                    call_group_name(target),
                     {
                         "type": "call_ended",
                         "payload": data,
