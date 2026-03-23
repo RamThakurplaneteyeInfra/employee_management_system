@@ -138,3 +138,52 @@ class Announcement(models.Model):
 
     def __str__(self):
         return (self.announcement[:50] + "…") if len(self.announcement) > 50 else self.announcement
+
+
+# =============================================================================
+# Schema: attention (separate from Alert/“alter”)
+# =============================================================================
+class Attention(models.Model):
+    """Attention: separate section from Alert (“alter”) with role-based visibility."""
+
+    STATUS_PENDING = 1
+    STATUS_IN_PROGRESS = 2
+    STATUS_COMPLETE = 3
+    STATUS_CHOICES = [
+        (STATUS_PENDING, "pending"),
+        (STATUS_IN_PROGRESS, "in_progress"),
+        (STATUS_COMPLETE, "complete"),
+    ]
+
+    attention_title = models.TextField()
+    description = models.TextField()
+    # 1=pending, 2=in_progress, 3=complete
+    # Non-null + default ensures existing rows backfill automatically during migration.
+    status = models.IntegerField(choices=STATUS_CHOICES, default=STATUS_PENDING, null=False, blank=False)
+    attention_creator = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="created_attentions",
+        db_column="attention_creator_id",
+        to_field="username",
+    )
+    # Employee selected from frontend dropdown; used for HR/Admin visibility scoping.
+    # Nullable for backward compatibility with any existing Attention rows created
+    # before this field existed.
+    target_employee = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="targeted_attentions",
+        db_column="target_employee_id",
+        to_field="username",
+        null=True,
+        blank=True,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'alerts"."Attention'
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return self.attention_title[:50] or "(no title)"

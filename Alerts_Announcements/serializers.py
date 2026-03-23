@@ -8,7 +8,7 @@ from ems.utils import gmt_to_ist_str
 from project.models import Product
 from task_management.models import TaskStatus
 
-from .models import Alert, AlertType, Announcement, AnnouncementType
+from .models import Alert, AlertType, Announcement, AnnouncementType, Attention
 
 
 # -------- Alert types (read-only list) --------
@@ -155,4 +155,100 @@ class AnnouncementSerializer(serializers.ModelSerializer):
         if attrs.get("percentage") is None:
             raise serializers.ValidationError({"percentage": "This field is required."})
 
+        return attrs
+
+
+# -------- Attention --------
+class AttentionSerializer(serializers.ModelSerializer):
+    """
+    Attention is a separate model/section from Alert (“alter”).
+    GET returns creator display name.
+    """
+
+    class StatusField(serializers.Field):
+        """
+        Accept status as:
+        - int 1/2/3
+        - numeric strings "1"/"2"/"3"
+        - strings: pending, in_progress, in progress, complete
+        Output is always int 1..3.
+        """
+
+        def to_representation(self, value):
+            return int(value) if value is not None else None
+
+        def to_internal_value(self, data):
+            if data is None:
+                raise serializers.ValidationError("status is required.")
+
+            # ints: 1/2/3
+            if isinstance(data, int):
+                status_int = data
+            else:
+                # numeric strings / textual statuses
+                if isinstance(data, str):
+                    raw = data.strip()
+                else:
+                    raw = str(data).strip()
+
+                # Numeric string support
+                if raw.isdigit():
+                    status_int = int(raw)
+                else:
+                    normalized = raw.lower().replace("_", " ")
+                    normalized = " ".join(normalized.split())  # collapse whitespace
+                    if normalized == "pending":
+                        status_int = 1
+                    elif normalized in ("in progress", "inprogress"):
+                        status_int = 2
+                    elif normalized == "complete":
+                        status_int = 3
+                    else:
+                        raise serializers.ValidationError(
+                            "Invalid status. Use 1/2/3 or pending/in_progress/complete."
+                        )
+
+            if status_int not in (1, 2, 3):
+                raise serializers.ValidationError("Invalid status value. Allowed: 1, 2, 3.")
+            return status_int
+
+    attention_creator = serializers.SerializerMethodField()
+    status = StatusField(required=False)
+    target_employee = serializers.SlugRelatedField(
+        queryset=User.objects.all(),
+        slug_field="username",
+        required=False,
+        allow_null=True,
+    )
+
+    class Meta:
+        model = Attention
+        fields = [
+            "id",
+            "attention_title",
+            "description",
+            "attention_creator",
+            "status",
+            "target_employee",
+            "created_at",
+        ]
+        read_only_fields = ["id", "attention_creator", "created_at"]
+
+    def get_attention_creator(self, obj):
+        return _get_users_Name_sync(obj.attention_creator)
+
+    def create(self, validated_data):
+        # attention_creator is set in viewset.
+        return super().create(validated_data)
+
+    def validate(self, attrs):
+        """
+        Enforce that target_employee is present for create/update requests.
+        Allow missing on partial PATCH where user might only edit text fields.
+        """
+        if self.partial:
+            return attrs
+        # For PUT: required; for POST: required.
+        if "target_employee" not in attrs or attrs.get("target_employee") is None:
+            raise serializers.ValidationError({"target_employee": "This field is required."})
         return attrs

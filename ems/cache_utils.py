@@ -236,6 +236,8 @@ _MUTATION_PATH_TO_GET_PREFIXES = [
     ("alertsapi:alerts", ["alertsapi:alerts"]),
     # Announcements: POST/PUT/PATCH/DELETE on announcements invalidate GET announcements list/detail
     ("alertsapi:announcements", ["alertsapi:announcements"]),
+    # Attention: POST/PUT/PATCH/DELETE on attention invalidate GET attention list/detail
+    ("alertsapi:attention", ["alertsapi:attention"]),
     # events (birthday counter)
     ("eventsapi:events:birthdaycounter", ["eventsapi:events:birthdaycounter"]),
     # QuaterlyReports (root-mounted: addDayEntries, changeStatus, deleteEntry, ActionableEntries, etc.)

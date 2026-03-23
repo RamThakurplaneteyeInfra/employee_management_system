@@ -213,7 +213,7 @@ DATABASES = {
             "channel_binding": "require",
         },
         # "CONN_MAX_AGE": 0,
-        # "DISABLE_SERVER_SIDE_CURSORS": True,
+        "DISABLE_SERVER_SIDE_CURSORS": True,
         # "POOL_OPTIONS": {
         #     "POOL_SIZE": DB_POOL_SIZE,
         #     "MAX_OVERFLOW": DB_MAX_OVERFLOW,

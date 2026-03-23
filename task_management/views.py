@@ -69,8 +69,11 @@ async def create_task(request: HttpRequest):
     try:
         await sync_to_async(_create_task_sync)(request.user, data)
         return JsonResponse({"message": "Task created"}, status=status.HTTP_201_CREATED)
-    except (Http404, Exception) as e:
-        return JsonResponse({"message": f"{e}"}, status=status.HTTP_403_FORBIDDEN)
+    except Http404 as e:
+        # Most commonly: invalid TaskTypes.type_name or unknown usernames in assigned_to
+        return JsonResponse({"message": f"{e}"}, status=status.HTTP_400_BAD_REQUEST)
+    except Exception as e:
+        return JsonResponse({"message": f"{e}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 # ==================== update_task ====================

@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import AlertType, Alert, AnnouncementType, Announcement
+from .models import AlertType, Alert, AnnouncementType, Announcement, Attention
 
 
 @admin.register(AlertType)
@@ -23,3 +23,10 @@ class AnnouncementTypeAdmin(admin.ModelAdmin):
 class AnnouncementAdmin(admin.ModelAdmin):
     list_display = ("announcement", "type", "created_by", "product", "percentage", "created_at")
     list_filter = ("type", "product")
+
+
+@admin.register(Attention)
+class AttentionAdmin(admin.ModelAdmin):
+    list_display = ("attention_title", "attention_creator", "status", "created_at")
+    list_filter = ("status",)
+    search_fields = ("attention_title", "description")
