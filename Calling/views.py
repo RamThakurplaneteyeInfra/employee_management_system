@@ -16,6 +16,7 @@ from datetime import timedelta
 from accounts.models import User, Profile
 from ems.verify_methods import *
 from ems.utils import gmt_to_ist_str
+from ems.channel_groups import call_group_name
 from .models import Call, GroupCall, GroupCallParticipant, MissedCallCount
 
 # ==================== Voice/Video Call APIs ====================
@@ -66,7 +67,7 @@ def _initiate_call_sync(req, user_id, call_type):
     if channel_layer:
         try:
             async_to_sync(channel_layer.group_send)(
-                f"call_{receiver.username}",
+                call_group_name(receiver.username),
                 {
                     "type": "incoming_call",
                     "payload": {
@@ -202,7 +203,7 @@ def _notify_sender_call_accepted(sender_username, receiver_username, call_id):
     if channel_layer:
         try:
             async_to_sync(channel_layer.group_send)(
-                f"call_{sender_username}",
+                call_group_name(sender_username),
                 {
                     "type": "call_accepted",
                     "payload": {
@@ -228,7 +229,7 @@ def _notify_sender_call_declined(sender_username, receiver_username, call_id):
     if channel_layer:
         try:
             async_to_sync(channel_layer.group_send)(
-                f"call_{sender_username}",
+                call_group_name(sender_username),
                 {
                     "type": "call_declined",
                     "payload": {
@@ -339,7 +340,7 @@ async def end_call(request: HttpRequest):
         channel_layer = get_channel_layer()
         if channel_layer:
             await channel_layer.group_send(
-                f"call_{other_username}",
+                call_group_name(other_username),
                 {
                     "type": "call_ended",
                     "from_user": ended_by,
@@ -492,7 +493,7 @@ async def screen_share(request: HttpRequest):
             if result.get("kind") == "call":
                 payload["call_id"] = result["call_id"]
                 await channel_layer.group_send(
-                    f"call_{result['other_username']}",
+                    call_group_name(result["other_username"]),
                     {"type": "screen_shared", "payload": payload},
                 )
                 logger.info("screen_share: notified %s (1:1 call %s)", result["other_username"], result["call_id"])
@@ -554,7 +555,7 @@ async def stop_screen_share(request: HttpRequest):
             if result.get("kind") == "call":
                 payload["call_id"] = result["call_id"]
                 await channel_layer.group_send(
-                    f"call_{result['other_username']}",
+                    call_group_name(result["other_username"]),
                     {"type": "screen_shared", "payload": payload},
                 )
                 logger.info("stop_screen_share: notified %s (1:1 call %s)", result["other_username"], result["call_id"])
@@ -756,7 +757,7 @@ def _initiate_group_call_sync(req, user_ids, call_type):
         for username in usernames:
             try:
                 async_to_sync(channel_layer.group_send)(
-                    f"call_{username}",
+                    call_group_name(username),
                     {"type": "incoming_group_call", "payload": payload},
                 )
             except Exception:

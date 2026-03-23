@@ -8,6 +8,7 @@ from datetime import date
 
 from accounts.filters import _get_users_Name_sync
 from ems.utils import gmt_to_ist_str
+from ems.channel_groups import user_group_name
 
 from .models import BookSlot, SlotMembers
 from notifications.models import Notification, notification_type
@@ -53,7 +54,7 @@ def _notify_slot_booked_sync(sender, created, instance: SlotMembers, **kwargs):
         return
     try:
         async_to_sync(channel_layer.group_send)(
-            f"user_{member.username}",
+            user_group_name(member.username),
             {
                 "type": "send_notification",
                 "title": "Meeting booked",

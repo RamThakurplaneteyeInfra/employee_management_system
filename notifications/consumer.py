@@ -7,14 +7,15 @@ import json
 import logging
 from asgiref.sync import sync_to_async
 from channels.generic.websocket import AsyncWebsocketConsumer
+from ems.channel_groups import product_group_name, user_group_name
 
 logger = logging.getLogger(__name__)
 
 
 def _product_group_name(product_label: str) -> str:
     """Build a safe channel group name from a Product.name (spaces → underscores)."""
-    safe = (product_label or "").strip().replace(" ", "_")
-    return f"notifications_product_{safe}"
+    # Backwards-compatible wrapper used by other modules.
+    return product_group_name(product_label)
 
 
 def _fetch_product_names_sync():
@@ -49,7 +50,7 @@ class NotificationConsumer(AsyncWebsocketConsumer):
             await self.close(code=4001)
             return
 
-        self.room_name = f"user_{user.username}"
+        self.room_name = user_group_name(user.username)
         await self.channel_layer.group_add(self.room_name, self.channel_name)
 
         # Subscribe to every product group derived from project.Product (DB)

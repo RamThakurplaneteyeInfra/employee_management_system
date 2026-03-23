@@ -12,6 +12,7 @@ from django.utils import timezone
 from channels.layers import get_channel_layer
 from accounts.filters import _get_users_Name_sync
 from ems.utils import gmt_to_ist_str
+from ems.channel_groups import user_group_name
 
 from .models import (
     Task,
@@ -101,7 +102,7 @@ def _task_assigned_notification_sync(sender, created, instance: TaskAssignies, *
     )
     channel_layer = get_channel_layer()
     async_to_sync(channel_layer.group_send)(
-        f"user_{assignee.username}",
+        user_group_name(assignee.username),
         {"type": "send_notification", "title": f"New task Assigned", "category": "Task_Created", "message": msg, "extra": {"time": gmt_to_ist_str(notification_obj.created_at, "%d/%m/%Y, %H:%M:%S")}},
     )
 
@@ -143,7 +144,7 @@ def _task_message_notification_sync(sender, created, instance: TaskMessage, **kw
             else:
                 extra_time = gmt_to_ist_str(timezone.now(), "%d/%m/%Y, %H:%M:%S")
             async_to_sync(channel_layer.group_send)(
-                f"user_{assignee.username}",
+                user_group_name(assignee.username),
                 {
                     "type": "send_notification",
                     "title": f"Task Message for the task '{task.title}'",

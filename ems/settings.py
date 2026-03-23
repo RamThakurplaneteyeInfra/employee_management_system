@@ -359,7 +359,10 @@ if os.getenv("is_developement") == "True":
 else:
     DEBUG = True
     CSRF_COOKIE_SECURE = os.getenv("CSRF_COOKIE_SECURE", False)
-    SESSION_COOKIE_SECURE = os.getenv("CSRF_COOKIE_SECURE", False)
+    # SESSION_COOKIE_SECURE must come from SESSION_COOKIE_SECURE.
+    # Using CSRF_COOKIE_SECURE here can prevent cookies being sent on HTTPS
+    # WebSocket handshakes when CSRF_COOKIE_SECURE is not configured.
+    SESSION_COOKIE_SECURE = os.getenv("SESSION_COOKIE_SECURE", False)
     SESSION_COOKIE_SAMESITE = os.getenv("SESSION_COOKIE_SAMESITE", "None")
     CSRF_COOKIE_SAMESITE = os.getenv("CSRF_COOKIE_SAMESITE", "None")
     SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
