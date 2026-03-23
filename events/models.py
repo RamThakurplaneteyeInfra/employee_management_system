@@ -51,6 +51,13 @@ class BookSlot(models.Model):
     meeting_type = models.CharField(max_length=20,choices=MEETING_TYPE_CHOICES)
     status = models.ForeignKey(BookingStatus,on_delete=models.CASCADE,related_name="slotstatus",null=True,blank=True)
     notes = models.TextField(blank=True, null=True, help_text="Optional; required when status is set to Done.")
+    # Optional "Schedule Hub done" text inputs (not required).
+    need_more_discussion = models.TextField(blank=True, null=True)
+    dispute = models.TextField(blank=True, null=True)
+    in_future = models.TextField(blank=True, null=True)
+    deliverable = models.TextField(blank=True, null=True)
+    not_deliverable = models.TextField(blank=True, null=True)
+    opportunity = models.TextField(blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     created_by=models.ForeignKey(User,on_delete=models.CASCADE,related_name="slotcreater",null=True)
     members=models.ManyToManyField(User,through="Slotmembers")

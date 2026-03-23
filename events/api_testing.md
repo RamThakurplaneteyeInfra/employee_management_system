@@ -76,6 +76,19 @@
 **url:** `{{baseurl}}/eventsapi/bookslots/<id>/`  
 **method:** PUT or PATCH  
 **body:** Same fields as create (partial allowed for PATCH).  
+**example body (mark Done + optional done-fields):**
+```json
+{
+  "status": "Done",
+  "notes": null,
+  "need_more_discussion": "More time needed for this point.",
+  "dispute": "",
+  "in_future": "Will revisit next month.",
+  "deliverable": "Final report draft.",
+  "not_deliverable": null,
+  "opportunity": "Good chance for follow-up project."
+}
+```
 **sample_response:** Updated slot object.  
 **notes:** 404 if id not found.
 

@@ -32,12 +32,25 @@ class BookSlotSerializer(serializers.ModelSerializer):
     member_details = serializers.SerializerMethodField()
     creater_details = serializers.SerializerMethodField()
     notes = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    # Optional "Schedule Hub done" inputs (not required).
+    need_more_discussion = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    dispute = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    in_future = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    deliverable = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    not_deliverable = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    opportunity = serializers.CharField(required=False, allow_blank=True, allow_null=True)
 
     class Meta:
         model = BookSlot
         fields = [
             'id', 'meeting_title', 'date', 'start_time', 'end_time', 
             'room', 'description', 'meeting_type', 'status', 'notes', "members",
+            'need_more_discussion',
+            'dispute',
+            'in_future',
+            'deliverable',
+            'not_deliverable',
+            'opportunity',
             'created_at','member_details',"creater_details","created_by"
         ]
 
@@ -136,14 +149,9 @@ class BookSlotSerializer(serializers.ModelSerializer):
         # When changing status to "Done", notes are required (from payload and/or slot object).
         new_status = attrs.get("status")
         if new_status is not None and str(getattr(new_status, "status_name", "") or "").strip().lower() == "done":
-            # Accept notes from payload or, on update, from the existing slot object
-            notes_from_payload = attrs.get("notes")
-            notes_from_slot = getattr(self.instance, "notes", None) if self.instance else None
-            notes_value = notes_from_payload if (notes_from_payload is not None and (not isinstance(notes_from_payload, str) or notes_from_payload.strip())) else notes_from_slot
-            if notes_value is None or (isinstance(notes_value, str) and not notes_value.strip()):
-                raise serializers.ValidationError(
-                    {"notes": "Notes cannot be null while changing status to 'Done'."}
-                )
+            # notes are optional for Done. Keep existing behavior for other validations.
+            # Accept notes from payload or, on update, from the existing slot object.
+            _ = getattr(self.instance, "notes", None) if self.instance else None
 
         return attrs
 
