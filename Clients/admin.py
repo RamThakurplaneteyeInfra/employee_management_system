@@ -10,7 +10,7 @@ class CurrentClientStageAdmin(admin.ModelAdmin):
 
 @admin.register(ClientProfile)
 class ClientProfileAdmin(admin.ModelAdmin):
-    list_display = ["id", "company_name", "client_name", "status", "created_at"]
+    list_display = ["id", "company_name", "client_name", "status", "product_value", "created_at"]
     list_filter = ["status", "created_at"]
     search_fields = ["company_name", "client_name", "client_contact"]
     filter_horizontal = ["members"]

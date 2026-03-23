@@ -3,7 +3,7 @@ Client Lead API - Add Client Lead form.
 No database changes. Uses existing ClientProfile, CurrentClientStage, ClientProfileMembers.
 """
 import json
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from django.utils import timezone
 from django.db.models import Prefetch, Q, F
 from ems.RequiredImports import sync_to_async, JsonResponse, status, HttpRequest
@@ -135,6 +135,31 @@ def _get_user_display_name(u):
     return full or u.username
 
 
+def _coerce_product_value(raw):
+    """
+    Parse API product_value to Decimal for DB. None / empty → None.
+    Raises ValueError if a non-empty value is not a valid finite number.
+    """
+    if raw is None:
+        return None
+    if isinstance(raw, str) and not raw.strip():
+        return None
+    try:
+        d = Decimal(str(raw))
+    except (InvalidOperation, TypeError, ValueError):
+        raise ValueError("product_value must be a valid number") from None
+    if not d.is_finite():
+        raise ValueError("product_value must be a finite number")
+    return d
+
+
+def _product_value_for_json(c):
+    """JSON-serializable product_value (float) or None."""
+    if c.product_value is None:
+        return None
+    return float(c.product_value)
+
+
 def _note_to_dict(conv):
     return {
         "id": conv.id,
@@ -160,6 +185,7 @@ def _profile_to_dict(c):
         "status_name": c.status.name if c.status else None,
         "product_id": c.Product_id,
         "product_name": c.Product.name if c.Product else None,
+        "product_value": _product_value_for_json(c),
         "created_by": c.created_by.username if c.created_by else None,
         "members": [_get_user_display_name(u) for u in c.members.all()],
         "notes": notes,
@@ -309,6 +335,10 @@ def _create_profile_sync(user, data):
     if product_name:
         product_obj = Project.objects.filter(name__iexact=str(product_name).strip()).first()
 
+    product_value = None
+    if "product_value" in data:
+        product_value = _coerce_product_value(data.get("product_value"))
+
     c = ClientProfile.objects.create(
         company_name=data.get("company_name", ""),
         client_name=data.get("client_name", ""),
@@ -319,6 +349,7 @@ def _create_profile_sync(user, data):
         gst_number=data.get("gst_number", ""),
         status=status_obj,
         Product=product_obj,
+        product_value=product_value,
         created_by=user,
     )
 
@@ -382,6 +413,8 @@ def _update_profile_sync(profile_id, data):
             c.Product = Project.objects.filter(name__iexact=str(pn).strip()).first()
         else:
             c.Product = None
+    if "product_value" in data:
+        c.product_value = _coerce_product_value(data.get("product_value"))
     if "members" in data or "employees" in data:
         members = data.get("members", data.get("employees", []))
         c.members.clear()

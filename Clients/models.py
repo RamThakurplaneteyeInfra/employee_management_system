@@ -55,6 +55,13 @@ class ClientProfile(models.Model):
         blank=True,
         db_index=True,
     )
+    product_value = models.DecimalField(
+        max_digits=14,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Optional numeric value associated with the product (e.g. quote or amount).",
+    )
     members = models.ManyToManyField(
         settings.AUTH_USER_MODEL,
         through="ClientProfileMembers",

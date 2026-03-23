@@ -181,9 +181,10 @@ class AttentionViewSet(ModelViewSet):
         serializer.save()
 
     def perform_destroy(self, instance):
-        # Policy: nobody can delete attentions created by someone else.
-        # (Even MD/Admin/HR can view all, but only creators can delete.)
+        # attention_creator FK uses to_field="username" → attention_creator_id is username, not User.pk.
+        # Compare with User instance (or username), never request.user.id.
+        is_creator = instance.attention_creator == self.request.user
         role = (self._get_role(self.request.user) or "").upper()
-        if instance.attention_creator_id != self.request.user.id and role not in ("MD", "HR", "ADMIN"):
+        if not is_creator and role not in ("MD", "HR", "ADMIN"):
             raise PermissionDenied("You are not allowed to delete this attention.")
         instance.delete()

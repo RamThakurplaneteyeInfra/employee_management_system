@@ -66,6 +66,7 @@ Response 200:
     "status_name": "Leads",
     "product_id": 5,
     "product_name": "Cropeye",
+    "product_value": 12345.67,
     "created_by": "admin",
     "members": [
       { "id": 2, "username": "employee1" },
@@ -93,8 +94,11 @@ Request:
   "gst_number": "27AABCU9603R1ZM",
   "status_id": 1,
   "product_name": "Cropeye",
+  "product_value": 12345.67,
   "members": [1, 2, 3]
 }
+
+Optional: omit "product_value" or set to null. Integers are allowed (e.g. 8898 → 8898.00). Invalid strings return 400.
 
 Response 201:
 {
@@ -127,6 +131,7 @@ Response 200:
   "status_name": "Leads",
   "product_id": 5,
   "product_name": "Cropeye",
+  "product_value": 12345.67,
   "created_by": "admin",
   "members": [
     { "id": 2, "username": "employee1" },
@@ -155,8 +160,11 @@ Request:
   "representative_name": "Jane Smith",
   "status_id": 2,
   "product_name": "RAMS",
+  "product_value": 8898,
   "members": [2, 3, 4]
 }
+
+Optional: include "product_value": null to clear the value on update.
 
 Response 200:
 {
