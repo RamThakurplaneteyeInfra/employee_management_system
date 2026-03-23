@@ -118,6 +118,15 @@ class GroupMessages(models.Model):
     deleted_at = models.DateTimeField(default=None, null=True, blank=True)
     updated_at = models.DateTimeField(blank=True, null=True)
     content = models.TextField()
+    # WhatsApp-style reply: link to another message in the same group.
+    reply_to = models.ForeignKey(
+        "self",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="group_replies",
+        db_column="reply_to_id",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -145,6 +154,15 @@ class IndividualMessages(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     seen = models.BooleanField(default=False)
     content = models.TextField()
+    # WhatsApp-style reply: link to another message in the same DM.
+    reply_to = models.ForeignKey(
+        "self",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="dm_replies",
+        db_column="reply_to_id",
+    )
 
     class Meta:
         db_table = 'Chats'

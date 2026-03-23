@@ -266,6 +266,36 @@ def _parse_attachment_ids(value):
     return []
 
 
+def _post_body_message_text(data):
+    """
+    Text body for postMessages: legacy key `Message` (capital M) and lowercase alias `message`.
+    If both are present, `Message` wins when non-empty after trimming.
+    """
+    for key in ("Message", "message"):
+        val = data.get(key)
+        if val is not None:
+            s = str(val).strip()
+            if s:
+                return s
+    return ""
+
+
+def _parse_reply_to_id(data):
+    """
+    Optional replyTo / reply_to from JSON body. Returns int pk or None.
+    Raises ValueError if key is present but not a valid integer.
+    """
+    if "replyTo" not in data and "reply_to" not in data:
+        return None
+    raw = data.get("replyTo") if "replyTo" in data else data.get("reply_to")
+    if raw is None or raw == "":
+        return None
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        raise ValueError("replyTo must be an integer message id") from None
+
+
 def _attachment_is_linked(att):
     """True if attachment is already used (linked to a message or standalone in group/chat)."""
     return bool(
@@ -306,7 +336,12 @@ def _post_message_sync(req, chat_id):
         return verify_method
 
     data = load_data(req)
-    message_text = (data.get("Message") or "").strip()
+    try:
+        reply_pk = _parse_reply_to_id(data)
+    except ValueError as e:
+        return JsonResponse({"message": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+    message_text = _post_body_message_text(data)
     attachment_ids = _parse_attachment_ids(data.get("attachment_ids"))
     has_text = bool(message_text)
     has_attachments = bool(attachment_ids)
@@ -314,23 +349,44 @@ def _post_message_sync(req, chat_id):
     if not (has_text or has_attachments):
         return JsonResponse({"message": "Message or attachments required"}, status=status.HTTP_400_BAD_REQUEST)
 
+    if reply_pk is not None and not has_text:
+        return JsonResponse(
+            {"message": "replyTo requires text in Message or message (cannot reply on attachment-only post)"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
     is_group = check_group_or_chat(id=chat_id)
 
+    reply_to_obj = None
     if is_group:
         conv = _get_group_object_sync(group_id=chat_id)
         if not isinstance(conv, GroupChats):
             raise Http404("Invalid Group_id")
-        _post_to_group(req, conv, message_text, attachment_ids, has_text, has_attachments)
+        if reply_pk is not None:
+            reply_to_obj = GroupMessages.objects.filter(pk=reply_pk, group=conv).first()
+            if reply_to_obj is None:
+                return JsonResponse(
+                    {"message": "Invalid replyTo: message not found in this group"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+        _post_to_group(req, conv, message_text, attachment_ids, has_text, has_attachments, reply_to=reply_to_obj)
         conv.save(update_fields=["last_message_at"])
     else:
         conv = _get_individual_chat_object_sync(chat_id)
         if not isinstance(conv, IndividualChats):
             raise Http404("Invalid chat_id")
-        _post_to_chat(req, conv, message_text, attachment_ids, has_text, has_attachments)
+        if reply_pk is not None:
+            reply_to_obj = IndividualMessages.objects.filter(pk=reply_pk, chat=conv).first()
+            if reply_to_obj is None:
+                return JsonResponse(
+                    {"message": "Invalid replyTo: message not found in this chat"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+        _post_to_chat(req, conv, message_text, attachment_ids, has_text, has_attachments, reply_to=reply_to_obj)
         conv.save(update_fields=["last_message_at"])
 
 
-def _post_to_group(req, group_obj, message_text, attachment_ids, has_text, has_attachments):
+def _post_to_group(req, group_obj, message_text, attachment_ids, has_text, has_attachments, reply_to=None):
     """
     Handle post_message for a group.
     - Empty content + attachments → standalone: set group_id on MessageAttachment.
@@ -343,6 +399,7 @@ def _post_to_group(req, group_obj, message_text, attachment_ids, has_text, has_a
             group=group_obj,
             sender=req.user,
             content=message_text,
+            reply_to=reply_to,
         )
         unlinked = _get_unlinked_attachments_queryset(req.user, attachment_ids)
         unlinked.update(group_message=msg, group=None, chat=None)
@@ -353,6 +410,7 @@ def _post_to_group(req, group_obj, message_text, attachment_ids, has_text, has_a
             group=group_obj,
             sender=req.user,
             content=message_text,
+            reply_to=reply_to,
         )
     else:
         # Standalone: empty content + attachments → add group_id to MessageAttachment
@@ -360,7 +418,7 @@ def _post_to_group(req, group_obj, message_text, attachment_ids, has_text, has_a
         unlinked.update(group=group_obj)
 
 
-def _post_to_chat(req, chat_obj, message_text, attachment_ids, has_text, has_attachments):
+def _post_to_chat(req, chat_obj, message_text, attachment_ids, has_text, has_attachments, reply_to=None):
     """
     Handle post_message for an individual chat.
     - Empty content + attachments → standalone: set chat_id on MessageAttachment.
@@ -373,6 +431,7 @@ def _post_to_chat(req, chat_obj, message_text, attachment_ids, has_text, has_att
             chat=chat_obj,
             sender=req.user,
             content=message_text,
+            reply_to=reply_to,
         )
         unlinked = _get_unlinked_attachments_queryset(req.user, attachment_ids)
         unlinked.update(individual_message=msg, group=None, chat=None)
@@ -382,6 +441,7 @@ def _post_to_chat(req, chat_obj, message_text, attachment_ids, has_text, has_att
             chat=chat_obj,
             sender=req.user,
             content=message_text,
+            reply_to=reply_to,
         )
     else:
         # Standalone: empty content + attachments → add chat_id to MessageAttachment
@@ -393,7 +453,9 @@ def _post_to_chat(req, chat_obj, message_text, attachment_ids, has_text, has_att
 @login_required
 async def post_message(request: HttpRequest, chat_id: str):
     try:
-        await sync_to_async(_post_message_sync)(request, chat_id)
+        result = await sync_to_async(_post_message_sync)(request, chat_id)
+        if result is not None:
+            return result
         return JsonResponse({"message": "Message sent successfully"}, status=status.HTTP_201_CREATED)
     except Http404:
         return JsonResponse({"message": "Invalid chat/group id"}, status=status.HTTP_400_BAD_REQUEST)

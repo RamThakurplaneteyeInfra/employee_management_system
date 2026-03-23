@@ -134,11 +134,19 @@ For React integration and WebSocket chat flow, see **`Messaging/REACT_INTEGRATIO
 ```json
 { "attachment_ids": [1] }
 ```
+**body (reply to a message):**
+```json
+{
+  "Message": "Agreed, thanks!",
+  "replyTo": 930,
+  "attachment_ids": []
+}
+```
 **sample_response:**
 ```json
 { "message": "Message sent successfully" }
 ```
-**notes:** `<chat_id>` is group id (e.g. G-xxx) or individual chat_id. Send at least one of `Message` or `attachment_ids`. Attachment ids from uploadFile/addLink. 201 on success; 400 if invalid chat or neither Message nor attachment_ids.
+**notes:** `<chat_id>` is group id (e.g. G-xxx) or individual chat_id. Send at least one of `Message` (or lowercase `message`) or `attachment_ids`. `replyTo` (or `reply_to`) is optional but must point to an existing message in the same chat/group; when `replyTo` is provided, the new post must include non-empty text. Attachment ids from uploadFile/addLink. 201 on success; 400 if invalid chat or neither Message/message nor attachment_ids.
 
 ---
 
@@ -148,7 +156,7 @@ For React integration and WebSocket chat flow, see **`Messaging/REACT_INTEGRATIO
 **method:** GET  
 **body:** None  
 **sample_response:** Array of messages with `message`, `attachments`, `quote`, sender info, timestamps in IST; DM messages may include `seen`.  
-**notes:** Only participants. Used with same chat_id as loadChats/postMessages.
+**notes:** Only participants. Includes reply-to fields when present: `replyTo` (parent id or null) and `repliedMessage` (`{id, message, sender}` or null).
 
 ---
 

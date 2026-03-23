@@ -125,7 +125,11 @@ def _get_messages_sync(request: HttpRequest, chat_id: str):
             return JsonResponse({"message": "you are not authorised to accessed this conversation"}, status=status.HTTP_403_FORBIDDEN)
         messages = (
             GroupMessages.objects.filter(group=group_obj)
-            .select_related("sender__accounts_profile")
+            .select_related(
+                "sender__accounts_profile",
+                "reply_to",
+                "reply_to__sender__accounts_profile",
+            )
             .prefetch_related("attachments")
             .order_by("-created_at")
         )
@@ -142,7 +146,11 @@ def _get_messages_sync(request: HttpRequest, chat_id: str):
             return JsonResponse({"message": "Chat not found"}, status=status.HTTP_403_FORBIDDEN)
         messages = (
             IndividualMessages.objects.filter(chat=chat_obj)
-            .select_related("sender__accounts_profile")
+            .select_related(
+                "sender__accounts_profile",
+                "reply_to",
+                "reply_to__sender__accounts_profile",
+            )
             .prefetch_related("attachments")
             .order_by("-created_at")
         )
@@ -158,6 +166,14 @@ def _get_messages_sync(request: HttpRequest, chat_id: str):
     items = []
     for m in messages:
         attachments = [_attachment_payload(a) for a in m.attachments.all()]
+        reply_to = getattr(m, "reply_to", None)
+        replied_message = None
+        if reply_to is not None:
+            replied_message = {
+                "id": reply_to.id,
+                "message": _message_content_for_response(reply_to.content),
+                "sender": _sender_name(reply_to.sender),
+            }
         item = {
             "id": m.id,
             "sender": _sender_name(m.sender),
@@ -165,6 +181,8 @@ def _get_messages_sync(request: HttpRequest, chat_id: str):
             "date": gmt_to_ist_date_str(m.created_at),
             "time": gmt_to_ist_time_str(m.created_at),
             "attachments": attachments,
+            "replyTo": getattr(m, "reply_to_id", None),
+            "repliedMessage": replied_message,
             "_sort_at": m.created_at,
         }
         if hasattr(m, "seen"):
@@ -178,6 +196,8 @@ def _get_messages_sync(request: HttpRequest, chat_id: str):
             "date": gmt_to_ist_date_str(a.created_at),
             "time": gmt_to_ist_time_str(a.created_at),
             "attachments": [_attachment_payload(a)],
+            "replyTo": None,
+            "repliedMessage": None,
             "_sort_at": a.created_at,
         })
 

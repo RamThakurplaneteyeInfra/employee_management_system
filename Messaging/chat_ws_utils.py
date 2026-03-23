@@ -35,6 +35,17 @@ def build_message_payload_for_ws(message, is_group):
         created_at = timezone.make_aware(created_at, timezone.utc)
     created_at_str = created_at.isoformat().replace("+00:00", "Z") if created_at else None
 
+    reply_to_id = getattr(message, "reply_to_id", None)
+    replied_message = None
+    if reply_to_id:
+        r = getattr(message, "reply_to", None)
+        if r is not None:
+            replied_message = {
+                "id": r.id,
+                "message": _message_content_for_response(r.content),
+                "sender": _sender_name(r.sender),
+            }
+
     return {
         "id": message.id,
         "sender": sender.username if sender else None,
@@ -46,6 +57,8 @@ def build_message_payload_for_ws(message, is_group):
         "attachment": attachments[0] if attachments else None,
         "attachments": attachments,
         "created_at": created_at_str,
+        "replyTo": reply_to_id,
+        "repliedMessage": replied_message,
     }
 
 
