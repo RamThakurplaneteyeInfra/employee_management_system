@@ -1,7 +1,7 @@
 """
 Messaging API views. Base path: {{baseurl}}/messaging/
 - Groups: createGroup, showCreatedGroups, showGroupMembers, addUser, deleteUser, deleteGroup.
-- Chats: startChat, postMessages/<chat_id>, getMessages/<chat_id>, markSeen/<chat_id>, loadChats.
+- Chats: startChat, postMessages/<chat_id>, editMessage/<chat_id>/<msg_id>, getMessages/<chat_id>, markSeen/<chat_id>, loadChats.
 - Attachments: uploadFile, addLink, attachments/<id> (DELETE), files/<id>/url (GET).
 All require login. Real-time: WebSocket /ws/chat/.
 """
@@ -18,11 +18,13 @@ from .filters import (
     _get_group_members_sync,
     _get_messages_sync,
     _get_individual_chat_object_sync,
+    _message_content_for_response,
     get_group_members,
     get_messages,
     check_group_or_chat,
 )
-from .chat_ws_utils import mark_seen_sync
+from .chat_ws_utils import mark_seen_sync, broadcast_message_edited_sync
+from django.utils import timezone
 from accounts.filters import _get_user_object_sync, _get_users_Name_sync, _get_user_role_sync
 from .utils import gmt_to_ist_str
 from .s3_utils import upload_file as s3_upload_file, get_file_url as s3_get_file_url
@@ -459,6 +461,113 @@ async def post_message(request: HttpRequest, chat_id: str):
         return JsonResponse({"message": "Message sent successfully"}, status=status.HTTP_201_CREATED)
     except Http404:
         return JsonResponse({"message": "Invalid chat/group id"}, status=status.HTTP_400_BAD_REQUEST)
+
+
+# ==================== edit_message ====================
+# Edit own message in a group or individual chat (PATCH). Sender only; others get 404.
+# URL: {{baseurl}}/messaging/editMessage/<chat_id>/<msg_id>/
+# Method: PATCH — JSON body: Message or message (non-empty text), same keys as postMessages.
+# Resolve group vs DM like getMessages: try GroupChats by group_id first, then IndividualChats
+# (not only ids starting with "G", so clients can use the same chat_id as getMessages).
+def _edit_message_sync(req, chat_id, msg_id):
+    verify_method = verifyPatch(req)
+    if verify_method:
+        return verify_method
+    data = load_data(req)
+    message_text = _post_body_message_text(data)
+    if not message_text:
+        return JsonResponse({"message": "Message content required"}, status=status.HTTP_400_BAD_REQUEST)
+
+    # If chat_id is provided (legacy route), resolve within that conversation.
+    # If omitted (new route), resolve by msg_id first and infer conversation type.
+    if chat_id:
+        try:
+            conv = GroupChats.objects.get(group_id=chat_id)
+            is_group = True
+        except GroupChats.DoesNotExist:
+            conv = None
+            is_group = False
+
+        if is_group:
+            participants = GroupMembers.objects.filter(groupchat=conv).select_related("participant")
+            if not any(req.user == i.participant for i in participants):
+                return JsonResponse(
+                    {"message": "you are not authorised to accessed this conversation"},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+            msg = GroupMessages.objects.filter(pk=msg_id, group=conv).first()
+        else:
+            try:
+                chat_obj = IndividualChats.objects.select_related("participant1", "participant2").get(chat_id=chat_id)
+            except IndividualChats.DoesNotExist:
+                return JsonResponse({"message": "Chat not found"}, status=status.HTTP_403_FORBIDDEN)
+            if req.user not in (chat_obj.participant1, chat_obj.participant2):
+                return JsonResponse(
+                    {"message": "you are not authorised to accessed this conversation"},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+            msg = IndividualMessages.objects.filter(pk=msg_id, chat=chat_obj).first()
+    else:
+        # New route: /editMessage/<msg_id>/ — infer conversation from message id.
+        msg = GroupMessages.objects.select_related("group").filter(pk=msg_id).first()
+        if msg is not None:
+            is_group = True
+            conv = msg.group
+            participants = GroupMembers.objects.filter(groupchat=conv).select_related("participant")
+            if not any(req.user == i.participant for i in participants):
+                return JsonResponse(
+                    {"message": "you are not authorised to accessed this conversation"},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+        else:
+            is_group = False
+            msg = (
+                IndividualMessages.objects.select_related("chat__participant1", "chat__participant2")
+                .filter(pk=msg_id)
+                .first()
+            )
+            if msg is None:
+                return JsonResponse({"message": "Not found"}, status=status.HTTP_404_NOT_FOUND)
+            chat_obj = msg.chat
+            if req.user not in (chat_obj.participant1, chat_obj.participant2):
+                return JsonResponse(
+                    {"message": "you are not authorised to accessed this conversation"},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
+    if msg is None:
+        return JsonResponse({"message": "Not found"}, status=status.HTTP_404_NOT_FOUND)
+    if msg.deleted:
+        return JsonResponse({"message": "Message was deleted"}, status=status.HTTP_400_BAD_REQUEST)
+    if req.user != msg.sender:
+        return JsonResponse({"message": "Not found"}, status=status.HTTP_404_NOT_FOUND)
+
+    now = timezone.now()
+    msg.content = message_text
+    msg.edited = True
+    msg.updated_at = now
+    msg.save(update_fields=["content", "edited", "updated_at"])
+
+    broadcast_message_edited_sync(msg, is_group=is_group)
+
+    upd = msg.updated_at
+    return JsonResponse(
+        {
+            "id": msg.id,
+            "message": _message_content_for_response(msg.content),
+            "edited": True,
+            "editedAtDate": gmt_to_ist_str(upd, "%d/%m/%y") if upd else None,
+            "editedAtTime": gmt_to_ist_str(upd, "%H:%M:%S") if upd else None,
+        },
+        status=status.HTTP_200_OK,
+    )
+
+
+@csrf_exempt
+@login_required
+async def edit_message(request: HttpRequest, msg_id: int, chat_id: str = None):
+    result = await sync_to_async(_edit_message_sync)(request, chat_id, msg_id)
+    return result
 
 
 # ==================== upload_message_file ====================

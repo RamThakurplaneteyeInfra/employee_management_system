@@ -1,6 +1,10 @@
 """
 Helpers for Real-Time Chat WebSocket: message payload, chat access, mark_seen.
 """
+import logging
+
+from asgiref.sync import async_to_sync
+from channels.layers import get_channel_layer
 from django.contrib.auth import get_user_model
 from django.utils import timezone
 
@@ -46,7 +50,11 @@ def build_message_payload_for_ws(message, is_group):
                 "sender": _sender_name(r.sender),
             }
 
-    return {
+    updated_at = getattr(message, "updated_at", None)
+    if updated_at and timezone.is_naive(updated_at):
+        updated_at = timezone.make_aware(updated_at, timezone.utc)
+
+    payload = {
         "id": message.id,
         "sender": sender.username if sender else None,
         "sender_name": _sender_name(sender),
@@ -59,7 +67,37 @@ def build_message_payload_for_ws(message, is_group):
         "created_at": created_at_str,
         "replyTo": reply_to_id,
         "repliedMessage": replied_message,
+        "edited": bool(getattr(message, "edited", False)),
+        "editedAtDate": gmt_to_ist_date_str(updated_at) if getattr(message, "edited", False) and updated_at else None,
+        "editedAtTime": gmt_to_ist_time_str(updated_at) if getattr(message, "edited", False) and updated_at else None,
     }
+    return payload
+
+
+logger = logging.getLogger(__name__)
+
+
+def broadcast_message_edited_sync(message, is_group):
+    """Push message_edited to chat_<chat_id> for subscribers (same channel as new_message)."""
+    channel_layer = get_channel_layer()
+    if not channel_layer:
+        return
+    chat_id = chat_id_from_message(message)
+    if not chat_id:
+        return
+    try:
+        payload = build_message_payload_for_ws(message, is_group)
+    except Exception as e:
+        logger.warning("Chat WS build_message_payload_for_ws (edit) failed: %s", e)
+        return
+    group_name = f"chat_{chat_id}"
+    try:
+        async_to_sync(channel_layer.group_send)(
+            group_name,
+            {"type": "chat.message_edited", "chat_id": chat_id, "payload": payload},
+        )
+    except Exception as e:
+        logger.warning("Chat WS message_edited group_send failed for %s: %s", group_name, e)
 
 
 def chat_id_from_message(message):

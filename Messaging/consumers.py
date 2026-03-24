@@ -2,7 +2,7 @@
 Real-Time Chat WebSocket consumer: /ws/chat/
 Auth: Session-based (same as /ws/notifications/ and /ws/calls/). Cookie must be sent with the handshake.
 Supports: subscribe/unsubscribe, typing_start/typing_stop, mark_seen.
-Server pushes: new_message, chat_updated, messages_seen, user_typing.
+Server pushes: new_message, message_edited, chat_updated, messages_seen, user_typing.
 """
 import asyncio
 import json
@@ -174,6 +174,14 @@ class ChatConsumer(AsyncWebsocketConsumer):
         payload = event.get("payload", {})
         await self.send(text_data=json.dumps({
             "type": "new_message",
+            "chat_id": event.get("chat_id"),
+            "message": payload,
+        }))
+
+    async def chat_message_edited(self, event):
+        payload = event.get("payload", {})
+        await self.send(text_data=json.dumps({
+            "type": "message_edited",
             "chat_id": event.get("chat_id"),
             "message": payload,
         }))

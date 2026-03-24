@@ -8,6 +8,8 @@ group_management_url=[path("createGroup/",create_group,name="groups_management")
                       path("addUser/<slug:group_id>/",add_user,name="groups_management"),
                       path("deleteGroup/<slug:group_id>/",delete_group,name="groups_management"),
                       path("postMessages/<slug:chat_id>/",post_message,name="groups_management"),
+                      path("editMessage/<int:msg_id>/",edit_message,name="messaging_edit_message_by_id"),
+                      path("editMessage/<slug:chat_id>/<int:msg_id>/",edit_message,name="messaging_edit_message"),
                       path("getMessages/<slug:chat_id>/",get_chats,name="groups_management"),
                       path("markSeen/<slug:chat_id>/",mark_seen,name="messaging_mark_seen"),
                       path("uploadFile/",upload_message_file,name="messaging_upload_file"),

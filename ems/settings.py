@@ -78,6 +78,7 @@ INSTALLED_APPS = [
     "events",
     "project",
     "Clients",
+    "CustomerPanel",
     "QuaterlyReports",
     "notifications",
     "adminpanel",

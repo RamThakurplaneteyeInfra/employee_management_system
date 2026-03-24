@@ -30,6 +30,7 @@ urlpatterns = [
     path('adminapi/', include('adminpanel.urls'),name="adminpanelapi"),
     path('eventsapi/', include('events.urls'),name="eventsapi"),
     path('clientsapi/', include('Clients.urls'), name="clientsapi"),
+    path('customerpanelapi/', include('CustomerPanel.urls'), name="customerpanelapi"),
     path("projectapi/", include("project.urls"), name="project"),
     path("alertsapi/", include("Alerts_Announcements.urls"), name="alerts_announcements"),
 ]

@@ -174,6 +174,8 @@ def _get_messages_sync(request: HttpRequest, chat_id: str):
                 "message": _message_content_for_response(reply_to.content),
                 "sender": _sender_name(reply_to.sender),
             }
+        edited = bool(getattr(m, "edited", False))
+        upd = getattr(m, "updated_at", None)
         item = {
             "id": m.id,
             "sender": _sender_name(m.sender),
@@ -183,6 +185,9 @@ def _get_messages_sync(request: HttpRequest, chat_id: str):
             "attachments": attachments,
             "replyTo": getattr(m, "reply_to_id", None),
             "repliedMessage": replied_message,
+            "edited": edited,
+            "editedAtDate": gmt_to_ist_date_str(upd) if edited and upd else None,
+            "editedAtTime": gmt_to_ist_time_str(upd) if edited and upd else None,
             "_sort_at": m.created_at,
         }
         if hasattr(m, "seen"):

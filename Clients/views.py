@@ -11,7 +11,13 @@ from ems.verify_methods import verifyGet, verifyPost, verifyPut, verifyPatch, ve
 from ems.utils import gmt_to_ist_str
 from accounts.snippet import login_required, csrf_exempt
 from accounts.models import User
-from .models import ClientProfile, CurrentClientStage, ClientProfileMembers, ClientConversation, ClientInteractionChannels
+from .models import (
+    ClientProfile,
+    CurrentClientStage,
+    ClientProfileMembers,
+    ClientConversation,
+    ClientInteractionChannels,
+)
 from project.models import Project, Product
 from QuaterlyReports.models import SalesStatistics
 from task_management.models import TaskStatus
@@ -594,3 +600,5 @@ async def conversation_update_delete(request: HttpRequest, profile_id: int, note
             return JsonResponse({"error": "Note not found"}, status=status.HTTP_404_NOT_FOUND)
         return JsonResponse({"message": "Note deleted"}, status=status.HTTP_200_OK)
     return JsonResponse({"error": "Method not allowed"}, status=status.HTTP_405_METHOD_NOT_ALLOWED)
+
+
