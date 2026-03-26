@@ -192,7 +192,11 @@ def _on_connection_created(connection, **kwargs):
     _orig = connection.cursor
 
     def _cursor(*a, **kw):
-        return _MetricsCursor(_orig(*a, **kw), alias)
+        raw = _orig(*a, **kw)
+        # avoid double-wrapping if already instrumented
+        if isinstance(raw, _MetricsCursor):
+            return raw
+        return _MetricsCursor(raw, alias)
 
     connection.cursor = _cursor
 
