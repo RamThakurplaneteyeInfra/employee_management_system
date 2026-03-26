@@ -101,30 +101,6 @@ _HTTP_RESPONSE_SIZE = Histogram(
     buckets=[100, 1_000, 10_000, 100_000, 1_000_000],
 )
 
-# ---------------------------------------------------------------------------
-# Database metrics
-# ---------------------------------------------------------------------------
-_DB_QUERIES_TOTAL = Counter(
-    "django_db_queries_total",
-    "Total DB queries executed",
-    ["alias"],
-)
-_DB_QUERY_DURATION = Histogram(
-    "django_db_query_duration_seconds",
-    "DB query duration in seconds",
-    ["alias"],
-    buckets=[0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 5.0],
-)
-_DB_ERRORS_TOTAL = Counter(
-    "django_db_errors_total",
-    "Total DB query errors",
-    ["alias"],
-)
-_DB_SLOW_QUERIES = Counter(
-    "django_db_slow_queries_total",
-    "DB queries exceeding 0.5s threshold",
-    ["alias"],
-)
 
 # ---------------------------------------------------------------------------
 # Cache metrics
@@ -142,66 +118,6 @@ _MSG_SENT = Counter("app_messages_sent_total", "Messages sent", ["type"])  # typ
 _WS_ACTIVE = Gauge("app_ws_connections_active", "Active WebSocket connections", ["consumer"])
 _WS_CONNECT = Counter("app_ws_connects_total", "WebSocket connect events", ["consumer"])
 _WS_DISCONNECT = Counter("app_ws_disconnects_total", "WebSocket disconnect events", ["consumer"])
-
-
-# ---------------------------------------------------------------------------
-# DB cursor instrumentation — wired via connection_created signal
-# ---------------------------------------------------------------------------
-class _MetricsCursor:
-    _SLOW_THRESHOLD = float(os.getenv("DB_SLOW_QUERY_THRESHOLD", "0.5"))
-
-    def __init__(self, cursor, alias):
-        self._c = cursor
-        self._alias = alias
-
-    def _track(self, fn, sql, params):
-        t = time.perf_counter()
-        try:
-            result = fn(sql, params)
-            duration = time.perf_counter() - t
-            _DB_QUERIES_TOTAL.labels(alias=self._alias).inc()
-            _DB_QUERY_DURATION.labels(alias=self._alias).observe(duration)
-            if duration >= self._SLOW_THRESHOLD:
-                _DB_SLOW_QUERIES.labels(alias=self._alias).inc()
-            return result
-        except Exception:
-            _DB_ERRORS_TOTAL.labels(alias=self._alias).inc()
-            raise
-
-    def execute(self, sql, params=None):
-        return self._track(self._c.execute, sql, params)
-
-    def executemany(self, sql, params=None):
-        return self._track(self._c.executemany, sql, params)
-
-    def __getattr__(self, name):
-        return getattr(self._c, name)
-
-    def __iter__(self):
-        return iter(self._c)
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *a):
-        self._c.close()
-
-
-def _on_connection_created(connection, **kwargs):
-    alias = connection.alias
-    _orig = connection.cursor
-
-    def _cursor(*a, **kw):
-        raw = _orig(*a, **kw)
-        # avoid double-wrapping if already instrumented
-        if isinstance(raw, _MetricsCursor):
-            return raw
-        return _MetricsCursor(raw, alias)
-
-    connection.cursor = _cursor
-
-
-connection_created.connect(_on_connection_created)
 
 
 # ---------------------------------------------------------------------------
