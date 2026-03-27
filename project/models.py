@@ -34,7 +34,8 @@ class Project(models.Model):
     # ManyToManyField allows multiple participants per project and multiple projects per user
     participants = models.ManyToManyField(User,related_name='participating_projects',blank=True,through="ProjectParticipant")
     status = models.ForeignKey(TaskStatus,on_delete=models.CASCADE,null=True,related_name="project_status")
-    deadline = models.DateField()
+    # Deadline is optional from the frontend. Keep NULL support (no deletes needed).
+    deadline = models.DateField(null=True, blank=True)
     # Automatically sets the field to now when the object is first created
     created_at = models.DateTimeField(auto_now_add=True)
     # Automatically updates the field to now every time the object is saved

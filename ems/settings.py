@@ -84,6 +84,7 @@ INSTALLED_APPS = [
     "adminpanel",
     "maintenance",
     "Alerts_Announcements",
+    "projects_deadline",
 ]
 
 MIDDLEWARE = [
