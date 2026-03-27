@@ -85,6 +85,7 @@ INSTALLED_APPS = [
     "maintenance",
     "Alerts_Announcements",
     "projects_deadline",
+    "notes",
 ]
 
 MIDDLEWARE = [

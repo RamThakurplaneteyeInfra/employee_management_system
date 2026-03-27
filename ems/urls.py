@@ -35,6 +35,7 @@ urlpatterns = [
     path("projectapi/", include("project.urls"), name="project"),
     path("deadline/", include("projects_deadline.urls"), name="projects_deadline"),
     path("alertsapi/", include("Alerts_Announcements.urls"), name="alerts_announcements"),
+    path("notesapi/", include("notes.urls"), name="notesapi"),
 ]
 
 if True:
