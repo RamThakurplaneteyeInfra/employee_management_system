@@ -62,6 +62,9 @@ Response 200:
     "representative_name": "Jane Smith",
     "motive": "Describe the lead...",
     "gst_number": "27AABCU9603R1ZM",
+    "address": "123 Main St, City",
+    "branch_id": 2,
+    "branch_name": "Mumbai",
     "status_id": 1,
     "status_name": "Leads",
     "product_id": 5,
@@ -92,13 +95,15 @@ Request:
   "representative_name": "Jane Smith",
   "motive": "Describe the lead...",
   "gst_number": "27AABCU9603R1ZM",
+  "address": "123 Main St, City",
+  "branch_id": 2,
   "status_id": 1,
   "product_name": "Cropeye",
   "product_value": 12345.67,
   "members": [1, 2, 3]
 }
 
-Optional: omit "product_value" or set to null. Integers are allowed (e.g. 8898 → 8898.00). Invalid strings return 400.
+Optional: omit "address" (stored as empty string). Optional "branch_id": FK to accounts.Branch (team_management.Branches); omit or null for no branch. You may send "branch" as id (number or numeric string) or branch name string instead of branch_id. Omit "product_value" or set to null. Integers are allowed (e.g. 8898 → 8898.00). Invalid strings return 400.
 
 Response 201:
 {
@@ -127,6 +132,9 @@ Response 200:
   "representative_name": "Jane Smith",
   "motive": "Describe the lead...",
   "gst_number": "27AABCU9603R1ZM",
+  "address": "123 Main St, City",
+  "branch_id": 2,
+  "branch_name": "Mumbai",
   "status_id": 1,
   "status_name": "Leads",
   "product_id": 5,
@@ -158,13 +166,15 @@ Request:
   "company_name": "Acme Corp Updated",
   "client_name": "John Doe",
   "representative_name": "Jane Smith",
+  "address": "New address line",
+  "branch_id": 3,
   "status_id": 2,
   "product_name": "RAMS",
   "product_value": 8898,
   "members": [2, 3, 4]
 }
 
-Optional: include "product_value": null to clear the value on update.
+Optional: include "product_value": null to clear the value on update. PATCH may include only "address" (or "") to clear text. Include "branch_id": null to clear branch; omit "branch_id" to leave branch unchanged. Unknown branch_id on update leaves the previous branch set.
 
 Response 200:
 {

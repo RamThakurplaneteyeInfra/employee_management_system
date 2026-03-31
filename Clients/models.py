@@ -47,6 +47,20 @@ class ClientProfile(models.Model):
         default=_get_leads_stage_id,
     )
     gst_number = models.CharField(max_length=50, blank=True, db_index=True)
+    address = models.TextField(
+        blank=True,
+        default="",
+        help_text="Optional client or site address.",
+    )
+    branch = models.ForeignKey(
+        "accounts.Branch",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        db_index=True,
+        related_name="client_profiles",
+        help_text="Office branch from team_management.Branches (dropdown branch_id).",
+    )
     Product = models.ForeignKey(
         Project,
         on_delete=models.SET_NULL,

@@ -161,7 +161,7 @@ if REDIS_URL:
 # Cache – Redis (same instance as Channels). GET API responses cached; invalidated on create/update.
 # When REDIS_URL is missing, use DummyCache to avoid in-process memory growth (e.g. on 512MB Render).
 # =============================================================================
-CACHE_GET_TIMEOUT = int(os.getenv("CACHE_GET_TIMEOUT", "1800"))  # 5 min default
+CACHE_GET_TIMEOUT = int(os.getenv("CACHE_GET_TIMEOUT", "1800"))  
 if REDIS_URL:
     CACHES = {
         "default": {

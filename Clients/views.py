@@ -10,7 +10,7 @@ from ems.RequiredImports import sync_to_async, JsonResponse, status, HttpRequest
 from ems.verify_methods import verifyGet, verifyPost, verifyPut, verifyPatch, verifyDelete, load_data
 from ems.utils import gmt_to_ist_str
 from accounts.snippet import login_required, csrf_exempt
-from accounts.models import User
+from accounts.models import Branch, User
 from .models import (
     ClientProfile,
     CurrentClientStage,
@@ -21,6 +21,62 @@ from .models import (
 from project.models import Project, Product
 from QuaterlyReports.models import SalesStatistics
 from task_management.models import TaskStatus
+
+
+def _branch_pk_from_raw(raw):
+    if raw is None or raw == "":
+        return None
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def _branch_by_pk(pk):
+    if pk is None:
+        return None
+    return Branch.objects.filter(pk=pk).first()
+
+
+def _resolve_branch_for_create(data):
+    """
+    POST: optional branch from dropdown.
+    - branch_id: int or numeric string (preferred)
+    - branch: int, numeric string (treated as id), or non-numeric string (match branch_name, case-insensitive)
+    """
+    if data.get("branch_id") is not None and data.get("branch_id") != "":
+        return _branch_by_pk(_branch_pk_from_raw(data.get("branch_id")))
+    if "branch" not in data:
+        return None
+    b = data["branch"]
+    if b is None or b == "":
+        return None
+    if isinstance(b, int):
+        return _branch_by_pk(b)
+    if isinstance(b, str):
+        s = b.strip()
+        if not s:
+            return None
+        if s.isdigit():
+            return _branch_by_pk(int(s))
+        return Branch.objects.filter(branch_name__iexact=s).first()
+    return None
+
+
+def _apply_branch_update(c, data):
+    """PATCH/PUT: only if branch_id key present. null/\"\" clears. Invalid id leaves branch unchanged."""
+    if "branch_id" not in data:
+        return
+    raw = data["branch_id"]
+    if raw is None or raw == "":
+        c.branch = None
+        return
+    pk = _branch_pk_from_raw(raw)
+    if pk is None:
+        return
+    b = Branch.objects.filter(pk=pk).first()
+    if b is not None:
+        c.branch = b
 
 
 # Medium names that map to SalesStatistics count fields (must match ClientInteractionChannels: Calls, Trial, Demand, Pitch)
@@ -187,6 +243,9 @@ def _profile_to_dict(c):
         "representative_name": c.representative_name,
         "motive": getattr(c, "motive", "") or "",
         "gst_number": c.gst_number,
+        "address": getattr(c, "address", "") or "",
+        "branch_id": c.branch_id,
+        "branch_name": c.branch.branch_name if c.branch else None,
         "status_id": c.status_id,
         "status_name": c.status.name if c.status else None,
         "product_id": c.Product_id,
@@ -213,7 +272,7 @@ def _list_profiles_sync(user):
     qs = (
         ClientProfile.objects.filter(Q(created_by=user) | Q(member_links__user=user))
         .distinct()
-        .select_related("status", "Product", "created_by")
+        .select_related("status", "Product", "created_by", "branch")
         .prefetch_related(members_prefetch, conv_prefetch)
         .order_by("-created_at")
     )
@@ -241,7 +300,7 @@ def _get_profile_sync(profile_id):
         "members",
         queryset=User.objects.select_related("accounts_profile"),
     )
-    return ClientProfile.objects.select_related("status", "Product", "created_by").prefetch_related(
+    return ClientProfile.objects.select_related("status", "Product", "created_by", "branch").prefetch_related(
         members_prefetch, conv_prefetch
     ).get(id=profile_id)
 
@@ -345,6 +404,14 @@ def _create_profile_sync(user, data):
     if "product_value" in data:
         product_value = _coerce_product_value(data.get("product_value"))
 
+    raw_address = data.get("address")
+    if raw_address is None:
+        address_val = ""
+    else:
+        address_val = str(raw_address).strip()
+
+    branch_obj = _resolve_branch_for_create(data)
+
     c = ClientProfile.objects.create(
         company_name=data.get("company_name", ""),
         client_name=data.get("client_name", ""),
@@ -353,6 +420,8 @@ def _create_profile_sync(user, data):
         representative_name=data.get("representative_name", ""),
         motive=data.get("motive", "") or data.get("description", ""),
         gst_number=data.get("gst_number", ""),
+        address=address_val,
+        branch=branch_obj,
         status=status_obj,
         Product=product_obj,
         product_value=product_value,
@@ -408,6 +477,10 @@ def _update_profile_sync(profile_id, data):
         c.motive = data["description"]
     if "gst_number" in data:
         c.gst_number = data["gst_number"]
+    if "address" in data:
+        a = data["address"]
+        c.address = "" if a is None else str(a).strip()
+    _apply_branch_update(c, data)
     if "status_id" in data:
         try:
             c.status = CurrentClientStage.objects.get(id=data["status_id"])

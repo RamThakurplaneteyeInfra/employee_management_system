@@ -1,6 +1,7 @@
 from rest_framework import serializers
 
 from .models import DeadlineProject, DeadlineProjectPhase
+from .permissions import can_see_all_phases_for_project, resolve_deadline_employee_id
 
 
 class PhaseOutputSerializer(serializers.ModelSerializer):
@@ -41,7 +42,24 @@ class ProjectOutputSerializer(serializers.ModelSerializer):
         phases = getattr(obj, "active_phases", None)
         if phases is None:
             phases = obj.phases.filter(archived=False).order_by("sort_order", "created_at")
-        return PhaseOutputSerializer(phases, many=True).data
+
+        request = self.context.get("request") if isinstance(getattr(self, "context", None), dict) else None
+        user = getattr(request, "user", None) if request is not None else None
+
+        if user and can_see_all_phases_for_project(user, obj):
+            return PhaseOutputSerializer(phases, many=True).data
+
+        employee_id = resolve_deadline_employee_id(user) if user else None
+        if employee_id is None:
+            return []
+
+        filtered = []
+        for p in phases:
+            member_ids = getattr(p, "member_ids", None) or []
+            if p.team_lead_id == employee_id or employee_id in member_ids:
+                filtered.append(p)
+
+        return PhaseOutputSerializer(filtered, many=True).data
 
 
 class PhaseInputSerializer(serializers.Serializer):

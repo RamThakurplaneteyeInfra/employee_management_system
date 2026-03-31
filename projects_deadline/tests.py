@@ -270,3 +270,88 @@ class DeadlineProjectAPITests(TestCase):
         phase = resp.json()["data"]["phases"][0]
         self.assertEqual(phase["teamLeadId"], 99999)
         self.assertEqual(phase["memberIds"], [88888, 77777])
+
+    # ---- ACCESS CONTROL (list / detail / phases / PATCH) -------------------
+
+    def test_superuser_sees_all_phases_on_list_and_detail(self):
+        self.client.post("/deadline/projects/", self._sample_payload(), format="json")
+        resp = self.client.get("/deadline/projects/")
+        self.assertEqual(len(resp.json()["data"]), 1)
+        self.assertEqual(len(resp.json()["data"][0]["phases"]), 2)
+        pk = resp.json()["data"][0]["id"]
+        detail = self.client.get(f"/deadline/projects/{pk}/")
+        self.assertEqual(len(detail.json()["data"]["phases"]), 2)
+
+    def test_creator_sees_all_phases_and_can_patch(self):
+        creator = User.objects.create_user("creator", password="pass")
+        project = DeadlineProject.objects.create(
+            title="Creator Project",
+            branch="",
+            description="",
+            status="ACTIVE",
+            created_by=creator,
+        )
+        DeadlineProjectPhase.objects.create(
+            project=project,
+            title="Phase A",
+            phase_status="PENDING",
+            team_lead_id=99999,
+            member_ids=[],
+            checklist=[],
+            notes="",
+            sort_order=0,
+        )
+        DeadlineProjectPhase.objects.create(
+            project=project,
+            title="Phase B",
+            phase_status="PENDING",
+            team_lead_id=None,
+            member_ids=[],
+            checklist=[],
+            notes="",
+            sort_order=1,
+        )
+        self.client.force_authenticate(creator)
+        resp = self.client.get(f"/deadline/projects/{project.pk}/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(len(resp.json()["data"]["phases"]), 2)
+        r2 = self.client.patch(
+            f"/deadline/projects/{project.pk}/",
+            {"title": "Updated by creator"},
+            format="json",
+        )
+        self.assertEqual(r2.status_code, 200)
+        self.assertTrue(r2.json()["success"])
+        self.assertEqual(r2.json()["data"]["title"], "Updated by creator")
+
+    def test_phase_only_member_sees_assigned_phases_only_cannot_patch(self):
+        create_resp = self.client.post("/deadline/projects/", self._sample_payload(), format="json")
+        pk = create_resp.json()["data"]["id"]
+        self.client.force_authenticate(self.member)
+        list_resp = self.client.get("/deadline/projects/")
+        self.assertEqual(list_resp.status_code, 200)
+        self.assertEqual(len(list_resp.json()["data"]), 1)
+        self.assertEqual(
+            len(list_resp.json()["data"][0]["phases"]),
+            1,
+            "member is team lead only on first phase",
+        )
+        detail_resp = self.client.get(f"/deadline/projects/{pk}/")
+        self.assertEqual(len(detail_resp.json()["data"]["phases"]), 1)
+        patch_resp = self.client.patch(
+            f"/deadline/projects/{pk}/",
+            {"title": "Hacked"},
+            format="json",
+        )
+        self.assertEqual(patch_resp.status_code, 200)
+        self.assertFalse(patch_resp.json()["success"])
+
+    def test_unrelated_user_empty_list_and_404_detail(self):
+        create_resp = self.client.post("/deadline/projects/", self._sample_payload(), format="json")
+        pk = create_resp.json()["data"]["id"]
+        self.client.force_authenticate(self.other)
+        list_resp = self.client.get("/deadline/projects/")
+        self.assertEqual(list_resp.json()["data"], [])
+        detail_resp = self.client.get(f"/deadline/projects/{pk}/")
+        self.assertEqual(detail_resp.status_code, 404)
+        self.assertFalse(detail_resp.json()["success"])

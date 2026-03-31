@@ -1,4 +1,5 @@
 from django.urls import path
+from .meet_views import md_meet_notify
 from .views import (
     get_notifications,
     mark_as_read,
@@ -9,6 +10,7 @@ from .views import (
 )
 
 urlpatterns = [
+    path("md/meet/", md_meet_notify),
     path("today/", get_notifications),
     path("types/", get_notification_types),
     path("read/<int:pk>/", mark_as_read),

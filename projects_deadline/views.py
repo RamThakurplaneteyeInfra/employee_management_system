@@ -15,7 +15,11 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .models import DeadlineProject, DeadlineProjectPhase
-from .permissions import can_edit_project
+from .permissions import (
+    can_edit_project,
+    is_global_privileged_deadline_user,
+    resolve_deadline_employee_id,
+)
 from .serializers import (
     ProjectInputSerializer,
     ProjectOutputSerializer,
@@ -77,9 +81,31 @@ def _base_queryset():
     )
 
 
-def _serialize_project(project):
+def _serialize_project(project, *, request=None):
     """Render a single project through the output serializer."""
+    if request is not None:
+        return ProjectOutputSerializer(project, context={"request": request}).data
     return ProjectOutputSerializer(project).data
+
+
+def _user_can_view_project(request, project):
+    """
+    Read access:
+    - superuser / MD / Admin: any project
+    - creator: own project
+    - else: at least one non-archived phase with team_lead_id or member_ids match
+    """
+    user = getattr(request, "user", None)
+    if is_global_privileged_deadline_user(user):
+        return True
+    if project.created_by_id == getattr(user, "id", None):
+        return True
+    employee_id = resolve_deadline_employee_id(user)
+    if employee_id is None:
+        return False
+    return project.phases.filter(archived=False).filter(
+        Q(team_lead_id=employee_id) | Q(member_ids__contains=[employee_id])
+    ).exists()
 
 
 def _create_phases(project, phases_data):
@@ -109,6 +135,20 @@ class ProjectListCreateView(No403APIView):
     def get(self, request):
         qs = _base_queryset()
 
+        user = request.user
+        if not is_global_privileged_deadline_user(user):
+            employee_id = resolve_deadline_employee_id(user)
+            if employee_id is None:
+                return Response(
+                    {"success": False, "message": "Could not resolve employee id from user"},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+            qs = qs.filter(
+                Q(created_by_id=user.id)
+                | Q(phases__archived=False, phases__team_lead_id=employee_id)
+                | Q(phases__archived=False, phases__member_ids__contains=[employee_id])
+            ).distinct()
+
         search = request.query_params.get("search", "").strip()
         if search:
             qs = qs.filter(
@@ -123,7 +163,7 @@ class ProjectListCreateView(No403APIView):
         if branch_filter:
             qs = qs.filter(branch__icontains=branch_filter)
 
-        data = ProjectOutputSerializer(qs, many=True).data
+        data = ProjectOutputSerializer(qs, many=True, context={"request": request}).data
         return Response({"success": True, "data": data})
 
     def post(self, request):
@@ -151,7 +191,7 @@ class ProjectListCreateView(No403APIView):
 
         project = _base_queryset().get(pk=project.pk)
         return Response(
-            {"success": True, "data": _serialize_project(project)},
+            {"success": True, "data": _serialize_project(project, request=request)},
             status=status.HTTP_201_CREATED,
         )
 
@@ -180,7 +220,12 @@ class ProjectDetailView(No403APIView):
                 {"success": False, "message": "Not found"},
                 status=status.HTTP_404_NOT_FOUND,
             )
-        return Response({"success": True, "data": _serialize_project(project)})
+        if not _user_can_view_project(request, project):
+            return Response(
+                {"success": False, "message": "Not found"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        return Response({"success": True, "data": _serialize_project(project, request=request)})
 
     # ---- PATCH (update) ---------------------------------------------------
 
@@ -222,7 +267,7 @@ class ProjectDetailView(No403APIView):
                 _create_phases(project, d["phases"])
 
         project = _base_queryset().get(pk=project.pk)
-        return Response({"success": True, "data": _serialize_project(project)})
+        return Response({"success": True, "data": _serialize_project(project, request=request)})
 
     # ---- DELETE (soft-archive) --------------------------------------------
 
