@@ -65,8 +65,8 @@ class DeadlineProjectAPITests(TestCase):
         phase = data["data"]["phases"][0]
         self.assertIn("checklist", phase)
         self.assertEqual(phase["checklist"], [
-            {"text": "Design", "checked": True, "checkedDate": "2026-02-01", "employeeIds": [101, 102]},
-            {"text": "Prototype", "checked": False, "checkedDate": None, "employeeIds": []},
+            {"text": "Design", "checked": True, "checkedDate": "2026-02-01", "employeeIds": [101, 102], "note": ""},
+            {"text": "Prototype", "checked": False, "checkedDate": None, "employeeIds": [], "note": ""},
         ])
 
     def test_create_project_with_null_deadline(self):
@@ -120,6 +120,27 @@ class DeadlineProjectAPITests(TestCase):
         self.assertEqual(resp.status_code, 201)
         checklist_item = resp.json()["data"]["phases"][0]["checklist"][0]
         self.assertEqual(checklist_item["employeeIds"], [])
+        self.assertEqual(checklist_item["note"], "")
+
+    def test_checklist_note_optional_and_persisted(self):
+        payload = self._sample_payload()
+        payload["phases"][0]["checklist"] = [
+            {"text": "With note", "checked": False, "note": "Blocker: waiting on review"},
+            {"text": "No note key", "checked": True, "checkedDate": "2026-02-01"},
+        ]
+        resp = self.client.post("/deadline/projects/", payload, format="json")
+        self.assertEqual(resp.status_code, 201)
+        ch = resp.json()["data"]["phases"][0]["checklist"]
+        self.assertEqual(ch[0]["note"], "Blocker: waiting on review")
+        self.assertEqual(ch[1]["note"], "")
+
+    def test_checklist_invalid_note_type_returns_400(self):
+        payload = self._sample_payload()
+        payload["phases"][0]["checklist"] = [
+            {"text": "bad note", "checked": False, "note": 99},
+        ]
+        resp = self.client.post("/deadline/projects/", payload, format="json")
+        self.assertEqual(resp.status_code, 400)
 
     # ---- LIST -------------------------------------------------------------
 
@@ -192,8 +213,8 @@ class DeadlineProjectAPITests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(len(resp.json()["data"]["phases"]), 1)
         self.assertEqual(resp.json()["data"]["phases"][0]["checklist"], [
-            {"text": "a", "checked": False, "checkedDate": None, "employeeIds": []},
-            {"text": "b", "checked": True, "checkedDate": None, "employeeIds": []},
+            {"text": "a", "checked": False, "checkedDate": None, "employeeIds": [], "note": ""},
+            {"text": "b", "checked": True, "checkedDate": None, "employeeIds": [], "note": ""},
         ])
         total = DeadlineProjectPhase.objects.filter(project_id=pk).count()
         archived = DeadlineProjectPhase.objects.filter(project_id=pk, archived=True).count()

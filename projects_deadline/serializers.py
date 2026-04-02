@@ -125,6 +125,16 @@ class PhaseInputSerializer(serializers.Serializer):
                 normalized_ids.append(emp_id)
             item["employeeIds"] = normalized_ids
 
+            note = item.get("note")
+            if note is None:
+                item["note"] = ""
+            elif not isinstance(note, str):
+                raise serializers.ValidationError(
+                    f"Item {idx} 'note' must be a string."
+                )
+            else:
+                item["note"] = note
+
         return value
 
 

@@ -27,6 +27,15 @@ def _is_admin_or_md(user):
     return role in ("Admin", "MD")
 
 
+def _user_can_access_entry(user, entry: CustomerPanelEntry) -> bool:
+    """Admin / MD / superuser: any entry. Others: only rows they created."""
+    if not user or not user.is_authenticated:
+        return False
+    if _is_admin_or_md(user):
+        return True
+    return entry.created_by_id == user.id
+
+
 def _coerce_decimal(raw, field_name):
     if raw is None:
         return None
@@ -86,8 +95,10 @@ def _amount_log_to_dict(obj: CustomerPanelAmountLog):
     }
 
 
-def _list_entries_sync():
+def _list_entries_sync(user):
     qs = CustomerPanelEntry.objects.select_related("created_by").order_by("-created_at")
+    if not _is_admin_or_md(user):
+        qs = qs.filter(created_by=user)
     return [_entry_to_dict(obj) for obj in qs]
 
 
@@ -154,13 +165,10 @@ def _update_entry_sync(entry_id, data):
 @csrf_exempt
 @login_required
 async def list_create_entries(request: HttpRequest):
-    if not await sync_to_async(_is_admin_or_md)(request.user):
-        return JsonResponse({"error": "Only Admin/MD can access customer panel"}, status=status.HTTP_403_FORBIDDEN)
-
     if request.method == "GET":
         if verifyGet(request):
             return verifyGet(request)
-        data = await sync_to_async(_list_entries_sync)()
+        data = await sync_to_async(_list_entries_sync)(request.user)
         return JsonResponse(data, safe=False)
 
     if request.method != "POST":
@@ -183,11 +191,11 @@ async def list_create_entries(request: HttpRequest):
 @csrf_exempt
 @login_required
 async def detail_update_delete_entry(request: HttpRequest, entry_id: int):
-    if not await sync_to_async(_is_admin_or_md)(request.user):
-        return JsonResponse({"error": "Only Admin/MD can access customer panel"}, status=status.HTTP_403_FORBIDDEN)
     try:
         obj = await sync_to_async(_get_entry_sync)(entry_id)
     except CustomerPanelEntry.DoesNotExist:
+        return JsonResponse({"error": "Entry not found"}, status=status.HTTP_404_NOT_FOUND)
+    if not await sync_to_async(_user_can_access_entry)(request.user, obj):
         return JsonResponse({"error": "Entry not found"}, status=status.HTTP_404_NOT_FOUND)
 
     if request.method == "GET":
@@ -216,10 +224,6 @@ async def detail_update_delete_entry(request: HttpRequest, entry_id: int):
         return JsonResponse({"message": "Customer panel entry deleted"}, status=status.HTTP_200_OK)
 
     return JsonResponse({"error": "Method not allowed"}, status=status.HTTP_405_METHOD_NOT_ALLOWED)
-
-
-def _ensure_entry_exists_sync(entry_id):
-    return CustomerPanelEntry.objects.get(id=entry_id)
 
 
 def _list_amount_logs_sync(entry_id):
@@ -259,12 +263,11 @@ def _create_amount_logs_sync(entry_id, items):
 @csrf_exempt
 @login_required
 async def amount_log_list_create(request: HttpRequest, entry_id: int):
-    if not await sync_to_async(_is_admin_or_md)(request.user):
-        return JsonResponse({"error": "Only Admin/MD can access customer panel"}, status=status.HTTP_403_FORBIDDEN)
-
     try:
-        await sync_to_async(_ensure_entry_exists_sync)(entry_id)
+        entry = await sync_to_async(_get_entry_sync)(entry_id)
     except CustomerPanelEntry.DoesNotExist:
+        return JsonResponse({"error": "Entry not found"}, status=status.HTTP_404_NOT_FOUND)
+    if not await sync_to_async(_user_can_access_entry)(request.user, entry):
         return JsonResponse({"error": "Entry not found"}, status=status.HTTP_404_NOT_FOUND)
 
     if request.method == "GET":
@@ -326,8 +329,12 @@ def _delete_amount_log_sync(entry_id, log_id):
 @csrf_exempt
 @login_required
 async def amount_log_detail_update_delete(request: HttpRequest, entry_id: int, log_id: int):
-    if not await sync_to_async(_is_admin_or_md)(request.user):
-        return JsonResponse({"error": "Only Admin/MD can access customer panel"}, status=status.HTTP_403_FORBIDDEN)
+    try:
+        entry = await sync_to_async(_get_entry_sync)(entry_id)
+    except CustomerPanelEntry.DoesNotExist:
+        return JsonResponse({"error": "Entry not found"}, status=status.HTTP_404_NOT_FOUND)
+    if not await sync_to_async(_user_can_access_entry)(request.user, entry):
+        return JsonResponse({"error": "Entry not found"}, status=status.HTTP_404_NOT_FOUND)
 
     if request.method == "PATCH":
         err = verifyPatch(request)
