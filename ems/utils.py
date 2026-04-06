@@ -1,4 +1,6 @@
 from datetime import date, datetime, timezone, timedelta
+
+from django.contrib.auth import get_user_model
 from rest_framework.views import exception_handler
 from rest_framework.response import Response
 from rest_framework import status
@@ -21,6 +23,32 @@ def gmt_to_ist_str(dt, fmt="%d/%m/%y %H:%M:%S"):
 def gmt_to_ist_date_str(dt):
     """IST date only: %d/%m/%y."""
     return gmt_to_ist_str(dt, "%d/%m/%y") if dt else None
+
+
+def get_user_from_member(m):
+    """
+    Resolve API member payloads (client lead / customer panel) to a User instance.
+    Accepts dict with id and/or username, bare user id (int or numeric string), or username string.
+    """
+    User = get_user_model()
+    uid = m.get("id") if isinstance(m, dict) else m
+    uname = m.get("username") if isinstance(m, dict) else (m if isinstance(m, str) else None)
+    u = None
+    if uid is not None and uid != "":
+        try:
+            pid = int(uid) if (isinstance(uid, str) and str(uid).replace("-", "").isdigit()) else uid
+            u = User.objects.get(id=pid)
+        except (User.DoesNotExist, TypeError, ValueError):
+            try:
+                u = User.objects.get(username=str(uid))
+            except User.DoesNotExist:
+                pass
+    if u is None and uname:
+        try:
+            u = User.objects.get(username=str(uname))
+        except User.DoesNotExist:
+            pass
+    return u
 
 
 def gmt_to_ist_time_str(dt):

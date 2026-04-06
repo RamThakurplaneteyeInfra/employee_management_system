@@ -8,7 +8,7 @@ from django.utils import timezone
 from django.db.models import Prefetch, Q, F
 from ems.RequiredImports import sync_to_async, JsonResponse, status, HttpRequest
 from ems.verify_methods import verifyGet, verifyPost, verifyPut, verifyPatch, verifyDelete, load_data
-from ems.utils import gmt_to_ist_str
+from ems.utils import gmt_to_ist_str, get_user_from_member as _get_user_from_member
 from accounts.snippet import login_required, csrf_exempt
 from accounts.models import Branch, User
 from .models import (
@@ -358,28 +358,6 @@ async def profile_members(request: HttpRequest, profile_id: int):
         return JsonResponse({"error": "You do not have access to this client profile"}, status=status.HTTP_403_FORBIDDEN)
     data = [_get_user_display_name(u) for u in c.members.all()]
     return JsonResponse(data, safe=False)
-
-
-def _get_user_from_member(m):
-    """Resolve member value (id or username) to User. Tries id first, then username as fallback."""
-    uid = m.get("id") if isinstance(m, dict) else m
-    uname = m.get("username") if isinstance(m, dict) else (m if isinstance(m, str) else None)
-    u = None
-    if uid is not None and uid != "":
-        try:
-            pid = int(uid) if (isinstance(uid, str) and str(uid).replace("-", "").isdigit()) else uid
-            u = User.objects.get(id=pid)
-        except (User.DoesNotExist, TypeError, ValueError):
-            try:
-                u = User.objects.get(username=str(uid))
-            except User.DoesNotExist:
-                pass
-    if u is None and uname:
-        try:
-            u = User.objects.get(username=str(uname))
-        except User.DoesNotExist:
-            pass
-    return u
 
 
 def _create_profile_sync(user, data):

@@ -27,6 +27,12 @@ class CustomerPanelEntry(models.Model):
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    members = models.ManyToManyField(
+        settings.AUTH_USER_MODEL,
+        through="CustomerPanelEntryMembers",
+        related_name="shared_customer_panel_entries",
+        blank=True,
+    )
 
     class Meta:
         db_table = 'customer_panel"."entry'
@@ -41,6 +47,33 @@ class CustomerPanelEntry(models.Model):
 
     def __str__(self):
         return self.business_name or str(self.pk)
+
+
+class CustomerPanelEntryMembers(models.Model):
+    """Through model: which users may view a customer panel entry (in addition to created_by)."""
+
+    entry = models.ForeignKey(
+        CustomerPanelEntry,
+        on_delete=models.CASCADE,
+        related_name="member_links",
+        db_column="entry_id",
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="customer_panel_entry_memberships",
+        db_column="user_id",
+    )
+
+    class Meta:
+        db_table = 'customer_panel"."entry_members'
+        verbose_name = "customer panel entry member"
+        verbose_name_plural = "customer panel entry members"
+        unique_together = [("entry", "user")]
+        indexes = [
+            models.Index(fields=["entry_id"], name="cust_panel_ent_mem_entry_idx"),
+            models.Index(fields=["user_id"], name="cust_panel_ent_mem_user_idx"),
+        ]
 
 
 class CustomerPanelAmountLog(models.Model):

@@ -2,10 +2,12 @@ import json
 from decimal import Decimal, InvalidOperation
 
 from accounts.filters import _get_user_role_sync
+from accounts.models import User
 from accounts.snippet import csrf_exempt, login_required
 from django.db import transaction
+from django.db.models import Prefetch, Q
 from ems.RequiredImports import HttpRequest, JsonResponse, status, sync_to_async
-from ems.utils import gmt_to_ist_str
+from ems.utils import gmt_to_ist_str, get_user_from_member
 from ems.verify_methods import (
     load_data,
     verifyDelete,
@@ -15,7 +17,7 @@ from ems.verify_methods import (
     verifyPut,
 )
 
-from .models import CustomerPanelAmountLog, CustomerPanelEntry
+from .models import CustomerPanelAmountLog, CustomerPanelEntry, CustomerPanelEntryMembers
 
 
 def _is_admin_or_md(user):
@@ -28,12 +30,31 @@ def _is_admin_or_md(user):
 
 
 def _user_can_access_entry(user, entry: CustomerPanelEntry) -> bool:
-    """Admin / MD / superuser: any entry. Others: only rows they created."""
+    """Admin / MD / superuser: any entry. Others: creator or a selected member."""
     if not user or not user.is_authenticated:
         return False
     if _is_admin_or_md(user):
         return True
-    return entry.created_by_id == user.id
+    if entry.created_by_id == user.id:
+        return True
+    prefetched = getattr(entry, "_prefetched_objects_cache", {}).get("members")
+    if prefetched is not None:
+        return any(m.pk == user.id for m in prefetched)
+    return CustomerPanelEntryMembers.objects.filter(entry=entry, user=user).exists()
+
+
+def _get_user_display_name(u):
+    """Match Clients profile members endpoint: Profile.Name, or first+last, or username."""
+    try:
+        profile = getattr(u, "accounts_profile", None)
+        if profile and getattr(profile, "Name", None):
+            return profile.Name
+    except Exception:
+        pass
+    first = getattr(u, "first_name", None) or ""
+    last = getattr(u, "last_name", None) or ""
+    full = f"{first} {last}".strip()
+    return full or u.username
 
 
 def _coerce_decimal(raw, field_name):
@@ -63,6 +84,8 @@ def _entry_to_dict(obj: CustomerPanelEntry):
         created_by_username = getattr(obj.created_by, "username", None)
         if created_by_username is not None:
             created_by_username = str(created_by_username)
+    # Members: {id, username} per record — aligns with client lead detail JSON style.
+    members_payload = [{"id": u.id, "username": u.username} for u in obj.members.all()]
     return {
         "id": obj.id,
         "business_name": obj.business_name,
@@ -78,6 +101,7 @@ def _entry_to_dict(obj: CustomerPanelEntry):
         "total": float(obj.total) if obj.total is not None else None,
         # Keep created_by as username string for frontend display.
         "created_by": created_by_username,
+        "members": members_payload,
         "created_at": gmt_to_ist_str(obj.created_at, "%d/%m/%Y %H:%M:%S") if obj.created_at else None,
         "updated_at": gmt_to_ist_str(obj.updated_at, "%d/%m/%Y %H:%M:%S") if obj.updated_at else None,
     }
@@ -96,10 +120,27 @@ def _amount_log_to_dict(obj: CustomerPanelAmountLog):
 
 
 def _list_entries_sync(user):
-    qs = CustomerPanelEntry.objects.select_related("created_by").order_by("-created_at")
+    members_prefetch = Prefetch(
+        "members",
+        queryset=User.objects.only("id", "username"),
+    )
+    qs = (
+        CustomerPanelEntry.objects.select_related("created_by")
+        .prefetch_related(members_prefetch)
+        .order_by("-created_at")
+    )
     if not _is_admin_or_md(user):
-        qs = qs.filter(created_by=user)
+        qs = qs.filter(Q(created_by=user) | Q(members=user)).distinct()
     return [_entry_to_dict(obj) for obj in qs]
+
+
+def _apply_members_to_entry(entry, raw_list):
+    if not raw_list:
+        return
+    for m in raw_list:
+        u = get_user_from_member(m)
+        if u:
+            CustomerPanelEntryMembers.objects.get_or_create(entry=entry, user=u)
 
 
 def _create_entry_sync(user, data):
@@ -109,7 +150,7 @@ def _create_entry_sync(user, data):
     value = _coerce_decimal(data.get("value"), "value")
     tax_percent = _coerce_decimal(data.get("tax_percent"), "tax_percent")
     total = _calc_total(value, tax_percent)
-    return CustomerPanelEntry.objects.create(
+    obj = CustomerPanelEntry.objects.create(
         business_name=business_name,
         office_address=data.get("office_address"),
         representative_name=data.get("representative_name"),
@@ -123,14 +164,37 @@ def _create_entry_sync(user, data):
         total=total,
         created_by=user,
     )
+    members = data.get("members", []) or data.get("employees", [])
+    _apply_members_to_entry(obj, members)
+    return _get_entry_sync(obj.id)
 
 
 def _get_entry_sync(entry_id):
-    return CustomerPanelEntry.objects.select_related("created_by").get(id=entry_id)
+    members_prefetch = Prefetch(
+        "members",
+        queryset=User.objects.only("id", "username"),
+    )
+    return (
+        CustomerPanelEntry.objects.select_related("created_by")
+        .prefetch_related(members_prefetch)
+        .get(id=entry_id)
+    )
+
+
+def _get_entry_for_members_endpoint_sync(entry_id):
+    members_prefetch = Prefetch(
+        "members",
+        queryset=User.objects.select_related("accounts_profile"),
+    )
+    return (
+        CustomerPanelEntry.objects.select_related("created_by")
+        .prefetch_related(members_prefetch)
+        .get(id=entry_id)
+    )
 
 
 def _update_entry_sync(entry_id, data):
-    obj = CustomerPanelEntry.objects.get(id=entry_id)
+    obj = CustomerPanelEntry.objects.select_related("created_by").prefetch_related("members").get(id=entry_id)
     if "business_name" in data:
         name = str(data.get("business_name") or "").strip()
         if not name:
@@ -159,7 +223,11 @@ def _update_entry_sync(entry_id, data):
     if value_changed or tax_changed:
         obj.total = _calc_total(obj.value, obj.tax_percent)
     obj.save()
-    return obj
+    if "members" in data or "employees" in data:
+        members = data.get("members", data.get("employees", []))
+        obj.members.clear()
+        _apply_members_to_entry(obj, members)
+    return _get_entry_sync(entry_id)
 
 
 @csrf_exempt
@@ -224,6 +292,24 @@ async def detail_update_delete_entry(request: HttpRequest, entry_id: int):
         return JsonResponse({"message": "Customer panel entry deleted"}, status=status.HTTP_200_OK)
 
     return JsonResponse({"error": "Method not allowed"}, status=status.HTTP_405_METHOD_NOT_ALLOWED)
+
+
+@csrf_exempt
+@login_required
+async def entry_members(request: HttpRequest, entry_id: int):
+    """GET .../entries/<id>/members/ — same shape as Clients profile_members (display names JSON array)."""
+    if request.method != "GET":
+        return JsonResponse({"error": "Method not allowed"}, status=status.HTTP_405_METHOD_NOT_ALLOWED)
+    if verifyGet(request):
+        return verifyGet(request)
+    try:
+        entry = await sync_to_async(_get_entry_for_members_endpoint_sync)(entry_id)
+    except CustomerPanelEntry.DoesNotExist:
+        return JsonResponse({"error": "Entry not found"}, status=status.HTTP_404_NOT_FOUND)
+    if not await sync_to_async(_user_can_access_entry)(request.user, entry):
+        return JsonResponse({"error": "Entry not found"}, status=status.HTTP_404_NOT_FOUND)
+    data = [_get_user_display_name(u) for u in entry.members.all()]
+    return JsonResponse(data, safe=False)
 
 
 def _list_amount_logs_sync(entry_id):
