@@ -15,7 +15,16 @@ from .cache_utils import (
 )
 
 # Do not cache these path prefixes (admin, static, notifications GETs, logout, etc.)
-CACHE_SKIP_PREFIXES = ("/admin/", "/static/", "/media/", "/notifications/", "/accounts/logout/")
+# Book slots "today" is date-sensitive; skip Redis GET cache (also /api/... if proxied that way).
+CACHE_SKIP_PREFIXES = (
+    "/admin/",
+    "/static/",
+    "/media/",
+    "/notifications/",
+    "/accounts/logout/",
+    "/eventsapi/bookslots/today/",
+    "/api/eventsapi/bookslots/today/",
+)
 MUTATION_METHODS = ("POST", "PUT", "PATCH", "DELETE")
 
 

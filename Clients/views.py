@@ -1,6 +1,6 @@
 """
 Client Lead API - Add Client Lead form.
-No database changes. Uses existing ClientProfile, CurrentClientStage, ClientProfileMembers.
+Uses ClientProfile (including optional product_name text), CurrentClientStage, ClientProfileMembers.
 """
 import json
 from decimal import Decimal, InvalidOperation
@@ -222,6 +222,78 @@ def _product_value_for_json(c):
     return float(c.product_value)
 
 
+def _parse_optional_int(val):
+    if val is None or val == "":
+        return None
+    try:
+        return int(val)
+    except (TypeError, ValueError):
+        return None
+
+
+def _resolve_product_for_create(data):
+    """
+    From POST body: optional product_id (catalog Product pk) links Project when resolvable;
+    product_name / product / Product are always free text on ClientProfile.product_name (no Project match).
+    """
+    pid = _parse_optional_int(data.get("product_id"))
+    if pid is not None:
+        prod = Product.objects.filter(pk=pid).first()
+        if prod:
+            name = (prod.name or "").strip()
+            proj = Project.objects.filter(name__iexact=name).first() if name else None
+            if proj:
+                return proj, None
+            return None, name or None
+
+    pn = data.get("product_name") or data.get("product") or data.get("Product")
+    if pn is None:
+        return None, None
+    s = str(pn).strip()
+    if not s:
+        return None, None
+    return None, s
+
+
+def _apply_product_fields_update(c, data):
+    """
+    PATCH/PUT for /profiles/<id>/ only: product_name / product / Product update free text and clear Product FK.
+    product_id in the body is ignored (use GET list or other flows if id is needed elsewhere).
+    """
+    has_text = any(k in data for k in ("product_name", "product", "Product"))
+    if not has_text:
+        return
+    pn = None
+    if "product_name" in data:
+        pn = data["product_name"]
+    elif "product" in data:
+        pn = data["product"]
+    elif "Product" in data:
+        pn = data["Product"]
+    if pn is None:
+        c.Product = None
+        c.product_name = None
+        return
+    s = str(pn).strip()
+    if not s:
+        c.Product = None
+        c.product_name = None
+        return
+    c.Product = None
+    c.product_name = s
+
+
+def _display_product_name(c):
+    """Single API field: linked Project name, else stored product_name text."""
+    if c.Product_id and c.Product:
+        return c.Product.name
+    raw = getattr(c, "product_name", None)
+    if raw is None:
+        return None
+    s = str(raw).strip()
+    return s or None
+
+
 def _note_to_dict(conv):
     return {
         "id": conv.id,
@@ -232,9 +304,9 @@ def _note_to_dict(conv):
     }
 
 
-def _profile_to_dict(c):
+def _profile_to_dict(c, *, include_product_id=True):
     notes = [_note_to_dict(conv) for conv in c.conversations.all()] if hasattr(c, "conversations") else []
-    return {
+    out = {
         "id": c.id,
         "company_name": c.company_name,
         "client_name": c.client_name,
@@ -248,15 +320,17 @@ def _profile_to_dict(c):
         "branch_name": c.branch.branch_name if c.branch else None,
         "status_id": c.status_id,
         "status_name": c.status.name if c.status else None,
-        "product_id": c.Product_id,
-        "product_name": c.Product.name if c.Product else None,
-        "product_value": _product_value_for_json(c),
-        "created_by": c.created_by.username if c.created_by else None,
-        "members": [_get_user_display_name(u) for u in c.members.all()],
-        "notes": notes,
-        "created_at": gmt_to_ist_str(c.created_at, "%d/%m/%Y %H:%M:%S") if c.created_at else None,
-        "updated_at": gmt_to_ist_str(c.updated_at, "%d/%m/%Y %H:%M:%S") if c.updated_at else None,
     }
+    if include_product_id:
+        out["product_id"] = c.Product_id
+    out["product_name"] = _display_product_name(c)
+    out["product_value"] = _product_value_for_json(c)
+    out["created_by"] = c.created_by.username if c.created_by else None
+    out["members"] = [_get_user_display_name(u) for u in c.members.all()]
+    out["notes"] = notes
+    out["created_at"] = gmt_to_ist_str(c.created_at, "%d/%m/%Y %H:%M:%S") if c.created_at else None
+    out["updated_at"] = gmt_to_ist_str(c.updated_at, "%d/%m/%Y %H:%M:%S") if c.updated_at else None
+    return out
 
 
 def _list_profiles_sync(user):
@@ -318,7 +392,7 @@ async def profile_detail_update_delete(request: HttpRequest, profile_id: int):
     if request.method == "GET":
         if verifyGet(request):
             return verifyGet(request)
-        return JsonResponse(_profile_to_dict(c))
+        return JsonResponse(_profile_to_dict(c, include_product_id=False))
     if request.method in ("PUT", "PATCH"):
         return await profile_update(request, profile_id)
     if request.method == "DELETE":
@@ -373,10 +447,7 @@ def _create_profile_sync(user, data):
         except CurrentClientStage.DoesNotExist:
             pass
 
-    product_obj = None
-    product_name = data.get("product_name") or data.get("Product") or data.get("product")
-    if product_name:
-        product_obj = Project.objects.filter(name__iexact=str(product_name).strip()).first()
+    product_obj, stored_product_label = _resolve_product_for_create(data)
 
     product_value = None
     if "product_value" in data:
@@ -402,6 +473,7 @@ def _create_profile_sync(user, data):
         branch=branch_obj,
         status=status_obj,
         Product=product_obj,
+        product_name=stored_product_label,
         product_value=product_value,
         created_by=user,
     )
@@ -464,12 +536,7 @@ def _update_profile_sync(profile_id, data):
             c.status = CurrentClientStage.objects.get(id=data["status_id"])
         except CurrentClientStage.DoesNotExist:
             pass
-    if "product_name" in data or "product" in data or "Product" in data:
-        pn = data.get("product_name") or data.get("product") or data.get("Product")
-        if pn:
-            c.Product = Project.objects.filter(name__iexact=str(pn).strip()).first()
-        else:
-            c.Product = None
+    _apply_product_fields_update(c, data)
     if "product_value" in data:
         c.product_value = _coerce_product_value(data.get("product_value"))
     if "members" in data or "employees" in data:

@@ -69,6 +69,12 @@ class ClientProfile(models.Model):
         blank=True,
         db_index=True,
     )
+    product_name = models.CharField(
+        max_length=255,
+        blank=True,
+        null=True,
+        help_text="Free-text product label when Product (Project) is unset or has no matching Project.",
+    )
     product_value = models.DecimalField(
         max_digits=14,
         decimal_places=2,

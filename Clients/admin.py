@@ -12,7 +12,7 @@ class CurrentClientStageAdmin(admin.ModelAdmin):
 class ClientProfileAdmin(admin.ModelAdmin):
     list_display = ["id", "company_name", "client_name", "branch", "status", "product_value", "created_at"]
     list_filter = ["status", "created_at"]
-    search_fields = ["company_name", "client_name", "client_contact", "address"]
+    search_fields = ["company_name", "client_name", "client_contact", "address", "product_name"]
     filter_horizontal = ["members"]
     readonly_fields = ["created_at", "updated_at"]
 
