@@ -145,7 +145,8 @@ async def create_employee_login(request: HttpRequest):
 def _get_all_employees_sync():
     """Sync helper: DB operations with transaction.atomic. Optimized: select_related for Teamlead profile to avoid N+1."""
     with transaction.atomic():
-        profiles = Profile.objects.all().select_related(
+        # Only list profiles whose linked Django auth user is active.
+        profiles = Profile.objects.filter(Employee_id__is_active=True).select_related(
             "Role", "Designation", "Branch", "Department", "Employee_id", "Teamlead", "Teamlead__accounts_profile"
         ).prefetch_related("functions").order_by("Name")
         result = []

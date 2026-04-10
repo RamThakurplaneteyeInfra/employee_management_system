@@ -25,12 +25,12 @@ def resolve_deadline_employee_id(user):
 
 
 def is_global_privileged_deadline_user(user):
-    """See all projects / all phases: superuser or MD or Admin (not TeamLead, not phase-only)."""
+    """See all projects / all phases: superuser, MD, Admin, or TeamLead."""
     if not user or not user.is_authenticated:
         return False
     if getattr(user, "is_superuser", False):
         return True
-    return _role_name(user) in ("MD", "Admin")
+    return _role_name(user) in ("MD", "Admin", "TeamLead")
 
 
 def can_see_all_phases_for_project(user, project):
