@@ -36,7 +36,7 @@ class ClientProfile(models.Model):
     client_contact = models.CharField(max_length=100, blank=True)
     representative_contact_number = models.CharField(max_length=100, blank=True)
     representative_name = models.CharField(max_length=255, blank=True)
-    motive = models.CharField(max_length=255, blank=True)
+    motive = models.TextField(blank=True)
     status = models.ForeignKey(
         CurrentClientStage,
         on_delete=models.PROTECT,

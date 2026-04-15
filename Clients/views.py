@@ -22,6 +22,9 @@ from project.models import Project, Product
 from QuaterlyReports.models import SalesStatistics
 from task_management.models import TaskStatus
 
+# Keep a high but finite limit to avoid unexpectedly rejecting long lead notes.
+MAX_LEAD_DESCRIPTION_WORDS = 10000
+
 
 def _branch_pk_from_raw(raw):
     if raw is None or raw == "":
@@ -294,6 +297,29 @@ def _display_product_name(c):
     return s or None
 
 
+def _resolve_lead_text_from_payload(data):
+    """
+    Resolve incoming lead description text while preserving existing behavior.
+    - Create currently prefers motive, then description.
+    - Update currently applies motive then description (description wins if both present).
+    """
+    if "motive" in data:
+        return data.get("motive", "") or data.get("description", "")
+    if "description" in data:
+        return data.get("description", "")
+    return None
+
+
+def _validate_lead_description_word_limit(text):
+    if text is None:
+        return
+    word_count = len(str(text).split())
+    if word_count > MAX_LEAD_DESCRIPTION_WORDS:
+        raise ValueError(
+            f"Description cannot exceed {MAX_LEAD_DESCRIPTION_WORDS} words (received {word_count})."
+        )
+
+
 def _note_to_dict(conv):
     return {
         "id": conv.id,
@@ -435,6 +461,9 @@ async def profile_members(request: HttpRequest, profile_id: int):
 
 
 def _create_profile_sync(user, data):
+    lead_text = _resolve_lead_text_from_payload(data)
+    _validate_lead_description_word_limit(lead_text)
+
     status_obj = None
     if data.get("status_id"):
         try:
@@ -511,6 +540,9 @@ async def profile_create(request: HttpRequest):
 
 def _update_profile_sync(profile_id, data):
     c = ClientProfile.objects.get(id=profile_id)
+    lead_text = _resolve_lead_text_from_payload(data)
+    _validate_lead_description_word_limit(lead_text)
+
     if "company_name" in data:
         c.company_name = data["company_name"]
     if "client_name" in data:

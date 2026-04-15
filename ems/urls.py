@@ -36,6 +36,9 @@ urlpatterns = [
     path("deadline/", include("projects_deadline.urls"), name="projects_deadline"),
     path("alertsapi/", include("Alerts_Announcements.urls"), name="alerts_announcements"),
     path("notesapi/", include("notes.urls"), name="notesapi"),
+    # Recruitment: /api/jobs/ (canonical) and /jobs/ (alias for legacy / misconfigured clients)
+    path("api/", include("recruitment.urls"), name="recruitment"),
+    path("", include("recruitment.urls_root")),
 ]
 
 if True:
