@@ -39,6 +39,7 @@ urlpatterns = [
     # Recruitment: /api/jobs/ (canonical) and /jobs/ (alias for legacy / misconfigured clients)
     path("api/", include("recruitment.urls"), name="recruitment"),
     path("", include("recruitment.urls_root")),
+    path("attendanceapi/", include("attendance.urls"), name="attendance"),
 ]
 
 if True:

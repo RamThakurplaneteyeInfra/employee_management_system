@@ -87,6 +87,7 @@ INSTALLED_APPS = [
     "projects_deadline",
     "notes",
     "recruitment",
+    "attendance",
 ]
 
 MIDDLEWARE = [
@@ -289,6 +290,10 @@ AWS_S3_CORS_RULES = [
 # Cron (X-CRON-KEY header for cron endpoints)
 # =============================================================================
 X_CRON_KEY = os.getenv("X_CRON_KEY","").strip()
+
+# External Attendance API (read-only proxy)
+ATTENDANCE_API_URL = os.getenv("ATTENDANCE_API_URL", "")
+ATTENDANCE_API_KEY = os.getenv("ATTENDANCE_API_KEY", "")
 
 # =============================================================================
 # Misc
