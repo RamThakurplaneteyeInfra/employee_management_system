@@ -31,9 +31,10 @@ class JobOpeningViewSet(viewsets.ModelViewSet):
     - **GET** list/detail: everyone sees only **MD+HR approved** jobs unless the user is MD/HR/Admin/Team lead (then all non-deleted rows).
     - **POST/PATCH/PUT**: MD, HR, Admin, Team lead only (`created_by` set on create).
     - **POST** ``.../jobs/{id}/open/`` and ``.../jobs/{id}/close/``: creator-only (toggles ``job_state``).
-    - **DELETE**: same managers only — **soft-delete** (sets ``deleted_at``); **no row is removed** from the database; applications stay linked.
+    - **POST** ``.../jobs/{id}/remove/``: creator-only — **soft-delete this job only** (sets ``deleted_at`` on that row); not bulk; applications stay linked.
+    - **DELETE** ``.../jobs/{id}/``: managers **or creator** — **soft-delete that single job** (URL ``pk`` only); **no row is removed** from the database; applications stay linked.
     - **GET** ``.../jobs/apply/``: list all visible jobs for apply flow (no job id required).
-    - **GET** ``.../jobs/{id}/apply/`` / ``apply-batch/``: returns JSON **how to submit** (no 405 when opened in a browser).
+    - **GET** ``.../jobs/{id}/apply/`` / ``apply-batch/``: returns JSON **how to submit** (no 405 when opened in a browser); if the job is not accepting applications, **200** with ``accepts_applications: false`` (not 404).
     - **POST** ``.../jobs/{id}/apply/``: anyone may apply (name + resume); logged-in users get ``applied_by`` set.
     - **POST** ``.../jobs/{id}/apply-batch/``: multipart batch — repeat ``full_name`` and ``resume`` fields (same count, same order); only when MD+HR approved.
     """
@@ -56,6 +57,10 @@ class JobOpeningViewSet(viewsets.ModelViewSet):
                 ),
             )
         )
+        # Apply / apply-batch must resolve any non-deleted job by pk so public clients
+        # get clear JSON (400 on POST) instead of 404 when MD/HR approval is pending.
+        if getattr(self, "action", None) in ("apply", "apply_batch"):
+            return qs
         user = self.request.user
         if user_can_manage_jobs(user):
             return qs
@@ -186,6 +191,31 @@ class JobOpeningViewSet(viewsets.ModelViewSet):
 
     @action(
         detail=True,
+        methods=["post"],
+        url_path="remove",
+        permission_classes=[CanToggleJobState],
+        authentication_classes=[CsrfExemptSessionAuthentication],
+    )
+    def remove(self, request, pk=None):
+        """
+        Soft-delete exactly this opening (creator only; same rule as open/close).
+
+        ``detail=True`` + URL ``pk`` ensures a single row is updated—no bulk delete.
+        """
+        opening = self.get_object()
+        if opening.deleted_at is not None:
+            return Response(
+                {
+                    "detail": "Job opening is already removed.",
+                    "deleted_at": opening.deleted_at,
+                },
+                status=status.HTTP_200_OK,
+            )
+        self.perform_destroy(opening)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    @action(
+        detail=True,
         methods=["get", "post"],
         url_path="apply",
         permission_classes=[AllowAny],
@@ -196,14 +226,9 @@ class JobOpeningViewSet(viewsets.ModelViewSet):
         """GET: API hint. POST: submit one application (multipart: ``full_name``, ``resume``)."""
         opening = self.get_object()
         if request.method == "GET":
-            if not requirement_accepts_applications(opening):
-                return Response(
-                    {"detail": "Job is not available for application."},
-                    status=status.HTTP_404_NOT_FOUND,
-                )
-            # Build requirement_details only when both MD & HR approved
+            accepts = requirement_accepts_applications(opening)
             requirement_details = None
-            if requirement_accepts_applications(opening):
+            if accepts:
                 from .serializers import JobApplicationNestedSerializer
 
                 qs = opening.applications.all()
@@ -211,25 +236,29 @@ class JobOpeningViewSet(viewsets.ModelViewSet):
                     qs, many=True, context={"request": request},
                 ).data
 
-            return Response(
-                {
-                    "id": opening.pk,
-                    "title": opening.title,
-                    "department": opening.department,
-                    "team": opening.team,
-                    "type": opening.employment_type,
-                    "num_positions": opening.num_positions,
-                    "required_experience": opening.required_experience,
-                    "primary_skills": opening.primary_skills,
-                    "education": opening.education,
-                    "tools_tech": opening.tools_tech,
-                    "md_status": opening.md_status,
-                    "hr_status": opening.hr_status,
-                    "job_state": opening.job_state,
-                    "requirement_details": requirement_details,
-                },
-                status=status.HTTP_200_OK,
-            )
+            payload = {
+                "id": opening.pk,
+                "title": opening.title,
+                "department": opening.department,
+                "team": opening.team,
+                "type": opening.employment_type,
+                "num_positions": opening.num_positions,
+                "required_experience": opening.required_experience,
+                "primary_skills": opening.primary_skills,
+                "education": opening.education,
+                "tools_tech": opening.tools_tech,
+                "md_status": opening.md_status,
+                "hr_status": opening.hr_status,
+                "job_state": opening.job_state,
+                "accepts_applications": accepts,
+                "requirement_details": requirement_details,
+            }
+            if not accepts:
+                payload["detail"] = (
+                    "Job is not available for application "
+                    "(MD and HR must approve and the job must be open)."
+                )
+            return Response(payload, status=status.HTTP_200_OK)
         data = request.data.copy() if hasattr(request.data, "copy") else dict(request.data)
         if "fullName" in data and "full_name" not in data:
             data["full_name"] = data["fullName"]

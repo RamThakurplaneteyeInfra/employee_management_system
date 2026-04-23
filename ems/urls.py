@@ -40,6 +40,11 @@ urlpatterns = [
     path("api/", include("recruitment.urls"), name="recruitment"),
     path("", include("recruitment.urls_root")),
     path("attendanceapi/", include("attendance.urls"), name="attendance"),
+    # AI EMS insight (aggregates + Grok); also mounted at /ai/ for spec alias
+    path("api/ai/", include("insight.urls"), name="insight_api_ai"),
+    path("ai/", include("insight.urls"), name="insight_ai"),
+    # INFRA structure forms API (same routes as standalone backend, under /api/infra/)
+    path("api/infra/", include("infra_forms.urls"), name="infra_forms_api"),
 ]
 
 if True:

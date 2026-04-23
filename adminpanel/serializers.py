@@ -1,12 +1,223 @@
+import base64
+import mimetypes
+import os
+import re
+from urllib.parse import unquote, urlparse
+
+from django.conf import settings
+from django.core.files.base import ContentFile
+from django.core.files.storage import default_storage
 from rest_framework import serializers
 from task_management.models import TaskStatus
+
+from ems.s3_utils import get_presigned_url
 from .models import (
-    AssetType, 
+    AssetType,
     Asset,
-    BillCategory,
     Bill,
+    BillCategory,
+    BillFloor,
+    ExpenseCategory,
+    ExpenseMonthlyAdvance,
     ExpenseTracker,
-    Vendor)
+    Vendor,
+)
+
+# Align with model FileExtensionValidator; cap size to limit abuse (DoS / storage).
+_MAX_ADMIN_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MiB
+
+# data:mime;base64,...  (whitespace in base64 allowed)
+_DATA_URL_RE = re.compile(
+    r"^data:(?P<mime>[\w/+\-.]+);base64,(?P<b64>[\s\S]+)$",
+    re.IGNORECASE | re.DOTALL,
+)
+
+# Matches upload_to names: vendor_attachments|bill_attachments|expense_attachments/<32 hex>.<ext>
+_SAFE_STORED_NAME_RE = re.compile(
+    r"^(?P<folder>vendor_attachments|bill_attachments|expense_attachments)/[0-9a-f]{32}\.[_a-zA-Z0-9.]+$"
+)
+
+
+def _storage_name_from_client_media_string(s, allowed_stored_path_prefixes):
+    """
+    Resolve a string the client re-sent (absolute media URL, /media/... path, or storage
+    name) to a single storage-relative name. Only allows whitelisted folder prefixes; no
+    '..' or remote URL fetches (SSRF).
+    """
+    if not allowed_stored_path_prefixes:
+        raise serializers.ValidationError("Server configuration error: no allowed path prefixes.")
+    s = unquote(s.strip().replace("\\", "/"))
+    if not s:
+        return None
+    path = s
+    if s.lower().startswith(("http://", "https://")):
+        path = (urlparse(s).path or "").replace("\\", "/")
+
+    def _try_extract(candidate: str):
+        candidate = candidate.replace("\\", "/")
+        for pfx in allowed_stored_path_prefixes:
+            folder = pfx.rstrip("/")
+            key = f"{folder}/"
+            i = candidate.find(key)
+            if i >= 0:
+                return candidate[i:].lstrip("/")
+        return None
+
+    rel = _try_extract(path) or _try_extract(s)
+    if not rel:
+        raise serializers.ValidationError(
+            "Attachment URL or path is not a recognized file under this field's allowed storage."
+        )
+    if ".." in rel or rel.startswith(("/", "\\")) or "//" in rel:
+        raise serializers.ValidationError("Invalid attachment path.")
+    for part in rel.split("/"):
+        if part in (".", "..", ""):
+            raise serializers.ValidationError("Invalid attachment path.")
+    allowed = tuple(pfx.rstrip("/") + "/" for pfx in allowed_stored_path_prefixes)
+    if not any(rel.startswith(p) for p in allowed):
+        raise serializers.ValidationError("Attachment is not in an allowed folder for this field.")
+    if not _SAFE_STORED_NAME_RE.match(rel):
+        raise serializers.ValidationError(
+            "Only previously uploaded document names (e.g. vendor_attachments/<id>.pdf) are accepted."
+        )
+    if not default_storage.exists(rel):
+        raise serializers.ValidationError("That file is not present in storage (or was removed).")
+    return rel
+
+
+class MultipartOrDataUrlFileField(serializers.FileField):
+    """
+    Accepts: multipart file, base64 data URL, a full URL or /media/... string pointing at an
+    existing file in allowed storage (same server), or null/empty to clear.
+
+    The URL path reuses an existing object in default storage (no re-upload, no new uuid name).
+    """
+
+    def __init__(self, *args, allowed_stored_path_prefixes=None, **kwargs):
+        if allowed_stored_path_prefixes is not None and not isinstance(
+            allowed_stored_path_prefixes, (tuple, list)
+        ):
+            raise TypeError("allowed_stored_path_prefixes must be a tuple or list of strings")
+        # Default: allow both app folders; prefer passing explicit per-serializer prefixes.
+        self.allowed_stored_path_prefixes = tuple(allowed_stored_path_prefixes) if (
+            allowed_stored_path_prefixes is not None
+        ) else (
+            "vendor_attachments/",
+            "bill_attachments/",
+            "expense_attachments/",
+        )
+        super().__init__(*args, **kwargs)
+
+    def to_internal_value(self, data):
+        if data in (None,):
+            if not self.allow_null:
+                raise serializers.ValidationError("This field may not be null.")
+            return None
+        if data == "":
+            return None
+        if isinstance(data, str):
+            s = data.strip()
+            if not s:
+                return None
+            if s.lower().startswith("data:"):
+                return self._content_file_from_data_url(s)
+            return _storage_name_from_client_media_string(
+                s, self.allowed_stored_path_prefixes
+            )
+        return super().to_internal_value(data)
+
+    def _content_file_from_data_url(self, s: str) -> ContentFile:
+        m = _DATA_URL_RE.match(s.strip())
+        if not m:
+            raise serializers.ValidationError(
+                "Invalid data URL. Use data:<mime>;base64,<encoded data> (e.g. data:application/pdf;base64,...)."
+            )
+        b64 = re.sub(r"\s+", "", m.group("b64"))
+        try:
+            raw = base64.b64decode(b64, validate=True)
+        except (ValueError, TypeError):
+            raise serializers.ValidationError("Invalid base64 in data URL.")
+        if len(raw) > _MAX_ADMIN_UPLOAD_BYTES:
+            raise serializers.ValidationError(
+                f"File too large. Maximum size is {_MAX_ADMIN_UPLOAD_BYTES // (1024 * 1024)} MB."
+            )
+        mime = m.group("mime").split(";")[0].lower().strip()
+        ext = mimetypes.guess_extension(mime, strict=False) or ".bin"
+        if ext in (".jpe", ".jpeg"):
+            ext = ".jpg"
+        if ext == ".mpga":
+            ext = ".mp3"
+        # Avoid odd dual extensions from guess_extension
+        name = f"upload{ext}"
+        return ContentFile(raw, name=name)
+
+
+def _admin_attachment_read_url(attachment, request):
+    """
+    Public read URL for an optional FileField: presigned GET when S3 is configured
+    (same bucket/keys as django-storages for these models), else FieldFile.url.
+    """
+    if not attachment or not getattr(attachment, "name", None):
+        return None
+    if (
+        getattr(settings, "AWS_STORAGE_BUCKET_NAME", None)
+        and getattr(settings, "AWS_ACCESS_KEY_ID", None)
+    ):
+        presigned = get_presigned_url(attachment.name)
+        if presigned:
+            return presigned
+    try:
+        url = attachment.url
+    except Exception:
+        return None
+    if not url:
+        return None
+    if url.startswith("http://") or url.startswith("https://"):
+        return url
+    if request is not None:
+        return request.build_absolute_uri(url)
+    return url
+
+
+def _admin_attachment_payload(attachment, request):
+    """
+    Messaging-style attachment object for JSON responses (read only).
+    Keys match messaging upload response: s3_key, file_name, content_type, file_size, url.
+    """
+    if not attachment or not getattr(attachment, "name", None):
+        return None
+    name = attachment.name.replace("\\", "/")
+    file_name = os.path.basename(name) or "file"
+    ctype, _ = mimetypes.guess_type(file_name)
+    if not ctype:
+        ctype = "application/octet-stream"
+    try:
+        fsize = int(attachment.size)
+    except Exception:
+        fsize = 0
+    return {
+        "s3_key": name,
+        "file_name": file_name,
+        "content_type": ctype,
+        "file_size": fsize,
+        "url": _admin_attachment_read_url(attachment, request),
+    }
+
+
+class _AdminFileAttachmentResponseMixin:
+    """
+    On read, represent attachment as an object (like messaging) instead of a bare file URL string.
+    Writes are unchanged: multipart file, data URL, or storage path string.
+    """
+
+    def to_representation(self, instance):
+        ret = super().to_representation(instance)
+        ret["attachment"] = _admin_attachment_payload(
+            instance.attachment, self.context.get("request")
+        )
+        return ret
+
+
 # 1 AssetType Serializer (Dropdown)
 class AssetTypeSerializer(serializers.ModelSerializer):
     class Meta:
@@ -45,7 +256,7 @@ class BillCategorySerializer(serializers.ModelSerializer):
 
 
 # 4 Bills
-class BillSerializer(serializers.ModelSerializer):
+class BillSerializer(_AdminFileAttachmentResponseMixin, serializers.ModelSerializer):
     category = serializers.SlugRelatedField(
         queryset=BillCategory.objects.all(),
         slug_field="name"
@@ -53,26 +264,163 @@ class BillSerializer(serializers.ModelSerializer):
     status = serializers.SlugRelatedField(
         queryset=TaskStatus.objects.all(),
         slug_field="status_name")
-    
+    floor = serializers.ChoiceField(
+        choices=BillFloor.choices,
+        required=False,
+        allow_null=True,
+        allow_blank=True,
+    )
+
+    def validate_floor(self, value):
+        if value in (None, ""):
+            return None
+        return value
+
+    attachment = MultipartOrDataUrlFileField(
+        required=False,
+        allow_null=True,
+        allow_empty_file=False,
+        allowed_stored_path_prefixes=("bill_attachments/",),
+    )
+
     class Meta:
         model = Bill
-        fields = ['id', 'category', 'amount', 'recipient', 'created_at',"status","date"]
-        read_only_fields = ['created_at']
+        fields = [
+            "id",
+            "category",
+            "amount",
+            "recipient",
+            "floor",
+            "attachment",
+            "created_at",
+            "status",
+            "date",
+        ]
+        read_only_fields = ["created_at"]
+
+    def validate_attachment(self, value):
+        if not value:
+            return value
+        if isinstance(value, str):
+            try:
+                sz = default_storage.size(value)
+            except Exception:
+                raise serializers.ValidationError("Could not read attachment from storage.")
+            if sz > _MAX_ADMIN_UPLOAD_BYTES:
+                raise serializers.ValidationError(
+                    f"File too large. Maximum size is {_MAX_ADMIN_UPLOAD_BYTES // (1024 * 1024)} MB."
+                )
+            return value
+        if value.size > _MAX_ADMIN_UPLOAD_BYTES:
+            raise serializers.ValidationError(
+                f"File too large. Maximum size is {_MAX_ADMIN_UPLOAD_BYTES // (1024 * 1024)} MB."
+            )
+        return value
+
+
+# 5a Expense category (dropdown; same pattern as BillCategory)
+class ExpenseCategorySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ExpenseCategory
+        fields = ["id", "name", "created_at"]
+        read_only_fields = ["created_at"]
+
+
+# 5b Monthly advance (one row per calendar month)
+class ExpenseMonthlyAdvanceSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ExpenseMonthlyAdvance
+        fields = ["id", "year", "month", "advance_amount", "note", "created_at", "updated_at"]
+        read_only_fields = ["created_at", "updated_at"]
+
+    def validate_month(self, value):
+        if value < 1 or value > 12:
+            raise serializers.ValidationError("Month must be between 1 and 12.")
+        return value
+
+    def validate_year(self, value):
+        if value < 1900 or value > 3000:
+            raise serializers.ValidationError("Year is out of allowed range.")
+        return value
+
+    def validate(self, attrs):
+        year = attrs.get("year", getattr(self.instance, "year", None))
+        month = attrs.get("month", getattr(self.instance, "month", None))
+        if year is None or month is None:
+            return attrs
+        qs = ExpenseMonthlyAdvance.objects.filter(year=year, month=month)
+        if self.instance is not None:
+            qs = qs.exclude(pk=self.instance.pk)
+        if qs.exists():
+            raise serializers.ValidationError(
+                {"non_field_errors": ["An advance for this year and month already exists. Update that record instead."]}
+            )
+        return attrs
 
 
 # 5 Expense Tracker
-class ExpenseTrackerSerializer(serializers.ModelSerializer):
+class ExpenseTrackerSerializer(_AdminFileAttachmentResponseMixin, serializers.ModelSerializer):
     status = serializers.SlugRelatedField(
         queryset=TaskStatus.objects.all(),
-        slug_field="status_name")
+        slug_field="status_name",
+    )
+    category = serializers.SlugRelatedField(
+        slug_field="name",
+        queryset=ExpenseCategory.objects.all(),
+        required=False,
+        allow_null=True,
+    )
+    attachment = MultipartOrDataUrlFileField(
+        required=False,
+        allow_null=True,
+        allow_empty_file=False,
+        allowed_stored_path_prefixes=("expense_attachments/",),
+    )
+
     class Meta:
         model = ExpenseTracker
-        fields = ['id', 'title', 'amount', 'note', 'paid_date', 'created_at',"status"]
-        read_only_fields = ['created_at']
+        fields = [
+            "id",
+            "title",
+            "amount",
+            "note",
+            "category",
+            "attachment",
+            "paid_date",
+            "created_at",
+            "status",
+        ]
+        read_only_fields = ["created_at"]
+
+    def validate_attachment(self, value):
+        if not value:
+            return value
+        if isinstance(value, str):
+            try:
+                sz = default_storage.size(value)
+            except Exception:
+                raise serializers.ValidationError("Could not read attachment from storage.")
+            if sz > _MAX_ADMIN_UPLOAD_BYTES:
+                raise serializers.ValidationError(
+                    f"File too large. Maximum size is {_MAX_ADMIN_UPLOAD_BYTES // (1024 * 1024)} MB."
+                )
+            return value
+        if value.size > _MAX_ADMIN_UPLOAD_BYTES:
+            raise serializers.ValidationError(
+                f"File too large. Maximum size is {_MAX_ADMIN_UPLOAD_BYTES // (1024 * 1024)} MB."
+            )
+        return value
 
 
 # 6 Vendor
-class VendorSerializer(serializers.ModelSerializer):
+class VendorSerializer(_AdminFileAttachmentResponseMixin, serializers.ModelSerializer):
+    attachment = MultipartOrDataUrlFileField(
+        required=False,
+        allow_null=True,
+        allow_empty_file=False,
+        allowed_stored_path_prefixes=("vendor_attachments/",),
+    )
+
     class Meta:
         model = Vendor
         fields = [
@@ -83,7 +431,38 @@ class VendorSerializer(serializers.ModelSerializer):
             'email',
             'primary_phone',
             'alternate_phone',
-            'created_at'
+            'service',
+            'attachment',
+            'created_at',
         ]
         read_only_fields = ['created_at']
+
+    def validate_attachment(self, value):
+        if not value:
+            return value
+        if isinstance(value, str):
+            try:
+                sz = default_storage.size(value)
+            except Exception:
+                raise serializers.ValidationError("Could not read attachment from storage.")
+            if sz > _MAX_ADMIN_UPLOAD_BYTES:
+                raise serializers.ValidationError(
+                    f"File too large. Maximum size is {_MAX_ADMIN_UPLOAD_BYTES // (1024 * 1024)} MB."
+                )
+            return value
+        if value.size > _MAX_ADMIN_UPLOAD_BYTES:
+            raise serializers.ValidationError(
+                f"File too large. Maximum size is {_MAX_ADMIN_UPLOAD_BYTES // (1024 * 1024)} MB."
+            )
+        return value
+
+    def validate_service(self, value):
+        if value is None:
+            return ""
+        text = value.strip()
+        if len(text) > 10000:
+            raise serializers.ValidationError(
+                "Service description must be at most 10000 characters."
+            )
+        return text
 

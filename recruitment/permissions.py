@@ -22,12 +22,32 @@ def user_can_manage_jobs(user) -> bool:
 
 
 class CanManageJobOpenings(BasePermission):
-    """Create/update/soft-delete job openings (MD, HR, Admin, Team lead)."""
+    """
+    List/read: all (queryset enforces visibility).
+
+    Create/update: MD, HR, Admin, Team lead.
+
+    Delete (soft-delete, one object per ``DELETE /jobs/{id}/``): those managers **or**
+    the opening's creator (``created_by``).
+    """
 
     def has_permission(self, request, view):
         if request.method in ("GET", "HEAD", "OPTIONS"):
             return True
+        if request.method == "DELETE":
+            user = getattr(request, "user", None)
+            return bool(user and user.is_authenticated)
         return user_can_manage_jobs(request.user)
+
+    def has_object_permission(self, request, view, obj):
+        if request.method == "DELETE":
+            user = getattr(request, "user", None)
+            if not user or not user.is_authenticated:
+                return False
+            if user_can_manage_jobs(user):
+                return True
+            return getattr(obj, "created_by_id", None) == getattr(user, "id", None)
+        return True
 
 
 class CanViewApplicationDetails(BasePermission):

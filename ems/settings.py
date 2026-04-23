@@ -22,6 +22,13 @@ load_dotenv(f"{BASE_DIR}/.env")
 # =============================================================================
 SECRET_KEY = os.getenv("SECRET_KEY")
 
+# Grok / xAI (EMS insight API — set one of GROK_API_KEY or XAI_API_KEY in .env)
+_grok = (os.getenv("GROK_API_KEY") or os.getenv("XAI_API_KEY") or "").strip()
+GROK_API_KEY = _grok or None
+XAI_API_KEY = GROK_API_KEY
+GROK_API_URL = os.getenv("GROK_API_URL", "https://api.x.ai/v1/chat/completions")
+GROK_MODEL = os.getenv("GROK_MODEL", "grok-2-latest")
+
 # DEBUG is set conditionally below based on is_developement env var
 
 ALLOWED_HOSTS = [
@@ -88,6 +95,8 @@ INSTALLED_APPS = [
     "notes",
     "recruitment",
     "attendance",
+    "insight",
+    "infra_forms",
 ]
 
 MIDDLEWARE = [
@@ -204,6 +213,14 @@ DB_SEARCH_PATH = os.getenv(
     "login_details,emp_assessment,alerts,clients,events,task_management,notifications,project,quatery_reports,messaging,team_farm,team_infra,team_interns,team_management,customer_panel",
 )
 
+# Local Postgres often has no SSL; RDS expects SSL. Override with POSTGRES_SSLMODE if needed.
+_postgres_host = (os.getenv("POSTGRES_HOST") or "localhost").strip().lower()
+_default_pg_sslmode = (
+    "prefer"
+    if _postgres_host in ("localhost", "127.0.0.1", "::1")
+    else "require"
+)
+
 DATABASES = {
     "default": {
         "ENGINE": "ems.backends.postgresql",
@@ -214,7 +231,7 @@ DATABASES = {
         "PORT": os.getenv("POSTGRES_PORT"),
         "OPTIONS": {
             "connect_timeout": 10,
-            "sslmode": "require",
+            "sslmode": os.getenv("POSTGRES_SSLMODE", _default_pg_sslmode),
         },
         # "CONN_MAX_AGE": 0,
         "DISABLE_SERVER_SIDE_CURSORS": True,

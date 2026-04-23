@@ -1,0 +1,280 @@
+================================================================================
+EXPENSE MODULE — API REFERENCE (JSON)
+================================================================================
+Note (2026): For Bills, Expenses, and Vendors, attachment read responses, full field
+  lists, and examples, use the single frontend reference in this folder:
+  adminpanel/bill_expense_vendor_api_reference.txt
+  That file is authoritative for the "attachment" object shape and URLs.
+================================================================================
+Base path: {BASE_URL}/adminapi/
+Example BASE_URL: http://localhost:8005
+Auth: AdminPermission (same as other /adminapi/ routes). Use session or Basic auth per project settings.
+Content-Type: application/json (unless uploading attachment — use multipart/form-data).
+================================================================================
+
+--------------------------------------------------------------------------------
+1) EXPENSES — LIST
+--------------------------------------------------------------------------------
+GET  {BASE_URL}/adminapi/expenses/
+
+Optional query (filters by paid_date):
+  ?year=2026
+  ?year=2026&month=4
+
+Response 200 — JSON array of expense objects:
+
+[
+  {
+    "id": 1,
+    "title": "Office supplies",
+    "amount": "150.50",
+    "note": "Q1 stationery",
+    "category": "Stationary",
+    "attachment": "http://localhost:8005/media/expense_attachments/a1b2c3d4e5f6789012345678abcdef12.pdf",
+    "paid_date": "2026-04-15",
+    "created_at": "2026-04-16T10:30:00.123456Z",
+    "status": "PENDING"
+  }
+]
+
+Notes:
+- "category" is the ExpenseCategory name string, or null if unset.
+- "status" must match an existing task_management TaskStatus.status_name.
+- "amount" is returned as a string (decimal).
+- "attachment" is null or a URL/path to the stored file.
+
+--------------------------------------------------------------------------------
+2) EXPENSES — RETRIEVE ONE
+--------------------------------------------------------------------------------
+GET  {BASE_URL}/adminapi/expenses/{id}/
+
+Response 200 — single object:
+
+{
+  "id": 1,
+  "title": "Office supplies",
+  "amount": "150.50",
+  "note": "Q1 stationery",
+  "category": "Stationary",
+  "attachment": null,
+  "paid_date": "2026-04-15",
+  "created_at": "2026-04-16T10:30:00.123456Z",
+  "status": "PENDING"
+}
+
+--------------------------------------------------------------------------------
+3) EXPENSES — CREATE
+--------------------------------------------------------------------------------
+POST  {BASE_URL}/adminapi/expenses/
+
+Body (JSON, no file):
+
+{
+  "title": "Office supplies",
+  "amount": "150.50",
+  "note": "Q1 stationery",
+  "category": "Stationary",
+  "paid_date": "2026-04-15",
+  "status": "PENDING"
+}
+
+Minimal (category optional):
+
+{
+  "title": "Cab fare",
+  "amount": "45.00",
+  "note": "",
+  "paid_date": "2026-04-20",
+  "status": "PENDING"
+}
+
+Response 201 — same shape as retrieve, including "id" and "created_at".
+
+Attachment: send POST as multipart/form-data with fields: title, amount, note, category (optional), paid_date, status, attachment (file). Or JSON may accept data URL / existing storage path per MultipartOrDataUrlFileField rules.
+
+--------------------------------------------------------------------------------
+4) EXPENSES — FULL UPDATE
+--------------------------------------------------------------------------------
+PUT  {BASE_URL}/adminapi/expenses/{id}/
+
+Body (all writable fields):
+
+{
+  "title": "Office supplies (updated)",
+  "amount": "160.00",
+  "note": "Adjusted",
+  "category": "Grocery",
+  "paid_date": "2026-04-15",
+  "status": "PENDING"
+}
+
+Response 200 — full object.
+
+--------------------------------------------------------------------------------
+5) EXPENSES — PARTIAL UPDATE
+--------------------------------------------------------------------------------
+PATCH  {BASE_URL}/adminapi/expenses/{id}/
+
+Body (only fields to change):
+
+{
+  "amount": "175.25",
+  "category": null
+}
+
+Clear attachment via API (when supported as string null in JSON):
+
+{
+  "attachment": null
+}
+
+Response 200 — full object.
+
+--------------------------------------------------------------------------------
+6) EXPENSES — DELETE
+--------------------------------------------------------------------------------
+DELETE  {BASE_URL}/adminapi/expenses/{id}/
+
+Response 204 — empty body.
+
+--------------------------------------------------------------------------------
+7) EXPENSES — MONTH SUMMARY (advance vs spent)
+--------------------------------------------------------------------------------
+GET  {BASE_URL}/adminapi/expenses/month_summary/?year=2026&month=4
+
+Required query: year, month (month 1–12).
+
+Response 200:
+
+{
+  "year": 2026,
+  "month": 4,
+  "advance_amount": "5000.00",
+  "total_spent": "150.50",
+  "remaining": "4849.50",
+  "expense_count": 3,
+  "advance_note": "April opening advance"
+}
+
+If no advance row exists for that month, advance_amount is "0" and advance_note is "".
+
+Response 400 (missing params):
+
+{
+  "detail": "Query parameters year and month are required."
+}
+
+--------------------------------------------------------------------------------
+8) EXPENSE CATEGORIES — LIST
+--------------------------------------------------------------------------------
+GET  {BASE_URL}/adminapi/expense-categories/
+
+Response 200 — JSON array:
+
+[
+  {
+    "id": 1,
+    "name": "Grocery",
+    "created_at": "2026-04-22T08:00:00.000000Z"
+  },
+  {
+    "id": 2,
+    "name": "Stationary",
+    "created_at": "2026-04-22T08:00:00.000000Z"
+  }
+]
+
+--------------------------------------------------------------------------------
+9) EXPENSE CATEGORIES — CREATE
+--------------------------------------------------------------------------------
+POST  {BASE_URL}/adminapi/expense-categories/
+
+Body:
+
+{
+  "name": "Travel"
+}
+
+Response 201:
+
+{
+  "id": 5,
+  "name": "Travel",
+  "created_at": "2026-04-22T12:00:00.000000Z"
+}
+
+--------------------------------------------------------------------------------
+10) EXPENSE CATEGORIES — RETRIEVE / UPDATE / DELETE
+--------------------------------------------------------------------------------
+GET    {BASE_URL}/adminapi/expense-categories/{id}/
+PUT    {BASE_URL}/adminapi/expense-categories/{id}/
+PATCH  {BASE_URL}/adminapi/expense-categories/{id}/
+DELETE {BASE_URL}/adminapi/expense-categories/{id}/
+
+PATCH body example:
+
+{
+  "name": "Travel & conveyance"
+}
+
+--------------------------------------------------------------------------------
+11) EXPENSE MONTHLY ADVANCE — LIST
+--------------------------------------------------------------------------------
+GET  {BASE_URL}/adminapi/expense-advances/
+
+Response 200 — JSON array:
+
+[
+  {
+    "id": 1,
+    "year": 2026,
+    "month": 4,
+    "advance_amount": "5000.00",
+    "note": "April advance",
+    "created_at": "2026-04-01T09:00:00.000000Z",
+    "updated_at": "2026-04-01T09:00:00.000000Z"
+  }
+]
+
+--------------------------------------------------------------------------------
+12) EXPENSE MONTHLY ADVANCE — CREATE
+--------------------------------------------------------------------------------
+POST  {BASE_URL}/adminapi/expense-advances/
+
+Body:
+
+{
+  "year": 2026,
+  "month": 4,
+  "advance_amount": "5000.00",
+  "note": "April opening advance"
+}
+
+Only one row allowed per (year, month). Duplicate returns validation error, example:
+
+{
+  "non_field_errors": [
+    "An advance for this year and month already exists. Update that record instead."
+  ]
+}
+
+Response 201 — same shape as one list item, with "id".
+
+--------------------------------------------------------------------------------
+13) EXPENSE MONTHLY ADVANCE — RETRIEVE / UPDATE / DELETE
+--------------------------------------------------------------------------------
+GET    {BASE_URL}/adminapi/expense-advances/{id}/
+PUT    {BASE_URL}/adminapi/expense-advances/{id}/
+PATCH  {BASE_URL}/adminapi/expense-advances/{id}/
+DELETE {BASE_URL}/adminapi/expense-advances/{id}/
+
+PATCH body example:
+
+{
+  "advance_amount": "5500.00",
+  "note": "Revised April advance"
+}
+
+================================================================================
+END
+================================================================================

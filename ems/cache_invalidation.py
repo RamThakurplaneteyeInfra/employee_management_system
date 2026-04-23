@@ -316,7 +316,16 @@ def connect_cache_invalidation():
     from Messaging.models import GroupChats, GroupMembers, IndividualChats, GroupMessages, IndividualMessages, MessageAttachment
     from task_management.models import Task, TaskAssignies, TaskMessage, TaskTypes, TaskStatus
     from notifications.models import Notification, notification_type
-    from adminpanel.models import Asset, Bill, ExpenseTracker, Vendor, AssetType, BillCategory
+    from adminpanel.models import (
+        Asset,
+        Bill,
+        ExpenseCategory,
+        ExpenseMonthlyAdvance,
+        ExpenseTracker,
+        Vendor,
+        AssetType,
+        BillCategory,
+    )
     from accounts.models import Profile
     from Calling.models import Call, GroupCall, GroupCallParticipant
     from QuaterlyReports.models import (
@@ -337,7 +346,14 @@ def connect_cache_invalidation():
         GroupChats, GroupMembers, IndividualChats, GroupMessages, IndividualMessages, MessageAttachment,
         Task, TaskAssignies, TaskMessage, TaskTypes, TaskStatus,
         Notification, notification_type,
-        Asset, Bill, ExpenseTracker, Vendor, AssetType, BillCategory,
+        Asset,
+        Bill,
+        ExpenseCategory,
+        ExpenseMonthlyAdvance,
+        ExpenseTracker,
+        Vendor,
+        AssetType,
+        BillCategory,
         Profile,
         Quaters,
         Monthly_department_head_and_subhead,

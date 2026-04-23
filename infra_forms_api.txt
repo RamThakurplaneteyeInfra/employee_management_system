@@ -1,0 +1,189 @@
+INFRA FORMS API (frontend reference)
+===================================
+
+Base URL
+--------
+BASE = http://<host>:8006/api/infra/
+Example: http://127.0.0.1:8006/api/infra/
+
+IMPORTANT
+---------
+- If frontend calls /api/boq-entries/... it will return 404.
+- Correct path is /api/infra/boq-entries/...
+
+
+1) Projects Catalog (saved project names)
+----------------------------------------
+
+GET  BASE/projects/
+200 response (example):
+[
+  { "id": 1, "name": "NH-44 Phase 2", "created_at": "2026-04-23T10:00:00Z" },
+  { "id": 2, "name": "Corridor-A", "created_at": "2026-04-23T11:00:00Z" }
+]
+
+POST BASE/projects/
+Body:
+{ "name": "NH-44 Phase 2" }
+
+201 response (example):
+{ "id": 3, "name": "NH-44 Phase 2", "created_at": "2026-04-23T12:00:00Z" }
+
+GET    BASE/projects/{id}/
+DELETE BASE/projects/{id}/
+
+
+2) Structure Entries (BOQ / LiDAR / SAR)
+----------------------------------------
+These three collections share the same JSON fields and behavior.
+
+Collections:
+- BOQ   -> BASE/boq-entries/
+- LiDAR -> BASE/lidar-entries/
+- SAR   -> BASE/sar-entries/
+
+List filters (query params for GET list):
+- ?project_name=<Project Name>   (case-insensitive exact match)
+- ?route_group=<id>              (filters by RouteCorridorGroup primary key)
+
+Allowed inspection_status values:
+- "" (Not set)
+- "Completed"
+- "Missing"
+- "In progress"
+- "Issue-attention"
+
+NOTE about route_group:
+- route_group is READ-ONLY.
+- Backend creates/links route_group automatically from route_corridor on create/update.
+
+
+2.1) List + Create
+------------------
+
+GET  BASE/boq-entries/
+POST BASE/boq-entries/
+
+GET  BASE/lidar-entries/
+POST BASE/lidar-entries/
+
+GET  BASE/sar-entries/
+POST BASE/sar-entries/
+
+Create/Update body (example):
+{
+  "project_name": "NH-44 Phase 2",
+  "team_lead_name": "A. Kumar",
+  "branch": "INFRA_CORE",
+  "date_of_entry": "2026-04-23",
+  "route_corridor": "KM 12–15",
+  "sr_no": "101",
+  "chainage": "12+400",
+  "structure_type": "Bridge",
+  "length_of_structure": "120m",
+  "span_arrangement": "3x40m",
+  "equipment_notes": "Any notes",
+  "inspection_status": "Completed",
+  "remark": "OK",
+  "las_file_submitted": false,
+  "reports_available_on_bms_for_las": false,
+  "sar_files_submitted": false,
+  "reports_available_on_bms_for_sar": false
+}
+
+Create response object (example):
+{
+  "id": 10,
+  "route_group": 3,
+  "project_name": "NH-44 Phase 2",
+  "team_lead_name": "A. Kumar",
+  "branch": "INFRA_CORE",
+  "date_of_entry": "2026-04-23",
+  "route_corridor": "KM 12–15",
+  "sr_no": "101",
+  "chainage": "12+400",
+  "structure_type": "Bridge",
+  "length_of_structure": "120m",
+  "span_arrangement": "3x40m",
+  "equipment_notes": "Any notes",
+  "inspection_status": "Completed",
+  "remark": "OK",
+  "las_file_submitted": false,
+  "reports_available_on_bms_for_las": false,
+  "sar_files_submitted": false,
+  "reports_available_on_bms_for_sar": false,
+  "created_at": "2026-04-23T12:00:00Z",
+  "updated_at": "2026-04-23T12:00:00Z"
+}
+
+
+2.2) Get one + Update + Delete (per entry)
+------------------------------------------
+
+BOQ:
+- GET    BASE/boq-entries/{id}/
+- PATCH  BASE/boq-entries/{id}/
+- PUT    BASE/boq-entries/{id}/
+- DELETE BASE/boq-entries/{id}/
+
+LiDAR:
+- GET    BASE/lidar-entries/{id}/
+- PATCH  BASE/lidar-entries/{id}/
+- PUT    BASE/lidar-entries/{id}/
+- DELETE BASE/lidar-entries/{id}/
+
+SAR:
+- GET    BASE/sar-entries/{id}/
+- PATCH  BASE/sar-entries/{id}/
+- PUT    BASE/sar-entries/{id}/
+- DELETE BASE/sar-entries/{id}/
+
+
+3) Route corridor dropdown (distinct names)
+------------------------------------------
+
+GET BASE/boq-entries/route-corridors/
+GET BASE/lidar-entries/route-corridors/
+GET BASE/sar-entries/route-corridors/
+
+200 response (example):
+["KM 12–15", "Sector A", "Sector B"]
+
+
+4) Excel bulk upload (.xlsx / .xlsm)
+------------------------------------
+Creates many rows. Import is all-or-nothing:
+- If any row has errors, NO rows are saved and response includes row_errors.
+
+POST BASE/boq-entries/bulk-upload-excel/
+POST BASE/lidar-entries/bulk-upload-excel/
+POST BASE/sar-entries/bulk-upload-excel/
+
+Request: multipart/form-data
+- file: required (.xlsx or .xlsm)
+- project_name: optional (if provided, applied to all imported rows)
+
+201 response (example):
+{ "created": 42, "detail": "All rows imported successfully." }
+
+400 response (example):
+{
+  "detail": "Fix the sheet and re-upload; no rows were saved.",
+  "row_errors": [
+    { "excel_row": 5, "errors": { "chainage": ["This field may not be blank."] } }
+  ]
+}
+
+
+5) Delete all rows (DANGEROUS)
+------------------------------
+This deletes every row in that module table.
+Use only if you really want to wipe that module's entries.
+
+DELETE BASE/boq-entries/delete-all/
+DELETE BASE/lidar-entries/delete-all/
+DELETE BASE/sar-entries/delete-all/
+
+200 response (example):
+{ "deleted": 100, "detail": "All entries deleted." }
+

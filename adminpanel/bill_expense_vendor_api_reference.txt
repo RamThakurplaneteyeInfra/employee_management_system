@@ -1,0 +1,356 @@
+================================================================================
+BILL, EXPENSE & VENDOR — API REFERENCE (FRONTEND)
+Base path: {BASE_URL}/adminapi/
+Example BASE_URL: http://127.0.0.1:8005
+================================================================================
+
+--------------------------------------------------------------------------------
+GLOBAL
+--------------------------------------------------------------------------------
+
+  Auth
+    - Permission: Admin (AdminPermission) on all routes below: logged-in user must
+      be allowed as admin per backend rules.
+    - Send session cookie (e.g. same-origin) or use whatever auth the project
+      already uses for /adminapi/ (e.g. Basic if configured).
+
+  Content-Type
+    - application/json  —  for create/update when no new file is uploaded, or
+      when using JSON with data-URL / path string for attachment per rules below.
+    - multipart/form-data  —  required when uploading a new file as the
+      "attachment" field (binary).
+
+  Parsers (Bills, Expenses, Vendors)
+    - BillViewSet, ExpenseTrackerViewSet, VendorViewSet use JSON, multipart, and
+      form parsers, so you can send JSON or multipart as appropriate.
+
+================================================================================
+ATTACHMENT — BEHAVIOR (BILLS, EXPENSES, VENDORS)  *** READ THIS FIRST ***
+================================================================================
+
+  This section applies to the "attachment" field on:
+    - Bill         (bills)
+    - ExpenseTracker (expenses)
+    - Vendor       (vendors)
+
+--------------------------------------------------------------------------------
+A) READ RESPONSES (GET list, GET detail, POST/PUT/PATCH success body)
+--------------------------------------------------------------------------------
+
+  The field "attachment" is always ONE of:
+    - null
+        No file is stored for that record.
+    - object
+        Same shape as the messaging file upload response (s3-style metadata + URL).
+        The backend does NOT return a raw URL string in "attachment" on read.
+
+  Object shape (when a file exists):
+
+  {
+    "s3_key":   "<string>",   // storage object key (see prefixes below)
+    "file_name": "<string>",   // usually the stored filename (basename of s3_key)
+    "content_type": "<string>",  // e.g. "application/pdf" (inferred from extension)
+    "file_size": <number>,    // file size in bytes
+    "url":       "<string>"    // use this to open or download the file
+  }
+
+  Field notes:
+    s3_key
+      - Not necessarily under "s3://"; it is the key/path in your configured
+        storage (S3 or local).
+      - Typical prefixes in this app:
+          Bills:   bill_attachments/<32-hex-chars>.<ext>
+          Expenses: expense_attachments/<32-hex-chars>.<ext>
+          Vendors: vendor_attachments/<32-hex-chars>.<ext>
+      - Must match the allowed pattern the API accepts when re-sending a path.
+
+    file_name
+      - Display name is the basename of the stored path (e.g. uuid.pdf). The
+        original user-facing filename is not kept in a separate DB column; if
+        the UI needs a custom label, store it in your app or add a future field.
+
+    content_type
+      - Guessed from the file name extension; if unknown, "application/octet-stream".
+
+    file_size
+      - Integer size in bytes.
+
+    url
+      - When the server is configured with AWS S3 + credentials, this is usually
+        a **presigned GET URL** (time-limited).
+      - For local / dev without S3, it is a normal app media URL.
+      - **Use "url" for links, <a href>, new tab, or fetch to download.**
+      - **Do not** build a download from "s3_key" alone in the browser without
+        using this "url" (unless you implement a separate server proxy yourself).
+
+  Presigned URL expiry
+    - Default lifetime is controlled by the backend (env: AWS_S3_PRESIGNED_EXPIRY,
+      often 3600 seconds = 1 hour). After expiry, the same link may return 403.
+    - **Refresh** by calling GET again on the same bill/expense/vendor to obtain
+      a new "attachment.url".
+
+  There is no separate top-level "attachment_url" field; everything needed is
+  inside the "attachment" object.
+
+--------------------------------------------------------------------------------
+B) WRITE REQUESTS (POST / PUT / PATCH) — SENDING A FILE
+--------------------------------------------------------------------------------
+
+  "attachment" in the **request** is NOT the JSON object above. You cannot PATCH
+  a body like { "attachment": { "s3_key": "..." } } as the new file payload.
+
+  Supported input types (unchanged from backend design):
+
+  1) New binary upload
+     - Use multipart/form-data.
+     - Include the file under the form field name:  attachment
+     - Include all other required fields for that endpoint as form fields
+       (e.g. title, amount, ... for expenses).
+
+  2) Base64 data URL (in JSON)
+     - Some flows allow sending a string:
+       "data:<mime>;base64,<data>"
+     - See server validation in practice for your environment.
+
+  3) Reuse an already-uploaded file (path or URL that resolves to a path)
+     - The API may accept a string that points to an **existing** object under
+       the same allowed folder prefix, e.g.:
+         "bill_attachments/abcdef0123...94.pdf"
+       (no path traversal, must exist in storage; pattern validated server-side).
+
+  4) Clear attachment
+     - Where supported, null or "" may clear the attachment; confirm with a GET
+       after update.
+
+  Max upload size
+    - Enforced in API: 10 MB (10 * 1024 * 1024 bytes) for these uploads.
+
+  Allowed file extensions (extension validation on model; API enforces)
+    - pdf, jpg, jpeg, png, gif, webp, doc, docx, xls, xlsx, txt
+
+--------------------------------------------------------------------------------
+C) TYPING FOR FRONTEND (TypeScript / interfaces)
+--------------------------------------------------------------------------------
+
+  // Shared attachment object on READ:
+  type AdminAttachment = null | {
+    s3_key: string;
+    file_name: string;
+    content_type: string;
+    file_size: number;
+    url: string;
+  };
+
+  // On WRITE, attachment is: File | string | null  (per API), not AdminAttachment
+
+================================================================================
+BILLS
+================================================================================
+
+  Resource: Bill
+  List/create:  GET/POST  {BASE_URL}/adminapi/bills/
+  Detail:       GET/PUT/PATCH/DELETE  {BASE_URL}/adminapi/bills/{id}/
+
+  Parsers: JSON, multipart, form (per BillViewSet).
+
+  Fields (API names → meaning):
+    id            number (read-only)
+    category      string, BillCategory.name (required on create; must exist)
+    amount        string (decimal) e.g. "1234.56"
+    recipient     string
+    floor         string | null, one of: "3rd" | "4th" | "both" (optional)
+    date          string | null, ISO date "YYYY-MM-DD" (can be null in DB)
+    status        string, TaskStatus.status_name (must exist in task_management)
+    attachment    see global ATTACHMENT section
+    created_at    string, ISO-8601 datetime (read-only)
+
+  Example: GET {BASE_URL}/adminapi/bills/5/
+
+  {
+    "id": 5,
+    "category": "Electricity",
+    "amount": "5000.00",
+    "recipient": "ACME Power",
+    "floor": "3rd",
+    "attachment": {
+      "s3_key": "bill_attachments/abc123def456...789.pdf",
+      "file_name": "abc123def456...789.pdf",
+      "content_type": "application/pdf",
+      "file_size": 245000,
+      "url": "https://....amazonaws.com/...?X-Amz-Algorithm=...&X-Amz-Expires=3600&..."
+    },
+    "created_at": "2026-04-20T10:00:00.000000Z",
+    "status": "PENDING",
+    "date": "2026-04-19"
+  }
+
+  Example: attachment is null
+    "attachment": null
+
+  Create (JSON, no new file) — POST {BASE_URL}/adminapi/bills/
+  {
+    "category": "Electricity",
+    "amount": "5000.00",
+    "recipient": "ACME Power",
+    "floor": "3rd",
+    "date": "2026-04-19",
+    "status": "PENDING"
+  }
+
+  Create (multipart, with file)
+    - Method: POST
+    - Content-Type: multipart/form-data; boundary=...
+    - Form fields: category, amount, recipient, floor (optional), date, status, attachment (file)
+
+  Update (PUT/PATCH)
+    - Same field names; for file replace, use multipart with new attachment;
+      or use supported string/data URL per backend rules.
+
+  Related dropdown: bill categories
+    - GET/POST  {BASE_URL}/adminapi/billCategory/
+    - Fields: id, name
+
+================================================================================
+EXPENSES (EXPENSE TRACKER)
+================================================================================
+
+  Resource: ExpenseTracker
+  List/create:  GET/POST  {BASE_URL}/adminapi/expenses/
+  Detail:       GET/PUT/PATCH/DELETE  {BASE_URL}/adminapi/expenses/{id}/
+
+  List query (optional, filters by paid_date):
+    ?year=2026
+    ?year=2026&month=4
+
+  Parsers: JSON, multipart, form.
+
+  Fields:
+    id            number (read-only)
+    title         string
+    amount        string (decimal)
+    note          string (may be empty)
+    category      string | null, ExpenseCategory.name (optional)
+    paid_date     string "YYYY-MM-DD"
+    status        string, TaskStatus.status_name
+    attachment    see global ATTACHMENT section
+    created_at    string, ISO-8601 (read-only)
+
+  Example: GET {BASE_URL}/adminapi/expenses/12/
+
+  {
+    "id": 12,
+    "title": "Office supplies",
+    "amount": "150.50",
+    "note": "Q1 stationery",
+    "category": "Stationary",
+    "attachment": {
+      "s3_key": "expense_attachments/e1385d7cba204c9bb8199e88c27eb942.pdf",
+      "file_name": "e1385d7cba204c9bb8199e88c27eb942.pdf",
+      "content_type": "application/pdf",
+      "file_size": 12236,
+      "url": "https://....amazonaws.com/...?X-Amz-Algorithm=...&X-Amz-Expires=3600&..."
+    },
+    "paid_date": "2026-04-15",
+    "created_at": "2026-04-16T10:30:00.123456Z",
+    "status": "PENDING"
+  }
+
+  Create (JSON, no file) — POST {BASE_URL}/adminapi/expenses/
+  {
+    "title": "Cab fare",
+    "amount": "45.00",
+    "note": "",
+    "paid_date": "2026-04-20",
+    "status": "PENDING"
+  }
+
+  Create (multipart, with file)
+    - form fields: title, amount, note, category (optional), paid_date, status, attachment (file)
+
+  Clear attachment (when API accepts JSON null; verify in your build)
+
+  { "attachment": null }
+
+  Month summary (separate read-only action)
+  GET  {BASE_URL}/adminapi/expenses/month_summary/?year=2026&month=4
+  200
+  {
+    "year": 2026,
+    "month": 4,
+    "advance_amount": "5000.00",
+    "total_spent": "150.50",
+    "remaining": "4849.50",
+    "expense_count": 3,
+    "advance_note": "April opening advance"
+  }
+  400 if year or month missing: { "detail": "Query parameters year and month are required." }
+
+  Expense categories (dropdown)
+    GET/POST  {BASE_URL}/adminapi/expense-categories/
+    Fields: id, name, created_at
+
+  Expense monthly advances
+    GET/POST/PUT/PATCH/DELETE  {BASE_URL}/adminapi/expense-advances/  and .../{id}/
+    - One row per (year, month) enforced.
+
+================================================================================
+VENDORS
+================================================================================
+
+  Resource: Vendor
+  List/create:  GET/POST  {BASE_URL}/adminapi/vendors/
+  Detail:       GET/PUT/PATCH/DELETE  {BASE_URL}/adminapi/vendors/{id}/
+
+  Parsers: JSON, multipart, form.
+
+  Fields:
+    id               number (read-only)
+    business_name    string
+    gst_number       string, unique
+    office_address   string
+    email            string (email format)
+    primary_phone    string
+    alternate_phone  string | null
+    service          string (optional, long text, max 10000 in validation)
+    attachment       see global ATTACHMENT section
+    created_at       string, ISO-8601 (read-only)
+
+  Example: GET {BASE_URL}/adminapi/vendors/3/
+
+  {
+    "id": 3,
+    "business_name": "ACME Suppliers",
+    "gst_number": "22AAAAA0000A1Z5",
+    "office_address": "123 Street",
+    "email": "info@acme.com",
+    "primary_phone": "9876500000",
+    "alternate_phone": null,
+    "service": "Catering, supplies",
+    "attachment": {
+      "s3_key": "vendor_attachments/abc123def456...789.pdf",
+      "file_name": "abc123def456...789.pdf",
+      "content_type": "application/pdf",
+      "file_size": 50000,
+      "url": "https://....amazonaws.com/...?X-Amz-Algorithm=...&X-Amz-Expires=3600&..."
+    },
+    "created_at": "2026-01-10T12:00:00.000000Z"
+  }
+
+  Create (JSON, no file) — POST {BASE_URL}/adminapi/vendors/
+  {
+    "business_name": "ACME Suppliers",
+    "gst_number": "22AAAAA0000A1Z5",
+    "office_address": "123 Street",
+    "email": "info@acme.com",
+    "primary_phone": "9876500000",
+    "alternate_phone": "",
+    "service": "Catering"
+  }
+
+  Create (multipart, with file)
+    - form fields: business_name, gst_number, office_address, email, primary_phone,
+      alternate_phone, service, attachment (file)
+
+================================================================================
+END OF REFERENCE
+================================================================================
