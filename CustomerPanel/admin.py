@@ -9,6 +9,8 @@ class CustomerPanelEntryAdmin(admin.ModelAdmin):
     list_display = (
         "id",
         "business_name",
+        "client_name",
+        "client_contact",
         "serial_no",
         "product",
         "service",
@@ -18,7 +20,15 @@ class CustomerPanelEntryAdmin(admin.ModelAdmin):
         "created_by",
         "created_at",
     )
-    search_fields = ("business_name", "serial_no", "representative_name", "product", "service")
+    search_fields = (
+        "business_name",
+        "client_name",
+        "client_contact",
+        "serial_no",
+        "representative_name",
+        "product",
+        "service",
+    )
     ordering = ("-created_at",)
 
 

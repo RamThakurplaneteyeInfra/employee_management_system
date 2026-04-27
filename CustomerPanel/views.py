@@ -89,6 +89,8 @@ def _entry_to_dict(obj: CustomerPanelEntry):
     return {
         "id": obj.id,
         "business_name": obj.business_name,
+        "client_name": obj.client_name,
+        "client_contact": obj.client_contact,
         "office_address": obj.office_address,
         "representative_name": obj.representative_name,
         "representative_contact_number": obj.representative_contact_number,
@@ -152,6 +154,8 @@ def _create_entry_sync(user, data):
     total = _calc_total(value, tax_percent)
     obj = CustomerPanelEntry.objects.create(
         business_name=business_name,
+        client_name=data.get("client_name"),
+        client_contact=data.get("client_contact"),
         office_address=data.get("office_address"),
         representative_name=data.get("representative_name"),
         representative_contact_number=data.get("representative_contact_number"),
@@ -201,6 +205,8 @@ def _update_entry_sync(entry_id, data):
             raise ValueError("business_name cannot be empty")
         obj.business_name = name
     for field in [
+        "client_name",
+        "client_contact",
         "office_address",
         "representative_name",
         "representative_contact_number",

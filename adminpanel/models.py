@@ -11,6 +11,12 @@ from django.core.validators import FileExtensionValidator
 from django.db import models
 from task_management.models import TaskStatus
 
+# New uploads use these S3/storage keys (same bucket as DEFAULT_FILE_STORAGE). Legacy rows may
+# still reference bill_attachments/, vendor_attachments/, expense_attachments/.
+ADMIN_S3_BILL_PREFIX = "Attachment/Bill"
+ADMIN_S3_VENDOR_PREFIX = "Attachment/Vendor"
+ADMIN_S3_EXPENSE_PREFIX = "Attachment/Expense"
+
 # Shared allow-list for vendor/bill uploads (extension only; size checked in serializers).
 _DOCUMENT_ATTACHMENT_EXTENSIONS = (
     "pdf",
@@ -28,19 +34,19 @@ _DOCUMENT_ATTACHMENT_EXTENSIONS = (
 
 
 def vendor_attachment_upload_to(instance, filename):
-    """Store under MEDIA_ROOT with a random name; keep extension only (validated elsewhere)."""
+    """Random object name under Attachment/Vendor/ (legacy keys vendor_attachments/ remain valid)."""
     ext = os.path.splitext(filename)[1].lower()
-    return f"vendor_attachments/{uuid.uuid4().hex}{ext}"
+    return f"{ADMIN_S3_VENDOR_PREFIX}/{uuid.uuid4().hex}{ext}"
 
 
 def bill_attachment_upload_to(instance, filename):
     ext = os.path.splitext(filename)[1].lower()
-    return f"bill_attachments/{uuid.uuid4().hex}{ext}"
+    return f"{ADMIN_S3_BILL_PREFIX}/{uuid.uuid4().hex}{ext}"
 
 
 def expense_attachment_upload_to(instance, filename):
     ext = os.path.splitext(filename)[1].lower()
-    return f"expense_attachments/{uuid.uuid4().hex}{ext}"
+    return f"{ADMIN_S3_EXPENSE_PREFIX}/{uuid.uuid4().hex}{ext}"
 
 
 # 1️⃣ AssetType table (Hardware, Software)

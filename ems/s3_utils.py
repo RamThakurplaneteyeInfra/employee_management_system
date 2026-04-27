@@ -11,12 +11,18 @@ def get_s3_client():
     import boto3
     if not getattr(settings, "AWS_STORAGE_BUCKET_NAME", None):
         raise ValueError("AWS_STORAGE_BUCKET_NAME is not set")
-    return boto3.client(
-        "s3",
-        region_name=getattr(settings, "AWS_S3_REGION_NAME", "ap-south-1"),
-        aws_access_key_id=getattr(settings, "AWS_ACCESS_KEY_ID"),
-        aws_secret_access_key=getattr(settings, "AWS_SECRET_ACCESS_KEY"),
-    )
+    # Important: don't pass blank credentials. If keys are not set in settings,
+    # let boto3 resolve credentials from the default chain (env, AWS profile,
+    # instance/role credentials, etc.).
+    kwargs = {
+        "region_name": getattr(settings, "AWS_S3_REGION_NAME", "ap-south-1"),
+    }
+    akid = (getattr(settings, "AWS_ACCESS_KEY_ID", None) or "").strip()
+    secret = (getattr(settings, "AWS_SECRET_ACCESS_KEY", None) or "").strip()
+    if akid and secret:
+        kwargs["aws_access_key_id"] = akid
+        kwargs["aws_secret_access_key"] = secret
+    return boto3.client("s3", **kwargs)
 
 
 def get_presigned_url(s3_key, expires=None):

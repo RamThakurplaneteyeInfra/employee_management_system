@@ -12,6 +12,9 @@ from task_management.models import TaskStatus
 
 from ems.s3_utils import get_presigned_url
 from .models import (
+    ADMIN_S3_BILL_PREFIX,
+    ADMIN_S3_EXPENSE_PREFIX,
+    ADMIN_S3_VENDOR_PREFIX,
     AssetType,
     Asset,
     Bill,
@@ -32,9 +35,10 @@ _DATA_URL_RE = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 
-# Matches upload_to names: vendor_attachments|bill_attachments|expense_attachments/<32 hex>.<ext>
+# Legacy: *_attachments/<32 hex>.<ext>  New: Attachment/Bill|Vendor|Expense/<32 hex>.<ext>
 _SAFE_STORED_NAME_RE = re.compile(
-    r"^(?P<folder>vendor_attachments|bill_attachments|expense_attachments)/[0-9a-f]{32}\.[_a-zA-Z0-9.]+$"
+    r"^(?:(?:vendor_attachments|bill_attachments|expense_attachments)|"
+    r"Attachment/(?:Bill|Vendor|Expense))/[0-9a-f]{32}\.[_a-zA-Z0-9.]+$"
 )
 
 
@@ -78,7 +82,8 @@ def _storage_name_from_client_media_string(s, allowed_stored_path_prefixes):
         raise serializers.ValidationError("Attachment is not in an allowed folder for this field.")
     if not _SAFE_STORED_NAME_RE.match(rel):
         raise serializers.ValidationError(
-            "Only previously uploaded document names (e.g. vendor_attachments/<id>.pdf) are accepted."
+            "Only previously uploaded document names under allowed folders "
+            "(e.g. bill_attachments/<id>.pdf or Attachment/Bill/<id>.pdf) are accepted."
         )
     if not default_storage.exists(rel):
         raise serializers.ValidationError("That file is not present in storage (or was removed).")
@@ -105,6 +110,9 @@ class MultipartOrDataUrlFileField(serializers.FileField):
             "vendor_attachments/",
             "bill_attachments/",
             "expense_attachments/",
+            f"{ADMIN_S3_VENDOR_PREFIX}/",
+            f"{ADMIN_S3_BILL_PREFIX}/",
+            f"{ADMIN_S3_EXPENSE_PREFIX}/",
         )
         super().__init__(*args, **kwargs)
 
@@ -280,7 +288,10 @@ class BillSerializer(_AdminFileAttachmentResponseMixin, serializers.ModelSeriali
         required=False,
         allow_null=True,
         allow_empty_file=False,
-        allowed_stored_path_prefixes=("bill_attachments/",),
+        allowed_stored_path_prefixes=(
+            "bill_attachments/",
+            f"{ADMIN_S3_BILL_PREFIX}/",
+        ),
     )
 
     class Meta:
@@ -374,7 +385,10 @@ class ExpenseTrackerSerializer(_AdminFileAttachmentResponseMixin, serializers.Mo
         required=False,
         allow_null=True,
         allow_empty_file=False,
-        allowed_stored_path_prefixes=("expense_attachments/",),
+        allowed_stored_path_prefixes=(
+            "expense_attachments/",
+            f"{ADMIN_S3_EXPENSE_PREFIX}/",
+        ),
     )
 
     class Meta:
@@ -418,7 +432,10 @@ class VendorSerializer(_AdminFileAttachmentResponseMixin, serializers.ModelSeria
         required=False,
         allow_null=True,
         allow_empty_file=False,
-        allowed_stored_path_prefixes=("vendor_attachments/",),
+        allowed_stored_path_prefixes=(
+            "vendor_attachments/",
+            f"{ADMIN_S3_VENDOR_PREFIX}/",
+        ),
     )
 
     class Meta:

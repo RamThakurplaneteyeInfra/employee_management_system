@@ -1,12 +1,21 @@
 from django.db import transaction
 from rest_framework import parsers, status, viewsets
 from rest_framework.decorators import action
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from .excel_bulk_import import parse_excel_workbook
-from .models import BoqStructureEntry, LidarStructureEntry, ProjectCatalog, SarStructureEntry
+from .permissions import CanAccessInfraProjectForms
+from .models import (
+    BoqStructureEntry,
+    InfraProjectForm,
+    LidarStructureEntry,
+    ProjectCatalog,
+    SarStructureEntry,
+)
 from .serializers import (
     BoqStructureEntrySerializer,
+    InfraProjectFormSerializer,
     LidarStructureEntrySerializer,
     ProjectCatalogSerializer,
     SarStructureEntrySerializer,
@@ -130,3 +139,56 @@ class ProjectCatalogViewSet(viewsets.ModelViewSet):
     serializer_class = ProjectCatalogSerializer
     queryset = ProjectCatalog.objects.all()
     http_method_names = ["get", "post", "head", "options", "delete"]
+
+
+class InfraProjectFormViewSet(viewsets.ModelViewSet):
+    """
+    Separate endpoint for the project-selected numeric form (header + Entry[]).
+    Uses atomic writes so header+entries are never partially saved.
+    """
+
+    permission_classes = [IsAuthenticated, CanAccessInfraProjectForms]
+    serializer_class = InfraProjectFormSerializer
+    queryset = InfraProjectForm.objects.prefetch_related("entries").select_related("project")
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        projectname = (self.request.query_params.get("projectname") or "").strip()
+        if projectname:
+            qs = qs.filter(projectname__iexact=projectname)
+        project_id = self.request.query_params.get("project")
+        if project_id:
+            qs = qs.filter(project_id=project_id)
+        dt = (self.request.query_params.get("date") or "").strip()
+        if dt:
+            qs = qs.filter(date=dt)
+        return qs
+
+    def create(self, request, *args, **kwargs):
+        with transaction.atomic():
+            return super().create(request, *args, **kwargs)
+
+    def update(self, request, *args, **kwargs):
+        with transaction.atomic():
+            return super().update(request, *args, **kwargs)
+
+    def partial_update(self, request, *args, **kwargs):
+        with transaction.atomic():
+            return super().partial_update(request, *args, **kwargs)
+
+    @action(detail=False, methods=["get"], url_path="by-project")
+    def by_project(self, request):
+        """
+        Convenience read for UI: select project -> fetch latest matching form.
+        Query params (any combination):
+        - projectname=<text>
+        - project=<id>
+        - date=YYYY-MM-DD
+        Returns latest by updated_at.
+        """
+        qs = self.get_queryset().order_by("-updated_at", "-created_at")
+        obj = qs.first()
+        if not obj:
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        ser = self.get_serializer(obj)
+        return Response(ser.data, status=status.HTTP_200_OK)

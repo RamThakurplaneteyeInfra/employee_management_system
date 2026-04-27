@@ -7,7 +7,11 @@ Admin panel API views. Base path: {{baseurl}}/adminapi/
 - GET /expenses/?year=&month= — filter list by paid_date (optional).
 """
 from decimal import Decimal
+import mimetypes
+import os
+import uuid
 
+from django.conf import settings
 from django.db.models import Count, Sum
 from rest_framework import status, viewsets
 from rest_framework.decorators import action, api_view, permission_classes
@@ -15,6 +19,7 @@ from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
+from ems.s3_utils import get_presigned_url, get_s3_client
 from .models import (
     AssetType,
     Asset,
@@ -26,6 +31,12 @@ from .models import (
     Vendor,
 )
 from .permissions import AdminPermission
+from .models import (
+    ADMIN_S3_BILL_PREFIX,
+    ADMIN_S3_EXPENSE_PREFIX,
+    ADMIN_S3_VENDOR_PREFIX,
+    _DOCUMENT_ATTACHMENT_EXTENSIONS,
+)
 from .serializers import (
     AssetTypeSerializer,
     AssetSerializer,
@@ -39,6 +50,72 @@ from .serializers import (
 
 # Note: DRF ViewSets do not support async methods - they don't await coroutines.
 # Sync views work under ASGI; Django runs them in a thread pool automatically.
+
+_MAX_ADMIN_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MiB (keep aligned with adminpanel.serializers)
+
+
+def _upload_admin_attachment_to_s3(file_obj, key_prefix: str) -> str:
+    """
+    Upload a Django UploadedFile to S3 under a fixed prefix and return the S3 key.
+    Uses the same AWS creds/bucket as ems.s3_utils.get_s3_client.
+    """
+    # Ensure we keep extension only (server-side validation also checks allowed extensions).
+    ext = ""
+    name = getattr(file_obj, "name", "") or ""
+    if "." in name:
+        ext = "." + name.rsplit(".", 1)[-1].lower()
+    prefix = (key_prefix or "").strip("/").replace("\\", "/")
+    key = f"{prefix}/{uuid.uuid4().hex}{ext}"
+
+    bucket = getattr(settings, "AWS_STORAGE_BUCKET_NAME", None)
+    if not bucket:
+        raise ValueError("AWS_STORAGE_BUCKET_NAME is not set")
+
+    client = get_s3_client()
+    extra = {}
+    ctype = getattr(file_obj, "content_type", None) or None
+    if ctype:
+        extra["ContentType"] = ctype
+    client.upload_fileobj(file_obj, bucket, key, ExtraArgs=extra)
+    return key
+
+
+def _upload_file_response_payload(file_obj, s3_key: str):
+    file_name = os.path.basename(s3_key.replace("\\", "/")) or (getattr(file_obj, "name", "file") or "file")
+    content_type = getattr(file_obj, "content_type", "") or ""
+    if not content_type:
+        guessed, _ = mimetypes.guess_type(file_name)
+        content_type = guessed or "application/octet-stream"
+    file_size = getattr(file_obj, "size", None)
+    url = get_presigned_url(s3_key)
+    return {
+        "id": uuid.uuid4().hex,  # ephemeral id (messaging uses a DB id; here we keep API shape without new tables)
+        "s3_key": s3_key,
+        "file_name": getattr(file_obj, "name", file_name) or file_name,
+        "content_type": content_type,
+        "file_size": file_size,
+        "url": url,
+    }
+
+
+def _validate_admin_upload_file(file_obj):
+    if not file_obj:
+        return "No file provided"
+    try:
+        size = int(getattr(file_obj, "size", 0) or 0)
+    except Exception:
+        size = 0
+    if size <= 0:
+        return "Empty file is not allowed"
+    if size > _MAX_ADMIN_UPLOAD_BYTES:
+        return f"File too large. Maximum size is {_MAX_ADMIN_UPLOAD_BYTES // (1024 * 1024)} MB."
+    name = (getattr(file_obj, "name", "") or "").strip()
+    if "." not in name:
+        return "File extension is required."
+    ext = name.rsplit(".", 1)[-1].lower()
+    if ext not in set(_DOCUMENT_ATTACHMENT_EXTENSIONS):
+        return f"Invalid file type. Allowed: {', '.join(_DOCUMENT_ATTACHMENT_EXTENSIONS)}"
+    return None
 
 
 # ==================== AssetTypeViewSet ====================
@@ -72,6 +149,19 @@ class BillViewSet(viewsets.ModelViewSet):
     serializer_class = BillSerializer
     permission_classes = [AdminPermission]
     parser_classes = [JSONParser, MultiPartParser, FormParser]
+
+    # Upload-only endpoint (messaging-style): POST /adminapi/bills/uploadFile/ with multipart field "file"
+    @action(detail=False, methods=["post"], url_path="uploadFile", parser_classes=[MultiPartParser, FormParser])
+    def uploadFile(self, request):
+        file_obj = request.FILES.get("file")
+        err = _validate_admin_upload_file(file_obj)
+        if err:
+            return Response({"error": err}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            s3_key = _upload_admin_attachment_to_s3(file_obj, ADMIN_S3_BILL_PREFIX)
+        except Exception as e:
+            return Response({"error": f"Upload failed: {e}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return Response(_upload_file_response_payload(file_obj, s3_key), status=status.HTTP_201_CREATED)
 
 
 # ==================== ExpenseCategoryViewSet ====================
@@ -156,6 +246,19 @@ class ExpenseTrackerViewSet(viewsets.ModelViewSet):
             }
         )
 
+    # Upload-only endpoint (messaging-style): POST /adminapi/expenses/uploadFile/ with multipart field "file"
+    @action(detail=False, methods=["post"], url_path="uploadFile", parser_classes=[MultiPartParser, FormParser])
+    def uploadFile(self, request):
+        file_obj = request.FILES.get("file")
+        err = _validate_admin_upload_file(file_obj)
+        if err:
+            return Response({"error": err}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            s3_key = _upload_admin_attachment_to_s3(file_obj, ADMIN_S3_EXPENSE_PREFIX)
+        except Exception as e:
+            return Response({"error": f"Upload failed: {e}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return Response(_upload_file_response_payload(file_obj, s3_key), status=status.HTTP_201_CREATED)
+
 
 # ==================== VendorViewSet ====================
 # URL: {{baseurl}}/adminapi/vendors/  | CRUD
@@ -164,6 +267,19 @@ class VendorViewSet(viewsets.ModelViewSet):
     serializer_class = VendorSerializer
     permission_classes = [AdminPermission]
     parser_classes = [JSONParser, MultiPartParser, FormParser]
+
+    # Upload-only endpoint (messaging-style): POST /adminapi/vendors/uploadFile/ with multipart field "file"
+    @action(detail=False, methods=["post"], url_path="uploadFile", parser_classes=[MultiPartParser, FormParser])
+    def uploadFile(self, request):
+        file_obj = request.FILES.get("file")
+        err = _validate_admin_upload_file(file_obj)
+        if err:
+            return Response({"error": err}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            s3_key = _upload_admin_attachment_to_s3(file_obj, ADMIN_S3_VENDOR_PREFIX)
+        except Exception as e:
+            return Response({"error": f"Upload failed: {e}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return Response(_upload_file_response_payload(file_obj, s3_key), status=status.HTTP_201_CREATED)
 
 
 # ==================== dashboard_summary ====================

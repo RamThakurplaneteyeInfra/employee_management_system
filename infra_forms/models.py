@@ -129,3 +129,70 @@ class SarStructureEntry(AbstractStructureEntry):
     class Meta(AbstractStructureEntry.Meta):
         abstract = False
         verbose_name = "SAR structure entry"
+
+
+class InfraProjectForm(models.Model):
+    """
+    Header record for project-level numeric capture (separate from BOQ/LiDAR/SAR tables).
+    Kept isolated to avoid impacting existing infra_forms functionality.
+    """
+
+    project = models.ForeignKey(
+        ProjectCatalog,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="infra_project_forms",
+    )
+    projectname = models.CharField(max_length=160, blank=True, default="")
+    creator = models.CharField(max_length=120, blank=True, default="")
+    date = models.DateField(null=True, blank=True)
+
+    MJB = models.DecimalField(max_digits=14, decimal_places=3, null=True, blank=True)
+    MNB = models.DecimalField(max_digits=14, decimal_places=3, null=True, blank=True)
+    VUP = models.DecimalField(max_digits=14, decimal_places=3, null=True, blank=True)
+    PUP = models.DecimalField(max_digits=14, decimal_places=3, null=True, blank=True)
+    BOX_Slab_Culvert = models.DecimalField(max_digits=14, decimal_places=3, null=True, blank=True)
+    ROB = models.DecimalField(max_digits=14, decimal_places=3, null=True, blank=True)
+    FO = models.DecimalField(max_digits=14, decimal_places=3, null=True, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-updated_at", "-created_at"]
+        indexes = [
+            models.Index(fields=["projectname"]),
+            models.Index(fields=["date"]),
+            models.Index(fields=["project"]),
+        ]
+
+    def __str__(self):
+        name = self.projectname or (self.project.name if self.project_id else "")
+        dt = self.date or "-"
+        return f"{name or '-'} | {dt}"
+
+
+class InfraProjectFormEntry(models.Model):
+    """Child rows for `InfraProjectForm` (Entry[])."""
+
+    form = models.ForeignKey(InfraProjectForm, on_delete=models.CASCADE, related_name="entries")
+    date = models.DateField(null=True, blank=True)
+
+    MJB = models.DecimalField(max_digits=14, decimal_places=3, null=True, blank=True)
+    MNB = models.DecimalField(max_digits=14, decimal_places=3, null=True, blank=True)
+    VUP = models.DecimalField(max_digits=14, decimal_places=3, null=True, blank=True)
+    PUP = models.DecimalField(max_digits=14, decimal_places=3, null=True, blank=True)
+    BOX_Slab_Culvert = models.DecimalField(max_digits=14, decimal_places=3, null=True, blank=True)
+    ROB = models.DecimalField(max_digits=14, decimal_places=3, null=True, blank=True)
+    FO = models.DecimalField(max_digits=14, decimal_places=3, null=True, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["id"]
+        indexes = [
+            models.Index(fields=["form"]),
+            models.Index(fields=["date"]),
+        ]

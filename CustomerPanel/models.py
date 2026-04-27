@@ -9,6 +9,8 @@ class CustomerPanelEntry(models.Model):
     """
 
     business_name = models.CharField(max_length=255, db_index=True)
+    client_name = models.CharField(max_length=255, blank=True, null=True)
+    client_contact = models.CharField(max_length=100, blank=True, null=True)
     office_address = models.TextField(blank=True, null=True)
     representative_name = models.CharField(max_length=255, blank=True, null=True)
     representative_contact_number = models.CharField(max_length=100, blank=True, null=True)

@@ -58,10 +58,12 @@ A) READ RESPONSES (GET list, GET detail, POST/PUT/PATCH success body)
     s3_key
       - Not necessarily under "s3://"; it is the key/path in your configured
         storage (S3 or local).
-      - Typical prefixes in this app:
-          Bills:   bill_attachments/<32-hex-chars>.<ext>
-          Expenses: expense_attachments/<32-hex-chars>.<ext>
-          Vendors: vendor_attachments/<32-hex-chars>.<ext>
+      - Typical prefixes in this app (new uploads):
+          Bills:    Attachment/Bill/<32-hex-chars>.<ext>
+          Expenses: Attachment/Expense/<32-hex-chars>.<ext>
+          Vendors:  Attachment/Vendor/<32-hex-chars>.<ext>
+      - Legacy rows may still use: bill_attachments/, expense_attachments/,
+        vendor_attachments/ (same API rules; reuse strings must match an existing key).
       - Must match the allowed pattern the API accepts when re-sending a path.
 
     file_name
@@ -115,7 +117,8 @@ B) WRITE REQUESTS (POST / PUT / PATCH) — SENDING A FILE
   3) Reuse an already-uploaded file (path or URL that resolves to a path)
      - The API may accept a string that points to an **existing** object under
        the same allowed folder prefix, e.g.:
-         "bill_attachments/abcdef0123...94.pdf"
+         "Attachment/Bill/abcdef0123...94.pdf"
+         (legacy: "bill_attachments/abcdef0123...94.pdf")
        (no path traversal, must exist in storage; pattern validated server-side).
 
   4) Clear attachment
@@ -173,7 +176,7 @@ BILLS
     "recipient": "ACME Power",
     "floor": "3rd",
     "attachment": {
-      "s3_key": "bill_attachments/abc123def456...789.pdf",
+      "s3_key": "Attachment/Bill/abc123def456...789.pdf",
       "file_name": "abc123def456...789.pdf",
       "content_type": "application/pdf",
       "file_size": 245000,
@@ -244,7 +247,7 @@ EXPENSES (EXPENSE TRACKER)
     "note": "Q1 stationery",
     "category": "Stationary",
     "attachment": {
-      "s3_key": "expense_attachments/e1385d7cba204c9bb8199e88c27eb942.pdf",
+      "s3_key": "Attachment/Expense/e1385d7cba204c9bb8199e88c27eb942.pdf",
       "file_name": "e1385d7cba204c9bb8199e88c27eb942.pdf",
       "content_type": "application/pdf",
       "file_size": 12236,
@@ -327,7 +330,7 @@ VENDORS
     "alternate_phone": null,
     "service": "Catering, supplies",
     "attachment": {
-      "s3_key": "vendor_attachments/abc123def456...789.pdf",
+      "s3_key": "Attachment/Vendor/abc123def456...789.pdf",
       "file_name": "abc123def456...789.pdf",
       "content_type": "application/pdf",
       "file_size": 50000,
