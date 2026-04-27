@@ -35,6 +35,7 @@ urlpatterns = [
     path("projectapi/", include("project.urls"), name="project"),
     path("deadline/", include("projects_deadline.urls"), name="projects_deadline"),
     path("alertsapi/", include("Alerts_Announcements.urls"), name="alerts_announcements"),
+    path("api/announcements/", include("announcements_app.urls"), name="announcements_app_api"),
     path("notesapi/", include("notes.urls"), name="notesapi"),
     # Recruitment: /api/jobs/ (canonical) and /jobs/ (alias for legacy / misconfigured clients)
     path("api/", include("recruitment.urls"), name="recruitment"),
@@ -45,6 +46,8 @@ urlpatterns = [
     path("ai/", include("insight.urls"), name="insight_ai"),
     # INFRA structure forms API (same routes as standalone backend, under /api/infra/)
     path("api/infra/", include("infra_forms.urls"), name="infra_forms_api"),
+    # Asset / Software requests (TeamLead/HR/Admin/MD only)
+    path("api/assets-request/", include("assets_request.urls"), name="assets_request_api"),
 ]
 
 if True:

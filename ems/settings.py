@@ -29,6 +29,17 @@ XAI_API_KEY = GROK_API_KEY
 GROK_API_URL = os.getenv("GROK_API_URL", "https://api.x.ai/v1/chat/completions")
 GROK_MODEL = os.getenv("GROK_MODEL", "grok-2-latest")
 
+# Hugging Face (EMS insight API)
+# Token must be provided via env var / .env; never hardcode.
+_hf = (os.getenv("HF_API_TOKEN") or os.getenv("HUGGINGFACE_API_TOKEN") or "").strip()
+HF_API_TOKEN = _hf or None
+HF_API_URL = os.getenv(
+    "HF_API_URL",
+    # Default: Hugging Face Inference API "model" endpoint (text generation pipelines vary by model).
+    "https://api-inference.huggingface.co/models/",
+).rstrip("/") + "/"
+HF_MODEL = os.getenv("HF_MODEL", "mistralai/Mistral-7B-Instruct-v0.3")
+
 # DEBUG is set conditionally below based on is_developement env var
 
 ALLOWED_HOSTS = [
@@ -91,12 +102,14 @@ INSTALLED_APPS = [
     "adminpanel",
     "maintenance",
     "Alerts_Announcements",
+    "announcements_app",
     "projects_deadline",
     "notes",
     "recruitment",
     "attendance",
     "insight",
     "infra_forms",
+    "assets_request",
 ]
 
 MIDDLEWARE = [
