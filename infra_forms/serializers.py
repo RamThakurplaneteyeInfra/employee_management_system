@@ -131,8 +131,30 @@ class SarStructureEntrySerializer(BaseStructureEntrySerializer):
 class ProjectCatalogSerializer(serializers.ModelSerializer):
     class Meta:
         model = ProjectCatalog
-        fields = ["id", "name", "created_at"]
+        fields = ["id", "name", "service", "created_at"]
         read_only_fields = ["id", "created_at"]
+
+    def validate_service(self, value):
+        """
+        Accept:
+        - list[str] (preferred)
+        - single str (backward compatible with older clients)
+        """
+        if value in (None, "", []):
+            return []
+        if isinstance(value, str):
+            v = value.strip()
+            return [v] if v else []
+        if isinstance(value, (list, tuple)):
+            out: list[str] = []
+            for x in value:
+                if x is None:
+                    continue
+                s = str(x).strip()
+                if s:
+                    out.append(s)
+            return out
+        raise serializers.ValidationError("service must be a list of strings or a single string.")
 
 
 _INFRA_NUMERIC_FIELDS = (
@@ -149,12 +171,12 @@ _INFRA_NUMERIC_FIELDS = (
 class InfraProjectFormEntrySerializer(serializers.ModelSerializer):
     class Meta:
         model = InfraProjectFormEntry
-        fields = ["id", "date", *_INFRA_NUMERIC_FIELDS, "created_at", "updated_at"]
+        fields = ["id", "date", "status", *_INFRA_NUMERIC_FIELDS, "created_at", "updated_at"]
         read_only_fields = ["id", "created_at", "updated_at"]
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        for name in ("date", *_INFRA_NUMERIC_FIELDS):
+        for name in ("date", "status", *_INFRA_NUMERIC_FIELDS):
             f = self.fields.get(name)
             if not f:
                 continue

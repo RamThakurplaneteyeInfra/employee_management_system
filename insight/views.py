@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -8,6 +10,8 @@ from rest_framework import status
 from .aggregates import build_metrics_payload
 from .hf_client import call_hf_insight
 from .grok_client import call_grok_insight
+
+logger = logging.getLogger(__name__)
 
 
 @api_view(["GET"])
@@ -26,6 +30,7 @@ def ems_insight(request):
       ai_provider: str — "hf" or "grok" (best-effort)
     """
     metrics = build_metrics_payload(request.user)
+    logger.debug("ems_insight user=%s metrics_tier=%s", request.user.pk, metrics.get("insight_tier"))
 
     # Prefer Hugging Face. If not configured (or fails), fall back to Grok
     # to avoid breaking the endpoint for existing clients.
@@ -57,4 +62,11 @@ def ems_insight(request):
         "grok_error": ai_error,
         "ai_provider": provider,
     }
+    logger.info(
+        "ems_insight response provider=%s model=%s ai_error=%s summary_preview=%s",
+        provider,
+        model,
+        ai_error,
+        (summary or "")[:300].replace("\n", " ") + ("..." if len(summary or "") > 300 else ""),
+    )
     return Response(body, status=status.HTTP_200_OK)

@@ -86,6 +86,7 @@ class Profile(models.Model):
     )
     birthday_counter=models.SmallIntegerField(default=0)
     is_logged_in = models.BooleanField(default=False, help_text="True when user is logged in, False when logged out.")
+    gender = models.CharField(max_length=20, null=True, blank=True, verbose_name="gender", db_column="gender", choices=[("Male", "Male"), ("Female", "Female"), ("Other", "Other")])
     class Meta:
         verbose_name = "Employee Profile"
         verbose_name_plural = "Employees Profile"

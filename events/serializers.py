@@ -39,6 +39,12 @@ class BookSlotSerializer(serializers.ModelSerializer):
     deliverable = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     not_deliverable = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     opportunity = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    member_name = serializers.ListField(
+        child=serializers.CharField(allow_blank=False),
+        required=False,
+        allow_empty=True,
+        help_text="Required when room name is 'Outdoor' (case-insensitive): list of member display names.",
+    )
 
     class Meta:
         model = BookSlot
@@ -51,6 +57,7 @@ class BookSlotSerializer(serializers.ModelSerializer):
             'deliverable',
             'not_deliverable',
             'opportunity',
+            "member_name",
             'created_at','member_details',"creater_details","created_by"
         ]
 
@@ -96,6 +103,13 @@ class BookSlotSerializer(serializers.ModelSerializer):
         members = attrs.get("members", [])
 
         if date_val is None or start_time is None or end_time is None:
+            # Skip overlap checks; still avoid NULL member_name (NOT NULL on Postgres).
+            if attrs.get("member_name") is None:
+                attrs["member_name"] = (
+                    (getattr(self.instance, "member_name", None) or [])
+                    if self.instance
+                    else []
+                )
             return attrs
 
         if start_time >= end_time:
@@ -146,6 +160,38 @@ class BookSlotSerializer(serializers.ModelSerializer):
                     {"members": f"User {member.username} already has a slot in this time frame."}
                 )
 
+        # Outdoor-only extra field: member_name (array of strings)
+        effective_room = room
+        if effective_room is None and self.instance is not None:
+            effective_room = getattr(self.instance, "room", None)
+
+        is_outdoor = bool(
+            effective_room and str(getattr(effective_room, "name", "") or "").strip().lower() == "outdoor"
+        )
+
+        if "member_name" in attrs:
+            raw_names = attrs.get("member_name") or []
+        elif self.instance is not None:
+            raw_names = getattr(self.instance, "member_name", None) or []
+        else:
+            raw_names = []
+
+        if not is_outdoor:
+            attrs["member_name"] = []
+        else:
+            cleaned: list[str] = []
+            for x in raw_names:
+                if x is None:
+                    continue
+                s = str(x).strip()
+                if s:
+                    cleaned.append(s)
+            if not cleaned:
+                raise serializers.ValidationError(
+                    {"member_name": "member_name is required for Outdoor rooms (non-empty list of strings)."}
+                )
+            attrs["member_name"] = cleaned
+
         # When changing status to "Done", notes are required (from payload and/or slot object).
         new_status = attrs.get("status")
         if new_status is not None and str(getattr(new_status, "status_name", "") or "").strip().lower() == "done":
@@ -158,7 +204,8 @@ class BookSlotSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         # Extract the list of user objects identified by username
         member_users = validated_data.pop('members', [])
-        # print(validated_data)
+        if validated_data.get("member_name") is None:
+            validated_data["member_name"] = []
         # Create the BookSlot instance
         book_slot = BookSlot.objects.create(**validated_data)
         # Manually create entries in the through table
@@ -168,7 +215,9 @@ class BookSlotSerializer(serializers.ModelSerializer):
 
     def update(self, instance, validated_data):
         member_users = validated_data.pop('members', None)
-        
+        if validated_data.get("member_name") is None:
+            validated_data["member_name"] = []
+
         # Standard update for BookSlot fields
         for attr, value in validated_data.items():
             setattr(instance, attr, value)

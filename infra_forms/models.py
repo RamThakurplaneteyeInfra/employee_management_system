@@ -32,6 +32,11 @@ class ProjectCatalog(models.Model):
     """Saved project names shown in the top selector."""
 
     name = models.CharField(max_length=160, unique=True)
+    service = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="Optional list of service values from frontend dropdown(s).",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -178,6 +183,12 @@ class InfraProjectFormEntry(models.Model):
 
     form = models.ForeignKey(InfraProjectForm, on_delete=models.CASCADE, related_name="entries")
     date = models.DateField(null=True, blank=True)
+    status = models.CharField(
+        max_length=80,
+        blank=True,
+        default="",
+        help_text="Optional status value sent by frontend (static dropdown).",
+    )
 
     MJB = models.DecimalField(max_digits=14, decimal_places=3, null=True, blank=True)
     MNB = models.DecimalField(max_digits=14, decimal_places=3, null=True, blank=True)

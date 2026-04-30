@@ -58,6 +58,8 @@ class BookSlot(models.Model):
     deliverable = models.TextField(blank=True, null=True)
     not_deliverable = models.TextField(blank=True, null=True)
     opportunity = models.TextField(blank=True, null=True)
+    # Outdoor-only: list of display names (strings). Ignored/cleared when room is not Outdoor.
+    member_name = models.JSONField(default=list, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     created_by=models.ForeignKey(User,on_delete=models.CASCADE,related_name="slotcreater",null=True)
     members=models.ManyToManyField(User,through="Slotmembers")

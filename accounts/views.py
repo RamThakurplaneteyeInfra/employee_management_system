@@ -54,8 +54,8 @@ async def home(request: HttpRequest):
 # Method: POST
 def _create_employee_login_sync(req):
     """Sync helper: DB operations. Expects application/x-www-form-urlencoded or multipart/form-data."""
-    fields = ['Employee_id', 'password', 'Name', 'Role', 'Email_id', 'Designation', 'Date_of_join', 'Date_of_birth', 'Branch', 'Photo_link', "Department", "Teamlead", "Functions"]
-    not_required_field = ["Branch", "Designation", "Department", "Teamlead", "Functions", "Photo_link"]
+    fields = ['Employee_id', 'password', 'Name', 'Role', 'Email_id', 'Designation', 'Date_of_join', 'Date_of_birth', 'Branch', 'Photo_link', "Department", "Teamlead", "Functions", "gender"]
+    not_required_field = ["Branch", "Designation", "Department", "Teamlead", "Functions", "Photo_link", "gender"]
     login_values = {}
     profile_values = {}
     data, files = req.POST, req.FILES
@@ -171,6 +171,7 @@ def _get_all_employees_sync():
                 "Date_of_join": p.Date_of_join,
                 "Date_of_birth": p.Date_of_birth,
                 "Email_id": p.Email_id,
+                "gender": p.gender,
                 "Number_of_days_from_joining": completed_years_and_days(start_date=p.Date_of_join),
                 "is_logged_in": getattr(p, "is_logged_in", False),
             })
@@ -299,6 +300,7 @@ def _employee_dashboard_sync(request: HttpRequest):
             "Photo_link": p.Photo_link.url if p.Photo_link else None,
             "role": p.Role.role_name if p.Role else None,
             "department": p.Department.dept_name if p.Department else None,
+            "gender": p.gender,
             "functions": [f.function for f in p.functions.all()],
             "is_logged_in": getattr(p, "is_logged_in", False),
         } for p in profiles]
@@ -345,8 +347,8 @@ async def user_logout(request: HttpRequest):
 def _update_profile_sync(req, username):
     """Sync helper: DB operations. Expects application/x-www-form-urlencoded or multipart/form-data."""
     user = get_object_or_404(User, username=username)
-    fields = ['Name', 'Role', 'Email_id', 'Designation', 'Date_of_join', 'Date_of_birth', 'Branch', "Department", "Teamlead", "Functions"]
-    not_required_fields = ["Designation", "Branch", "Department", "Teamlead", "Functions"]
+    fields = ['Name', 'Role', 'Email_id', 'Designation', 'Date_of_join', 'Date_of_birth', 'Branch', "Department", "Teamlead", "Functions", "gender"]
+    not_required_fields = ["Designation", "Branch", "Department", "Teamlead", "Functions", "gender"]
     profile_values = {}
     data = load_data(req)
     function_names = None
@@ -466,6 +468,7 @@ def _view_employee_sync(username):
             "Branch": profile.Branch.branch_name if profile.Branch else None,
             "Name": profile.Name,
             "Photo_link": profile.Photo_link if profile.Photo_link else None,
+            "gender": profile.gender,
             "Role": profile.Role.role_name if profile.Role else None,
             "Functions": functions,
             "is_logged_in": getattr(profile, "is_logged_in", False),

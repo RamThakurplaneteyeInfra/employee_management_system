@@ -29,6 +29,10 @@ XAI_API_KEY = GROK_API_KEY
 GROK_API_URL = os.getenv("GROK_API_URL", "https://api.x.ai/v1/chat/completions")
 GROK_MODEL = os.getenv("GROK_MODEL", "grok-2-latest")
 
+# Groq (task summaries) — server-side only
+_groq = (os.getenv("GROQ_API_KEY") or "").strip()
+GROQ_API_KEY = _groq or None
+
 # Hugging Face (EMS insight API)
 # Token must be provided via env var / .env; never hardcode.
 _hf = (os.getenv("HF_API_TOKEN") or os.getenv("HUGGINGFACE_API_TOKEN") or "").strip()
@@ -108,6 +112,7 @@ INSTALLED_APPS = [
     "recruitment",
     "attendance",
     "insight",
+    "ai_summary",
     "infra_forms",
     "assets_request",
 ]
@@ -422,6 +427,8 @@ LOGGING = {
     "loggers": {
         "django.request": {"handlers": ["console"], "level": "INFO"},
         "django.server": {"handlers": ["console"], "level": "INFO"},
+        # EMS AI insight (HF + Grok): INFO/WARNING on console; set DEBUG for raw HF previews.
+        "insight": {"handlers": ["console"], "level": "DEBUG"},
     },
 }
 

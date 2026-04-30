@@ -41,6 +41,8 @@ urlpatterns = [
     path("api/", include("recruitment.urls"), name="recruitment"),
     path("", include("recruitment.urls_root")),
     path("attendanceapi/", include("attendance.urls"), name="attendance"),
+    # AI task summaries (Groq): isolated app, write-only to its own table.
+    path("api/ai/summary/", include("ai_summary.urls"), name="ai_summary_api"),
     # AI EMS insight (aggregates + Grok); also mounted at /ai/ for spec alias
     path("api/ai/", include("insight.urls"), name="insight_api_ai"),
     path("ai/", include("insight.urls"), name="insight_ai"),
