@@ -200,7 +200,7 @@ def _set_approvals_by_role(application, applicant, status_map, is_md_approval_by
     based on applicant's role.
     - MD applicant: all None except MD=Approved.
     - Admin applicant: team_lead=None, HR=Pending, admin=None, MD=Pending.
-    - HR applicant: team_lead=None, HR=None, admin=Pending, MD=Pending.
+    - HR applicant: team_lead=None, HR=None, admin=None, MD=Pending. (MD-only approval.)
     - TeamLead applicant: team_lead=None, HR=Pending, admin=None, MD=Pending.
     - Employee/Intern: team_lead=Pending (if a team lead is assigned), HR=Pending, admin=None, MD=Pending
       (Team Lead, HR, and MD see the request in parallel; MD's approval confirms it).
@@ -224,9 +224,11 @@ def _set_approvals_by_role(application, applicant, status_map, is_md_approval_by
         application.MD_approval_id = pending.id if pending else None
         return
     if role_name == "HR":
+        # HR's own leave goes to MD ONLY (no Admin step). Admin tab will not
+        # show this row because admin_approval is left NULL.
         application.team_lead_approval_id = None
         application.HR_approval_id = None
-        application.admin_approval_id = pending.id if pending else None
+        application.admin_approval_id = None
         application.MD_approval_id = pending.id if pending else None
         return
     if role_name in ("TeamLead", "Teamlead"):
@@ -588,6 +590,105 @@ class LeaveApplicationViewSet(ModelViewSet):
         qs = self.get_queryset().filter(applicant=request.user)
         serializer = LeaveApplicationResponseSerializer(qs, many=True)
         return Response(serializer.data)
+
+    # ---------- PATCH / DELETE on a single history row ----------
+    # Strict, applicant-scoped editing/cancellation of a row visible in the
+    # applicant's own history. Implemented as a NEW detail action so the
+    # standard CRUD endpoints (`partial_update`, `destroy`) keep their
+    # existing behaviour and approver-side update flow stays untouched.
+    #
+    #   PATCH  /accounts/leave-applications/{id}/view_history/
+    #     Edit content fields (start_date, duration_of_days, leave_subject,
+    #     reason, leave_type, half_day_slots, alternative) of an application
+    #     that the caller owns AND on which no approval has been granted yet.
+    #     Approval-fields are not accepted here; use the regular
+    #     PATCH /{id}/ for approver workflows.
+    #
+    #   DELETE /accounts/leave-applications/{id}/view_history/
+    #     Cancel an application that the caller owns AND on which MD has not
+    #     yet approved. Only the targeted row is deleted; no related rows or
+    #     other tables are affected.
+    @action(
+        detail=True,
+        methods=["patch", "delete"],
+        url_path="view_history",
+        permission_classes=[IsAuthenticated],
+    )
+    def view_history_modify(self, request, pk=None):
+        """Applicant-only PATCH (draft fields) / DELETE (pre-MD-approval) for own history rows."""
+        instance = self.get_object()
+
+        # Ownership check applies to BOTH methods. Approver-side actions must
+        # keep using PATCH /{id}/ — they will get 403 here on purpose.
+        if request.user != instance.applicant:
+            return Response(
+                {"detail": "You may only modify your own leave application."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        if request.method.upper() == "DELETE":
+            # Same rule as the standard `destroy`: cannot delete after MD
+            # approval. Only this single row is removed.
+            if instance.MD_approval and instance.MD_approval.name == "Approved":
+                return Response(
+                    {"detail": "Cannot delete an application that has been approved by MD."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+            instance.delete()
+            return Response(status=status.HTTP_204_NO_CONTENT)
+
+        # ---- PATCH ----
+        # Block editing once ANY approver has marked Approved (not just MD),
+        # to keep the history view consistent with what approvers already
+        # acted on. Mirrors the rule in `_apply_update_by_role`.
+        has_approval = any([
+            (instance.team_lead_approval and instance.team_lead_approval.name == "Approved"),
+            (instance.HR_approval and instance.HR_approval.name == "Approved"),
+            (instance.MD_approval and instance.MD_approval.name == "Approved"),
+            (instance.admin_approval and instance.admin_approval.name == "Approved"),
+        ])
+        if has_approval:
+            return Response(
+                {"detail": "Cannot edit application after an approval has been granted."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        DRAFT_FIELDS = (
+            "start_date",
+            "duration_of_days",
+            "leave_subject",
+            "reason",
+            "leave_type",
+            "half_day_slots",
+            "alternative",
+        )
+        forbidden = sorted(set(request.data.keys()) - set(DRAFT_FIELDS))
+        if forbidden:
+            return Response(
+                {"detail": f"Fields not editable from history: {forbidden}. Use the regular endpoint for approval fields."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        serializer = LeaveApplicationUpdateSerializer(instance, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+
+        # Re-validate balance only if duration actually changed.
+        if "duration_of_days" in serializer.validated_data:
+            _validate_remaining_leaves(
+                instance.applicant, serializer.validated_data["duration_of_days"]
+            )
+
+        with transaction.atomic():
+            updated_fields = []
+            for field in DRAFT_FIELDS:
+                if field in serializer.validated_data:
+                    setattr(instance, field, serializer.validated_data[field])
+                    updated_fields.append(field)
+            if updated_fields:
+                instance.save(update_fields=updated_fields)
+
+        instance.refresh_from_db()
+        return Response(LeaveApplicationResponseSerializer(instance).data)
 
     # ---------- GET: approval tab (Team lead + HR / Admin / MD – single API) ----------
     @action(detail=False, methods=["get"], url_path="approval")

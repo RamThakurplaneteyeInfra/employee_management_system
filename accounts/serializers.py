@@ -1,6 +1,8 @@
 """
 Serializers for accounts app (leave applications, etc.).
 """
+from decimal import Decimal
+
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
 
@@ -21,11 +23,49 @@ def _get_applicant_display_name(applicant):
         return applicant.username
 
 
+def _resolve_alternative_user(value):
+    """Resolve the ``alternative`` field to a ``User`` instance.
+
+    Accepts either an Employee ID / username (e.g. ``"EMP015"``) or the
+    employee's full name (``Profile.Name``, case-insensitive). Returns
+    ``None`` for blank/empty input. Raises ``serializers.ValidationError``
+    when the value cannot be resolved to any user.
+
+    Read-only lookup: this helper never creates, updates, or deletes data.
+    """
+    if value in (None, ""):
+        return None
+    val = str(value).strip()
+    if not val:
+        return None
+
+    user = User.objects.filter(username=val).first()
+    if user:
+        return user
+
+    profile = (
+        Profile.objects.filter(Name__iexact=val)
+        .select_related("Employee_id")
+        .first()
+    )
+    if profile and profile.Employee_id:
+        return profile.Employee_id
+
+    raise serializers.ValidationError(
+        f"Alternative user '{val}' not found. Provide a valid Employee ID or full name."
+    )
+
+
 class LeaveApplicationListSerializer(serializers.ModelSerializer):
     """Read-only serializer for list/retrieve; char/name fields only, no FK ids. User names from Profile.Name."""
     applicant_name = serializers.SerializerMethodField()
     team_lead_name = serializers.SerializerMethodField()
     alternative_name = serializers.SerializerMethodField()
+    # Emit duration_of_days as a JSON number (e.g. 1.0, 0.5) instead of the
+    # default DecimalField string ("1.0"), so existing clients keep working.
+    duration_of_days = serializers.DecimalField(
+        max_digits=5, decimal_places=1, coerce_to_string=False, read_only=True
+    )
     leave_type_name = serializers.CharField(source="leave_type.name", read_only=True)
     team_lead_approval_status = serializers.CharField(
         source="team_lead_approval.name", read_only=True, allow_null=True
@@ -72,11 +112,10 @@ class LeaveApplicationListSerializer(serializers.ModelSerializer):
         return _get_applicant_display_name(getattr(obj, "team_lead", None))
 
     def get_alternative_name(self, obj):
-        alt = getattr(obj, "alternative", None)
-        if not alt:
-            return None
-        profile = getattr(alt, "accounts_profile", None)
-        return (getattr(profile, "Name", None) if profile else None) or alt.username
+        # Same helper as applicant_name / team_lead_name so behaviour is
+        # identical: returns Profile.Name, falls back to username, handles
+        # users with no Profile via Profile.DoesNotExist.
+        return _get_applicant_display_name(getattr(obj, "alternative", None))
 
     def get_approved_by_MD_at(self, obj):
         return gmt_to_ist_str(obj.approved_by_MD_at, "%d/%m/%Y %H:%M:%S") if obj.approved_by_MD_at else None
@@ -87,6 +126,11 @@ class LeaveApplicationResponseSerializer(serializers.ModelSerializer):
     applicant_name = serializers.SerializerMethodField()
     team_lead_name = serializers.SerializerMethodField()
     alternative_name = serializers.SerializerMethodField()
+    # Emit duration_of_days as a JSON number (e.g. 1.0, 0.5) instead of the
+    # default DecimalField string ("1.0"), so existing clients keep working.
+    duration_of_days = serializers.DecimalField(
+        max_digits=5, decimal_places=1, coerce_to_string=False, read_only=True
+    )
     leave_type_name = serializers.CharField(source="leave_type.name", read_only=True)
     team_lead_approval_status = serializers.CharField(
         source="team_lead_approval.name", read_only=True, allow_null=True
@@ -135,11 +179,10 @@ class LeaveApplicationResponseSerializer(serializers.ModelSerializer):
         return _get_applicant_display_name(getattr(obj, "team_lead", None))
 
     def get_alternative_name(self, obj):
-        alt = getattr(obj, "alternative", None)
-        if not alt:
-            return None
-        profile = getattr(alt, "accounts_profile", None)
-        return (getattr(profile, "Name", None) if profile else None) or alt.username
+        # Same helper as applicant_name / team_lead_name so behaviour is
+        # identical: returns Profile.Name, falls back to username, handles
+        # users with no Profile via Profile.DoesNotExist.
+        return _get_applicant_display_name(getattr(obj, "alternative", None))
 
     def get_approved_by_MD_at(self, obj):
         return gmt_to_ist_str(obj.approved_by_MD_at, "%d/%m/%Y %H:%M:%S") if obj.approved_by_MD_at else None
@@ -149,9 +192,24 @@ class LeaveApplicationCreateSerializer(serializers.ModelSerializer):
     """Create leave application (regular). leave_type as string (Full_day/Half_day); validation by type."""
     applicant = serializers.HiddenField(default=serializers.CurrentUserDefault())
     leave_type = serializers.CharField(max_length=20, trim_whitespace=True)
-    # Optional for Half_day (defaulted to 1 in validate()); required >= 1 for Full_day
-    duration_of_days = serializers.IntegerField(required=False, allow_null=True, min_value=0)
-    alternative = serializers.IntegerField(required=False, allow_null=True, help_text="user_id (User pk) of the alternative user")
+    # Optional for Half_day (defaulted to 1 in validate()); required >= 1 for Full_day.
+    # DecimalField with coerce_to_string=False so half-day floats (e.g. 0.5, 1.5)
+    # are accepted on input and the response stays a JSON number, not a string.
+    duration_of_days = serializers.DecimalField(
+        max_digits=5,
+        decimal_places=1,
+        required=False,
+        allow_null=True,
+        min_value=Decimal("0"),
+        coerce_to_string=False,
+    )
+    # Accept the alternative user's username string (e.g. "EMP015").
+    alternative = serializers.CharField(
+        required=False,
+        allow_null=True,
+        allow_blank=True,
+        help_text="username of the alternative user",
+    )
 
     class Meta:
         model = LeaveApplicationData
@@ -168,12 +226,7 @@ class LeaveApplicationCreateSerializer(serializers.ModelSerializer):
         ]
 
     def validate_alternative(self, value):
-        if value is None:
-            return None
-        try:
-            return User.objects.get(pk=value)
-        except (User.DoesNotExist, TypeError, ValueError):
-            raise serializers.ValidationError("Alternative user with this user_id does not exist.")
+        return _resolve_alternative_user(value)
 
     def validate_leave_type(self, value):
         name = (value or "").strip()
@@ -232,7 +285,20 @@ class LeaveApplicationEmergencyCreateSerializer(serializers.ModelSerializer):
     """HR-only: create emergency leave on behalf of any user. applicant = username, leave_type = string, with optional note."""
     applicant = serializers.CharField(trim_whitespace=True)
     leave_type = serializers.CharField(max_length=20, trim_whitespace=True)
-    alternative = serializers.IntegerField(required=False, allow_null=True, help_text="user_id (User pk) of the alternative user")
+    # DecimalField mirrors the model: accepts half-day floats on input (>= 1
+    # rule preserved in validate_duration_of_days below for emergency leaves).
+    duration_of_days = serializers.DecimalField(
+        max_digits=5,
+        decimal_places=1,
+        coerce_to_string=False,
+    )
+    # Accept the alternative user's username string only.
+    alternative = serializers.CharField(
+        required=False,
+        allow_null=True,
+        allow_blank=True,
+        help_text="username of the alternative user",
+    )
     hr_approval_status = serializers.ChoiceField(
         choices=[("Approved", "Approved"), ("Pending", "Pending"), ("Rejected", "Rejected")],
         default="Approved",
@@ -256,12 +322,7 @@ class LeaveApplicationEmergencyCreateSerializer(serializers.ModelSerializer):
         ]
 
     def validate_alternative(self, value):
-        if value is None:
-            return None
-        try:
-            return User.objects.get(pk=value)
-        except (User.DoesNotExist, TypeError, ValueError):
-            raise serializers.ValidationError("Alternative user with this user_id does not exist.")
+        return _resolve_alternative_user(value)
 
     def validate_leave_type(self, value):
         name = (value or "").strip()
@@ -300,7 +361,22 @@ class LeaveApplicationUpdateSerializer(serializers.ModelSerializer):
     MD_approval = serializers.CharField(required=False, allow_blank=False)
     admin_approval = serializers.CharField(required=False, allow_blank=False)
     leave_type = serializers.CharField(required=False, allow_blank=True)
-    alternative = serializers.IntegerField(required=False, allow_null=True, help_text="user_id (User pk) of the alternative user")
+    # Accept half-day floats on PATCH/PUT; mirrors the model's DecimalField.
+    duration_of_days = serializers.DecimalField(
+        max_digits=5,
+        decimal_places=1,
+        required=False,
+        allow_null=True,
+        min_value=Decimal("0"),
+        coerce_to_string=False,
+    )
+    # Accept the alternative user's username string only.
+    alternative = serializers.CharField(
+        required=False,
+        allow_null=True,
+        allow_blank=True,
+        help_text="username of the alternative user",
+    )
 
     class Meta:
         model = LeaveApplicationData
@@ -319,12 +395,7 @@ class LeaveApplicationUpdateSerializer(serializers.ModelSerializer):
         ]
 
     def validate_alternative(self, value):
-        if value is None:
-            return None
-        try:
-            return User.objects.get(pk=value)
-        except (User.DoesNotExist, TypeError, ValueError):
-            raise serializers.ValidationError("Alternative user with this user_id does not exist.")
+        return _resolve_alternative_user(value)
 
     _APPROVAL_NAMES = {"Approved", "Pending", "Rejected"}
     _LEAVE_TYPE_NAMES = {"Full_day", "Half_day"}

@@ -203,6 +203,13 @@ class LeaveSummary(models.Model):
         default=Decimal("0"),
         validators=[MinValueValidator(Decimal("0"))],
     )
+    # Bookkeeping for the auto-credit jobs (`credit_earn_leave`,
+    # `credit_casual_leave`). Each command stamps `today` on success so a
+    # second run inside the same month / quarter is a no-op (idempotent).
+    # Nullable so existing rows pre-feature don't break; seeded to today by
+    # the migration that introduces these columns.
+    last_earn_credit_on = models.DateField(null=True, blank=True)
+    last_casual_credit_on = models.DateField(null=True, blank=True)
 
     class Meta:
         db_table = 'team_management"."leave_summary'
@@ -271,7 +278,9 @@ class LeaveApplicationData(models.Model):
         db_column="alternative_id",
     )
     start_date = models.DateField()
-    duration_of_days = models.SmallIntegerField()
+    # Decimal so half-day values (e.g. 0.5, 1.5) are accepted without truncation.
+    # Existing integer rows are read back unchanged (1 -> Decimal('1.0')).
+    duration_of_days = models.DecimalField(max_digits=5, decimal_places=1)
     leave_subject = models.CharField(max_length=255)
     reason = models.TextField()
     leave_type = models.ForeignKey(
