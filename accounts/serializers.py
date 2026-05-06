@@ -423,3 +423,23 @@ class LeaveApplicationUpdateSerializer(serializers.ModelSerializer):
         elif "leave_type" in attrs and (attrs["leave_type"] is None or attrs["leave_type"] == ""):
             attrs.pop("leave_type", None)
         return attrs
+
+
+class MenstrualLeaveCreateSerializer(serializers.Serializer):
+    """
+    Minimal payload for the dedicated menstrual leave endpoint.
+
+    Accepts exactly three input fields:
+        - date          : start date of the leave (mapped to LeaveApplicationData.start_date)
+        - leave_subject : short subject line (max 255 chars)
+        - reason        : free-form reason text
+
+    The view fills in `leave_type=Menstrual`, `duration_of_days=1`,
+    `half_day_slots=None`, `is_emergency=False`, and auto-approves all
+    rails. This serializer only validates / shapes the input; it does
+    not create or modify any DB rows.
+    """
+
+    date = serializers.DateField(required=True)
+    leave_subject = serializers.CharField(required=True, max_length=255, allow_blank=False)
+    reason = serializers.CharField(required=True, allow_blank=False)

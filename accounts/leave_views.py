@@ -26,6 +26,7 @@ from .serializers import (
     LeaveApplicationCreateSerializer,
     LeaveApplicationEmergencyCreateSerializer,
     LeaveApplicationUpdateSerializer,
+    MenstrualLeaveCreateSerializer,
 )
 from .filters import _get_user_role_sync
 
@@ -282,6 +283,8 @@ class LeaveApplicationViewSet(ModelViewSet):
             return LeaveApplicationCreateSerializer
         if self.action == "emergency_leave":
             return LeaveApplicationEmergencyCreateSerializer
+        if self.action == "menstrual_leave":
+            return MenstrualLeaveCreateSerializer
         if self.action in ("update", "partial_update"):
             return LeaveApplicationUpdateSerializer
         return LeaveApplicationResponseSerializer
@@ -415,6 +418,104 @@ class LeaveApplicationViewSet(ModelViewSet):
                 summary.emergency_leaves = summary.emergency_leaves - duration
                 summary.used_leaves = summary.used_leaves + duration
                 summary.save(update_fields=["emergency_leaves", "used_leaves"])
+        application.refresh_from_db()
+        return Response(
+            LeaveApplicationResponseSerializer(application).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+    @action(detail=False, methods=["post"], url_path="menstrual", permission_classes=[IsAuthenticated])
+    def menstrual_leave(self, request):
+        """
+        Dedicated endpoint for menstrual leave.
+        POST /accounts/leave-applications/menstrual/
+
+        Body (exactly 3 fields):
+            {
+                "date": "YYYY-MM-DD",
+                "leave_subject": "...",
+                "reason": "..."
+            }
+
+        Behaviour:
+            - Female applicants only (Profile.gender == "Female"); else 400.
+            - Requires LeaveSummary.menstrual_leaves >= 1; else 400.
+            - Auto-fills leave_type=Menstrual, duration_of_days=1,
+              half_day_slots=None, is_emergency=False.
+            - Auto-approves team_lead/HR/MD rails (admin left null);
+              applicant does NOT need any approver to act.
+            - Decrements LeaveSummary.menstrual_leaves to 0 immediately
+              (idempotent — the post_save signal will not double-decrement).
+            - Does NOT touch used_leaves, casual_leaves, earn_leaves,
+              unpaid_leaves, emergency_leaves, or any other user's data.
+            - The created row appears in /view_history/ (applicant) and
+              /approval/ (HR/MD/TeamLead) endpoints unchanged, marked
+              Approved.
+        """
+        from rest_framework import serializers as s
+
+        serializer = MenstrualLeaveCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        applicant = request.user
+
+        profile = Profile.objects.filter(Employee_id=applicant).first()
+        gender = (getattr(profile, "gender", "") or "").strip().lower()
+        if gender != "female":
+            raise s.ValidationError(
+                {"leave_type": ["Menstrual leave is available to female employees only."]}
+            )
+
+        summary, _ = LeaveSummary.objects.get_or_create(
+            user=applicant,
+            defaults={"total_leaves": 0, "used_leaves": 0},
+        )
+        if (summary.menstrual_leaves or 0) < 1:
+            raise s.ValidationError(
+                {"non_field_errors": ["No menstrual leave available this month."]}
+            )
+
+        try:
+            menstrual_type = LeaveTypes.objects.get(name="Menstrual")
+        except LeaveTypes.DoesNotExist:
+            raise s.ValidationError(
+                {"non_field_errors": ["Menstrual leave type is not configured."]}
+            )
+
+        status_map = _get_leave_status_map()
+        approved = status_map.get("Approved")
+
+        with transaction.atomic():
+            application = LeaveApplicationData.objects.create(
+                applicant=applicant,
+                start_date=serializer.validated_data["date"],
+                duration_of_days=Decimal("1"),
+                leave_subject=serializer.validated_data["leave_subject"],
+                reason=serializer.validated_data["reason"],
+                leave_type=menstrual_type,
+                half_day_slots=None,
+                is_emergency=False,
+            )
+            _set_team_lead_from_profile(application, applicant)
+            application.team_lead_approval = approved
+            application.HR_approval = approved
+            application.MD_approval = approved
+            application.admin_approval = None
+            application.approved_by_MD_at = timezone.now()
+            application.save(update_fields=[
+                "team_lead",
+                "team_lead_approval",
+                "HR_approval",
+                "MD_approval",
+                "admin_approval",
+                "approved_by_MD_at",
+            ])
+            # Decrement the monthly bucket. Idempotent: helper no-ops if
+            # menstrual_leaves is already 0, so the post_save signal that
+            # fires on the application above (which also calls this helper
+            # for Menstrual + MD-Approved rows) cannot double-decrement.
+            _consume_menstrual_leave(applicant)
+
         application.refresh_from_db()
         return Response(
             LeaveApplicationResponseSerializer(application).data,
