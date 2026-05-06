@@ -24,6 +24,8 @@ CACHE_SKIP_PREFIXES = (
     "/accounts/logout/",
     "/eventsapi/bookslots/today/",
     "/api/eventsapi/bookslots/today/",
+    "/accounts/leave-applications/",
+    "/api/accounts/leave-applications/",
 )
 MUTATION_METHODS = ("POST", "PUT", "PATCH", "DELETE")
 

@@ -4,8 +4,9 @@ Used by accounts views and leave-applications; Profile linked via OneToOne to Us
 """
 from django.db import models
 from django.contrib.auth.models import User
-from django.core.validators import validate_email
+from django.core.validators import validate_email, MinValueValidator, MaxValueValidator
 from datetime import timedelta
+from decimal import Decimal
 
 
 # A model for "Roles" table
@@ -171,6 +172,37 @@ class LeaveSummary(models.Model):
     used_leaves = models.PositiveIntegerField(default=0)
     # Emergency leave quota: 10%% of total_leaves, filled on create and decremented when emergency leave is taken.
     emergency_leaves = models.PositiveIntegerField(default=0)
+    # Per-employee casual/earn balances; Decimal so half-day values (e.g. 1.5, 4.5) are supported.
+    # MinValueValidator(0) preserves the non-negative semantics that the previous PositiveIntegerField had.
+    casual_leaves = models.DecimalField(
+        max_digits=5,
+        decimal_places=1,
+        default=Decimal("0"),
+        validators=[MinValueValidator(Decimal("0"))],
+    )
+    earn_leaves = models.DecimalField(
+        max_digits=5,
+        decimal_places=1,
+        default=Decimal("0"),
+        validators=[MinValueValidator(Decimal("0"))],
+    )
+    # Menstrual leave for female employees only. Always 0 or 1; reset to 1 on the
+    # 1st of every month by the `credit_menstrual_leave` management command, and
+    # consumed (set to 0) when an approved Menstrual leave application is processed.
+    # Does not carry over month-to-month and does not affect used_leaves.
+    menstrual_leaves = models.PositiveSmallIntegerField(
+        default=0,
+        validators=[MaxValueValidator(1)],
+    )
+    # Cumulative unpaid leave days taken (overflow when both casual_leaves and
+    # earn_leaves are exhausted at approval time). Decimal so half-day overflow
+    # is supported.
+    unpaid_leaves = models.DecimalField(
+        max_digits=6,
+        decimal_places=1,
+        default=Decimal("0"),
+        validators=[MinValueValidator(Decimal("0"))],
+    )
 
     class Meta:
         db_table = 'team_management"."leave_summary'
@@ -289,6 +321,11 @@ class LeaveApplicationData(models.Model):
     application_date = models.DateField(auto_now_add=True)
     approved_by_MD_at = models.DateTimeField(null=True, blank=True)
     note=models.TextField(null=True,blank=True)
+    # Per-application split filled at MD-approval time (waterfall casual -> earn -> unpaid).
+    # All zeros for legacy / unapproved / Menstrual / Emergency rows.
+    casual_used = models.DecimalField(max_digits=5, decimal_places=1, default=Decimal("0"))
+    earn_used = models.DecimalField(max_digits=5, decimal_places=1, default=Decimal("0"))
+    unpaid_used = models.DecimalField(max_digits=5, decimal_places=1, default=Decimal("0"))
 
     class Meta:
         db_table = 'team_management"."leave_application_data'

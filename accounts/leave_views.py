@@ -2,6 +2,8 @@
 Leave application APIs: POST (regular + emergency), GET, PATCH, PUT, DELETE.
 Approval hierarchy by applicant role; remaining-leaves validation; HR-only emergency leave.
 """
+from decimal import Decimal
+
 from django.utils import timezone
 from django.db import transaction
 from rest_framework import status
@@ -126,6 +128,72 @@ def _increment_used_leaves(applicant, duration_of_days):
     summary.save(update_fields=["used_leaves"])
 
 
+def _consume_menstrual_leave(applicant):
+    """Set the applicant's monthly menstrual_leaves bucket to 0 (idempotent)."""
+    if not applicant:
+        return
+    summary, _ = LeaveSummary.objects.get_or_create(
+        user=applicant,
+        defaults={"total_leaves": 0, "used_leaves": 0},
+    )
+    if summary.menstrual_leaves and summary.menstrual_leaves > 0:
+        summary.menstrual_leaves = 0
+        summary.save(update_fields=["menstrual_leaves"])
+
+
+def _consume_casual_earn_unpaid(applicant, duration_days):
+    """
+    Debit `duration_days` from the applicant's leave buckets in waterfall order:
+        casual_leaves -> earn_leaves -> unpaid_leaves.
+
+    `duration_days` accepts int / Decimal (e.g. Decimal('0.5') for half-day).
+    Also increments `used_leaves` by the integer paid portion (casual + earn) so
+    legacy reporting that reads used_leaves keeps working for paid days only.
+
+    Returns: dict {"casual": Decimal, "earn": Decimal, "unpaid": Decimal}.
+    """
+    zero = Decimal("0")
+    if not applicant:
+        return {"casual": zero, "earn": zero, "unpaid": zero}
+    needed = Decimal(duration_days or 0)
+    if needed <= 0:
+        return {"casual": zero, "earn": zero, "unpaid": zero}
+
+    summary, _ = LeaveSummary.objects.get_or_create(
+        user=applicant,
+        defaults={"total_leaves": 0, "used_leaves": 0},
+    )
+    casual_balance = summary.casual_leaves or zero
+    earn_balance = summary.earn_leaves or zero
+
+    take_casual = min(casual_balance, needed)
+    needed -= take_casual
+
+    take_earn = min(earn_balance, needed)
+    needed -= take_earn
+
+    take_unpaid = needed  # whatever is left becomes unpaid
+
+    summary.casual_leaves = casual_balance - take_casual
+    summary.earn_leaves = earn_balance - take_earn
+    summary.unpaid_leaves = (summary.unpaid_leaves or zero) + take_unpaid
+    # Keep legacy `used_leaves` coherent for the paid portion only.
+    paid_taken = take_casual + take_earn
+    summary.used_leaves = (summary.used_leaves or 0) + int(paid_taken)
+    summary.save(update_fields=[
+        "casual_leaves", "earn_leaves", "unpaid_leaves", "used_leaves",
+    ])
+    return {"casual": take_casual, "earn": take_earn, "unpaid": take_unpaid}
+
+
+def _debit_amount_for(application):
+    """Return the Decimal amount to debit for a given (non-Menstrual, non-Emergency) leave."""
+    leave_type_name = getattr(getattr(application, "leave_type", None), "name", "") or ""
+    if leave_type_name == "Half_day":
+        return Decimal("0.5")
+    return Decimal(application.duration_of_days or 0)
+
+
 def _set_approvals_by_role(application, applicant, status_map, is_md_approval_by_default=False):
     """
     Set team_lead_approval, HR_approval, admin_approval, MD_approval on application
@@ -134,7 +202,8 @@ def _set_approvals_by_role(application, applicant, status_map, is_md_approval_by
     - Admin applicant: team_lead=None, HR=Pending, admin=None, MD=Pending.
     - HR applicant: team_lead=None, HR=None, admin=Pending, MD=Pending.
     - TeamLead applicant: team_lead=None, HR=Pending, admin=None, MD=Pending.
-    - Employee/Intern: team_lead=Pending, HR=None, admin=None, MD=Pending (team lead approves first).
+    - Employee/Intern: team_lead=Pending (if a team lead is assigned), HR=Pending, admin=None, MD=Pending
+      (Team Lead, HR, and MD see the request in parallel; MD's approval confirms it).
     """
     pending = status_map.get("Pending")
     approved = status_map.get("Approved")
@@ -167,13 +236,14 @@ def _set_approvals_by_role(application, applicant, status_map, is_md_approval_by
         application.admin_approval_id = None
         application.MD_approval_id = pending.id if pending else None
         return
-    # Employee or Intern: team_lead = Pending when they have a team lead; else skip to HR
+    # Employee or Intern: parallel approval. Team Lead (if assigned), HR, and MD
+    # all receive the request immediately. Only MD's approval confirms the leave
+    # and triggers balance debit (handled in _apply_update_by_role).
     if teamlead:
         application.team_lead_approval_id = pending.id if pending else None
-        application.HR_approval_id = None
     else:
         application.team_lead_approval_id = None
-        application.HR_approval_id = pending.id if pending else None
+    application.HR_approval_id = pending.id if pending else None
     application.admin_approval_id = None
     application.MD_approval_id = pending.id if pending else None
 
@@ -223,9 +293,16 @@ class LeaveApplicationViewSet(ModelViewSet):
         leave_type = validated.get("leave_type")
         leave_type_name = getattr(leave_type, "name", None) or ""
         duration = validated.get("duration_of_days") or 0
-        # Only validate remaining leaves for Full_day
-        if leave_type_name == "Full_day" and duration >= 1:
-            _validate_remaining_leaves(applicant, duration)
+        # Full_day / Half_day no longer reject on insufficient balance; the new
+        # waterfall (casual -> earn -> unpaid) absorbs any overflow at approval time.
+        # Menstrual leave uses a separate monthly bucket (0 or 1).
+        if leave_type_name == "Menstrual":
+            from rest_framework import serializers as _s
+            summary = LeaveSummary.objects.filter(user=applicant).first()
+            if not summary or (summary.menstrual_leaves or 0) < 1:
+                raise _s.ValidationError(
+                    {"non_field_errors": ["No menstrual leave available this month."]}
+                )
 
         status_map = _get_leave_status_map()
         is_md_applicant = _get_user_role_sync(applicant) == "MD"
@@ -237,9 +314,20 @@ class LeaveApplicationViewSet(ModelViewSet):
                 "team_lead", "team_lead_approval", "HR_approval", "MD_approval", "admin_approval",
                 "approved_by_MD_at",
             ])
-            # When applicant is MD, leave is auto-approved; deduct from leave_summary
-            if is_md_applicant and not application.is_emergency and (application.duration_of_days or 0) > 0:
-                _increment_used_leaves(applicant, application.duration_of_days)
+            # When applicant is MD, leave is auto-approved; deduct from the right bucket.
+            if is_md_applicant and not application.is_emergency:
+                if leave_type_name == "Menstrual":
+                    _consume_menstrual_leave(applicant)
+                else:
+                    debit = _debit_amount_for(application)
+                    if debit > 0:
+                        split = _consume_casual_earn_unpaid(applicant, debit)
+                        application.casual_used = split["casual"]
+                        application.earn_used = split["earn"]
+                        application.unpaid_used = split["unpaid"]
+                        application.save(update_fields=[
+                            "casual_used", "earn_used", "unpaid_used",
+                        ])
         application.refresh_from_db()
         return Response(
             LeaveApplicationResponseSerializer(application).data,
@@ -265,19 +353,36 @@ class LeaveApplicationViewSet(ModelViewSet):
         if duration < 1:
             raise s.ValidationError({"duration_of_days": ["duration_of_days must be at least 1."]})
 
-        # Enforce emergency leave quota: emergency_leaves is filled from total_leaves (10%) on create and decremented on use
+        leave_type_obj = serializer.validated_data.get("leave_type")
+        leave_type_name = getattr(leave_type_obj, "name", "") or ""
+        is_menstrual = leave_type_name == "Menstrual"
+
         summary, _ = LeaveSummary.objects.get_or_create(
             user=applicant,
             defaults={"total_leaves": 0, "used_leaves": 0},
         )
-        if duration > summary.emergency_leaves:
-            raise s.ValidationError(
-                {
-                    "non_field_errors": [
-                        f"Insufficient emergency leave balance. Remaining emergency: {summary.emergency_leaves}, requested: {duration}."
-                    ]
-                }
-            )
+        if is_menstrual:
+            # Menstrual emergency: female-only, draws from monthly menstrual bucket.
+            profile = Profile.objects.filter(Employee_id=applicant).first()
+            gender = (getattr(profile, "gender", "") or "").strip().lower()
+            if gender != "female":
+                raise s.ValidationError(
+                    {"leave_type": ["Menstrual leave is available to female employees only."]}
+                )
+            if (summary.menstrual_leaves or 0) < 1:
+                raise s.ValidationError(
+                    {"non_field_errors": ["No menstrual leave available this month."]}
+                )
+        else:
+            # Enforce emergency leave quota: emergency_leaves is filled from total_leaves (10%) on create and decremented on use
+            if duration > summary.emergency_leaves:
+                raise s.ValidationError(
+                    {
+                        "non_field_errors": [
+                            f"Insufficient emergency leave balance. Remaining emergency: {summary.emergency_leaves}, requested: {duration}."
+                        ]
+                    }
+                )
 
         with transaction.atomic():
             application = serializer.save()
@@ -299,10 +404,15 @@ class LeaveApplicationViewSet(ModelViewSet):
                 "approved_by_MD_at",
             ])
 
-            # Decrement emergency quota and add to used_leaves
-            summary.emergency_leaves = summary.emergency_leaves - duration
-            summary.used_leaves = summary.used_leaves + duration
-            summary.save(update_fields=["emergency_leaves", "used_leaves"])
+            if is_menstrual:
+                # Menstrual emergency draws from monthly menstrual bucket only.
+                summary.menstrual_leaves = 0
+                summary.save(update_fields=["menstrual_leaves"])
+            else:
+                # Decrement emergency quota and add to used_leaves
+                summary.emergency_leaves = summary.emergency_leaves - duration
+                summary.used_leaves = summary.used_leaves + duration
+                summary.save(update_fields=["emergency_leaves", "used_leaves"])
         application.refresh_from_db()
         return Response(
             LeaveApplicationResponseSerializer(application).data,
@@ -336,6 +446,11 @@ class LeaveApplicationViewSet(ModelViewSet):
         _, teamlead = _get_applicant_role_and_teamlead(instance.applicant)
         is_applicant = user == instance.applicant
         is_teamlead = teamlead == user
+        # Superusers may act as MD even if they don't have a Profile row whose
+        # Role.role_name == "MD" (mirrors the IsMD permission). Without this,
+        # an MD payload from a superuser was silently dropped, leaving the
+        # leave Pending and skipping the casual->earn->unpaid waterfall.
+        is_md = (role == "MD") or bool(getattr(user, "is_superuser", False))
 
         # Capture MD approval state before we change it (for leave_summary update)
         old_md_approved = (
@@ -350,7 +465,7 @@ class LeaveApplicationViewSet(ModelViewSet):
             approval_updates["HR_approval"] = validated_data.pop("HR_approval")
         if "admin_approval" in validated_data and role == "Admin":
             approval_updates["admin_approval"] = validated_data.pop("admin_approval")
-        if "MD_approval" in validated_data and role == "MD":
+        if "MD_approval" in validated_data and is_md:
             md_status = validated_data.pop("MD_approval")
             approval_updates["MD_approval"] = md_status
             if md_status and md_status.name == "Approved":
@@ -359,18 +474,28 @@ class LeaveApplicationViewSet(ModelViewSet):
         for key, value in approval_updates.items():
             setattr(instance, key, value)
 
-        # When MD just approved (was not already Approved), deduct from leave_summary (non-emergency only; emergency already updated at create)
+        draft_fields = ("start_date", "duration_of_days", "leave_subject", "reason", "leave_type", "half_day_slots", "alternative")
+        updated_fields = list(approval_updates.keys())
+
+        # When MD just approved (was not already Approved), deduct from the right bucket
+        # (non-emergency only; emergency already updated at create).
         if (
             approval_updates.get("MD_approval")
             and getattr(approval_updates["MD_approval"], "name", None) == "Approved"
             and not old_md_approved
             and not instance.is_emergency
-            and (instance.duration_of_days or 0) > 0
         ):
-            _increment_used_leaves(instance.applicant, instance.duration_of_days)
-
-        draft_fields = ("start_date", "duration_of_days", "leave_subject", "reason", "leave_type", "half_day_slots", "alternative")
-        updated_fields = list(approval_updates.keys())
+            leave_type_name = getattr(getattr(instance, "leave_type", None), "name", "") or ""
+            if leave_type_name == "Menstrual":
+                _consume_menstrual_leave(instance.applicant)
+            else:
+                debit = _debit_amount_for(instance)
+                if debit > 0:
+                    split = _consume_casual_earn_unpaid(instance.applicant, debit)
+                    instance.casual_used = split["casual"]
+                    instance.earn_used = split["earn"]
+                    instance.unpaid_used = split["unpaid"]
+                    updated_fields.extend(["casual_used", "earn_used", "unpaid_used"])
 
         # Applicant can update content fields only if no approval is yet Approved (draft)
         if is_applicant:
@@ -408,23 +533,48 @@ class LeaveApplicationViewSet(ModelViewSet):
         instance.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
 
-    # ---------- GET: my leave summary (total / used / remaining) ----------
+    # ---------- GET: my leave summary (total / used / remaining + per-category balances) ----------
     @action(detail=False, methods=["get"], url_path="summary")
     def leave_summary(self, request):
         """
-        Logged-in user's leave balance: total_leaves, used_leaves, remaining_leaves from LeaveSummary.
+        Logged-in user's leave balance.
         GET /accounts/leave-applications/summary/
+
+        Backwards-compatible: every key returned by the previous version is preserved
+        (`total_leaves`, `used_leaves`, `remaining_leaves`, `remaining_emergency_leave`).
+        Extra keys added without breaking existing clients:
+        `username`, `name`, `gender`, `is_female`, `emergency_leaves`,
+        `casual_leaves`, `earn_leaves`, `menstrual_leaves`.
+        `menstrual_leaves` is always `0` for non-female employees.
         """
         summary, _ = LeaveSummary.objects.get_or_create(
             user=request.user,
             defaults={"total_leaves": 0, "used_leaves": 0},
         )
+
+        profile = Profile.objects.filter(Employee_id=request.user).first()
+        display_name = (getattr(profile, "Name", None) or request.user.username) if profile else request.user.username
+        gender_raw = (getattr(profile, "gender", None) or "") if profile else ""
+        is_female = gender_raw.strip().lower() == "female"
+
         return Response(
             {
+                "username": request.user.username,
+                "name": display_name,
+                "gender": gender_raw or None,
+                "is_female": is_female,
+
                 "total_leaves": summary.total_leaves,
                 "used_leaves": summary.used_leaves,
                 "remaining_leaves": summary.remaining_leaves,
-                "remaining_emergency_leave":summary.emergency_leaves
+
+                "emergency_leaves": summary.emergency_leaves,
+                "remaining_emergency_leave": summary.emergency_leaves,
+
+                "casual_leaves": summary.casual_leaves,
+                "earn_leaves": summary.earn_leaves,
+                "menstrual_leaves": summary.menstrual_leaves if is_female else 0,
+                "unpaid_leaves": summary.unpaid_leaves,
             }
         )
 
@@ -443,11 +593,12 @@ class LeaveApplicationViewSet(ModelViewSet):
     @action(detail=False, methods=["get"], url_path="approval")
     def approval(self, request):
         """
-        Leave applications for the current user's approval tab. Hierarchy-based:
-        - Team lead: ALL applications where team_lead = user (irrespective of status).
-        - HR: ALL applications approved by team lead (team_lead_approval=Approved), regardless of HR_approval.
-        - Admin: ALL applications approved by team lead (team_lead_approval=Approved), regardless of admin_approval.
-        - MD: ALL applications approved by HR or Admin (HR_approval=Approved or admin_approval=Approved), regardless of MD_approval.
+        Leave applications for the current user's approval tab. Parallel visibility:
+        - Team lead: ALL applications where team_lead = user (any status).
+        - HR: ALL applications where HR is an approver (HR_approval is set), any status.
+        - Admin: ALL applications where Admin is an approver (admin_approval is set), any status.
+        - MD: ALL applications where MD is an approver (MD_approval is set), any status.
+          MD's approval is the final confirmation regardless of other approvers' state.
         Single endpoint: GET /accounts/leave-applications/approval/
         """
         from django.db.models import Q
@@ -459,15 +610,17 @@ class LeaveApplicationViewSet(ModelViewSet):
         # Team lead: all applications assigned to this user as team_lead (any status)
         if role in ("TeamLead", "Teamlead"):
             q |= Q(team_lead=request.user)
-        # HR: all applications approved by team lead (history + pending/current)
+        # HR: parallel visibility — every application where HR is an approver,
+        # regardless of team-lead state (Pending / Approved / Rejected all included).
         if role == "HR":
-            q |= Q(team_lead_approval__name="Approved")
-        # Admin: all applications approved by team lead (history + pending/current)
+            q |= Q(HR_approval__isnull=False)
+        # Admin: parallel visibility — every application where Admin is an approver.
         if role == "Admin":
-            q |= Q(team_lead_approval__name="Approved")
-        # MD: all applications approved by HR or Admin (history + pending/current)
+            q |= Q(admin_approval__isnull=False)
+        # MD: parallel visibility — every application where MD is an approver.
+        # MD's approval is the final confirmation regardless of others' state.
         if role == "MD":
-            q |= Q(HR_approval__name="Approved") | Q(admin_approval__name="Approved")
+            q |= Q(MD_approval__isnull=False)
 
         qs = base.filter(q).distinct()
         serializer = LeaveApplicationResponseSerializer(qs, many=True)

@@ -123,6 +123,9 @@ class LeaveApplicationResponseSerializer(serializers.ModelSerializer):
             "is_emergency",
             "application_date",
             "approved_by_MD_at",
+            "casual_used",
+            "earn_used",
+            "unpaid_used",
         ]
 
     def get_applicant_name(self, obj):
@@ -180,7 +183,7 @@ class LeaveApplicationCreateSerializer(serializers.ModelSerializer):
             return LeaveTypes.objects.get(name__iexact=name)
         except LeaveTypes.DoesNotExist:
             raise serializers.ValidationError(
-                f"leave_type must be one of: Full_day, Half_day (got '{value}')."
+                f"leave_type must be one of: Full_day, Half_day, Menstrual (got '{value}')."
             )
 
     def validate(self, attrs):
@@ -210,6 +213,18 @@ class LeaveApplicationCreateSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError(
                     {"half_day_slots": "half_day_slots must be First_Half or Second_Half for Half_day."}
                 )
+        elif name == "Menstrual":
+            # Female-only single-day leave from a separate monthly bucket.
+            request = self.context.get("request") if hasattr(self, "context") else None
+            applicant = getattr(request, "user", None) if request else None
+            profile = Profile.objects.filter(Employee_id=applicant).first() if applicant else None
+            gender = (getattr(profile, "gender", "") or "").strip().lower()
+            if gender != "female":
+                raise serializers.ValidationError(
+                    {"leave_type": "Menstrual leave is available to female employees only."}
+                )
+            attrs["duration_of_days"] = 1
+            attrs["half_day_slots"] = None
         return attrs
 
 

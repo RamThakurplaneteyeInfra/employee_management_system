@@ -1,9 +1,39 @@
 import os
-from django.db.models.signals import post_delete, post_save
+from django.db.models.signals import post_delete, post_save, pre_save
 from django.dispatch import receiver
+from django.db import transaction
 
-from .models import Profile, User, management_Profile
+from .models import (
+    Profile,
+    User,
+    management_Profile,
+    LeaveSummary,
+    LeaveApplicationData,
+    LeaveStatus,
+)
 from .filters import _get_role_object_sync
+
+
+def _seed_menstrual_leave_for_female_sync(sender, instance: Profile, **kwargs):
+    """Ensure female employees start with menstrual_leaves=1 (idempotent)."""
+    gender = (getattr(instance, "gender", "") or "").strip().lower()
+    if gender != "female":
+        return
+    user = instance.Employee_id
+    if not user:
+        return
+    summary, _ = LeaveSummary.objects.get_or_create(
+        user=user,
+        defaults={"total_leaves": 0, "used_leaves": 0},
+    )
+    if summary.menstrual_leaves != 1:
+        summary.menstrual_leaves = 1
+        summary.save(update_fields=["menstrual_leaves"])
+
+
+@receiver(post_save, sender=Profile)
+def seed_menstrual_leave_for_female(sender, instance: Profile, **kwargs):
+    _seed_menstrual_leave_for_female_sync(sender, instance, **kwargs)
 
 
 def _delete_profile_photo_sync(sender, instance: Profile, **kwargs):
@@ -62,4 +92,87 @@ def _create_profile_from_user_sync(sender, instance: User, created, **kwargs):
 @receiver(post_save, sender=User)
 def create_profile_from_user(sender, instance: User, created, **kwargs):
     _create_profile_from_user_sync(sender, instance, created, **kwargs)
-        
+
+
+# ---------------------------------------------------------------------------
+# Leave-approval safety net: debit casual -> earn -> unpaid whenever a
+# LeaveApplicationData row's MD_approval transitions to "Approved", regardless
+# of the path that triggered the save (DRF viewset, Django admin, manage.py
+# shell, fixtures, raw ORM updates, etc.). This complements (and is harmless
+# alongside) the deduction code already running in the viewset.
+# ---------------------------------------------------------------------------
+
+@receiver(pre_save, sender=LeaveApplicationData)
+def _capture_old_md_status(sender, instance: LeaveApplicationData, **kwargs):
+    """Stash the row's previous MD_approval_id so the post_save handler can
+    detect a transition from non-Approved -> Approved.
+    """
+    if instance.pk:
+        old = (
+            sender.objects
+            .filter(pk=instance.pk)
+            .only("MD_approval_id")
+            .first()
+        )
+        instance._old_md_approval_id = old.MD_approval_id if old else None
+    else:
+        instance._old_md_approval_id = None
+
+
+@receiver(post_save, sender=LeaveApplicationData)
+def _debit_on_md_approval(sender, instance: LeaveApplicationData, created, **kwargs):
+    """Run the casual -> earn -> unpaid waterfall when MD_approval flips to
+    Approved. Idempotent: a row that already carries a debit (casual_used /
+    earn_used / unpaid_used > 0) or that was already Approved before this save
+    is skipped. Emergency rows are skipped (they debit at create time).
+    """
+    new_md = instance.MD_approval
+    new_name = getattr(new_md, "name", None) if new_md else None
+    if new_name != "Approved":
+        return
+
+    already_debited = (
+        (instance.casual_used or 0) > 0
+        or (instance.earn_used or 0) > 0
+        or (instance.unpaid_used or 0) > 0
+    )
+    if already_debited:
+        return
+
+    old_id = getattr(instance, "_old_md_approval_id", None)
+    if old_id:
+        old_name = (
+            LeaveStatus.objects
+            .filter(pk=old_id)
+            .values_list("name", flat=True)
+            .first()
+        )
+        if old_name == "Approved":
+            return
+
+    if instance.is_emergency:
+        return
+
+    leave_type_name = getattr(getattr(instance, "leave_type", None), "name", "") or ""
+
+    from .leave_views import (
+        _consume_casual_earn_unpaid,
+        _consume_menstrual_leave,
+        _debit_amount_for,
+    )
+
+    with transaction.atomic():
+        if leave_type_name == "Menstrual":
+            _consume_menstrual_leave(instance.applicant)
+            return
+        debit = _debit_amount_for(instance)
+        if debit <= 0:
+            return
+        split = _consume_casual_earn_unpaid(instance.applicant, debit)
+        # Use .update() (not instance.save()) so the post_save signal does NOT
+        # re-fire and recurse on this same row.
+        LeaveApplicationData.objects.filter(pk=instance.pk).update(
+            casual_used=split["casual"],
+            earn_used=split["earn"],
+            unpaid_used=split["unpaid"],
+        )
