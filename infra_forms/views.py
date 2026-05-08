@@ -1,36 +1,64 @@
+from django.db.models import Count, Exists, OuterRef, Q
 from django.db import transaction
 from rest_framework import parsers, status, viewsets
 from rest_framework.decorators import action
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 
 from .excel_bulk_import import parse_excel_workbook
 from .permissions import CanAccessInfraProjectForms
 from .models import (
-    BoqStructureEntry,
     InfraProjectForm,
-    LidarStructureEntry,
+    InfraServiceType,
     ProjectCatalog,
-    SarStructureEntry,
+    StructureEntry,
+    StructureEntryServiceState,
 )
 from .serializers import (
     BoqStructureEntrySerializer,
     InfraProjectFormSerializer,
+    InfraServiceTypeSerializer,
     LidarStructureEntrySerializer,
     ProjectCatalogSerializer,
     SarStructureEntrySerializer,
+    UnifiedStructureEntrySerializer,
 )
+from .service_state_sync import delete_service_state_for_code
+
+
+_ALL_MODULES = ("boq", "lidar", "sar")
 
 
 class BaseStructureEntryViewSet(viewsets.ModelViewSet):
-    """One ViewSet per module table; `queryset`, `serializer_class`, and `module_key` are set on subclass."""
+    """
+    All three module endpoints (BOQ/LiDAR/SAR) operate on the unified
+    `StructureEntry` table, but each instance filters/writes only the
+    columns owned by its module (controlled via `module_key`).
+
+    Cross-module data is never destroyed: deleting an entry from one module
+    only clears that module's status/remark and turns off its `has_*` flag;
+    the underlying row is removed only when no module owns it anymore.
+    """
 
     serializer_class = None
-    queryset = None
+    queryset = StructureEntry.objects.all()
     module_key = None
 
+    def _has_field(self) -> str:
+        return f"has_{self.module_key}"
+
+    def _status_field(self) -> str:
+        return f"{self.module_key}_status"
+
+    def _remark_field(self) -> str:
+        return f"{self.module_key}_remark"
+
     def get_queryset(self):
-        queryset = self.queryset.select_related("route_group")
+        queryset = StructureEntry.objects.select_related("route_group").prefetch_related(
+            "service_states__service_type"
+        ).filter(
+            **{self._has_field(): True}
+        )
         project_name = (self.request.query_params.get("project_name") or "").strip()
         if project_name:
             queryset = queryset.filter(project_name__iexact=project_name)
@@ -38,6 +66,31 @@ class BaseStructureEntryViewSet(viewsets.ModelViewSet):
         if route_group:
             queryset = queryset.filter(route_group_id=route_group)
         return queryset
+
+    def perform_destroy(self, instance):
+        """
+        Smart delete: clear only this module's data on the row.
+        If no module owns the row anymore, delete the row entirely.
+        """
+        with transaction.atomic():
+            setattr(instance, self._has_field(), False)
+            setattr(instance, self._status_field(), "")
+            setattr(instance, self._remark_field(), "")
+            delete_service_state_for_code(instance, self.module_key)
+            instance.save(
+                update_fields=[
+                    self._has_field(),
+                    self._status_field(),
+                    self._remark_field(),
+                    "updated_at",
+                ]
+            )
+            still_owned_legacy = any(getattr(instance, f"has_{m}") for m in _ALL_MODULES)
+            still_has_services = StructureEntryServiceState.objects.filter(
+                structure_entry_id=instance.pk
+            ).exists()
+            if not still_owned_legacy and not still_has_services:
+                instance.delete()
 
     @action(detail=False, methods=["get"], url_path="route-corridors")
     def route_corridors(self, request):
@@ -57,7 +110,7 @@ class BaseStructureEntryViewSet(viewsets.ModelViewSet):
         parser_classes=[parsers.MultiPartParser, parsers.FormParser],
     )
     def bulk_upload_excel(self, request):
-        """Upload .xlsx: row 1 = headers, row 2+ = data → creates rows in this module's table (atomic)."""
+        """Upload .xlsx: row 1 = headers, row 2+ = data → creates rows owned by this module (atomic)."""
         upload = request.FILES.get("file")
         selected_project_name = (request.data.get("project_name") or "").strip()
         if not upload:
@@ -107,32 +160,133 @@ class BaseStructureEntryViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=["delete"], url_path="delete-all")
     def delete_all(self, request):
-        """Delete every row in this module's table (ignores ?route_group= query filters)."""
-        model = self.queryset.model
-        qs = model.objects.all()
-        n = qs.count()
-        if n == 0:
-            return Response({"deleted": 0, "detail": "No entries to delete."}, status=status.HTTP_200_OK)
-        qs.delete()
-        return Response({"deleted": n, "detail": "All entries deleted."}, status=status.HTTP_200_OK)
+        """
+        Clear this module's ownership on every row it currently owns.
+        Other modules' data on shared rows is preserved.
+        Rows that become unowned by any module are deleted.
+        """
+        has_field = self._has_field()
+        status_field = self._status_field()
+        remark_field = self._remark_field()
+
+        with transaction.atomic():
+            owned_qs = StructureEntry.objects.filter(**{has_field: True})
+            entry_ids = list(owned_qs.values_list("pk", flat=True))
+            n = len(entry_ids)
+            if n == 0:
+                return Response(
+                    {"deleted": 0, "detail": "No entries to delete."},
+                    status=status.HTTP_200_OK,
+                )
+            owned_qs.update(
+                **{has_field: False, status_field: "", remark_field: ""}
+            )
+            StructureEntryServiceState.objects.filter(
+                structure_entry_id__in=entry_ids,
+                service_type__code=self.module_key,
+            ).delete()
+            unowned_qs = (
+                StructureEntry.objects.filter(
+                    has_boq=False, has_lidar=False, has_sar=False
+                )
+                .annotate(_sc=Count("service_states"))
+                .filter(_sc=0)
+            )
+            unowned_qs.delete()
+
+        return Response(
+            {"deleted": n, "detail": "All entries deleted."},
+            status=status.HTTP_200_OK,
+        )
 
 
 class BoqStructureEntryViewSet(BaseStructureEntryViewSet):
     serializer_class = BoqStructureEntrySerializer
-    queryset = BoqStructureEntry.objects.all()
     module_key = "boq"
 
 
 class LidarStructureEntryViewSet(BaseStructureEntryViewSet):
     serializer_class = LidarStructureEntrySerializer
-    queryset = LidarStructureEntry.objects.all()
     module_key = "lidar"
 
 
 class SarStructureEntryViewSet(BaseStructureEntryViewSet):
     serializer_class = SarStructureEntrySerializer
-    queryset = SarStructureEntry.objects.all()
     module_key = "sar"
+
+
+class UnifiedStructureEntryViewSet(viewsets.ModelViewSet):
+    """
+    Single endpoint: shared row fields + inspection_status[] and remark[]
+    (length 3, order [BOQ, LiDAR, SAR]). Legacy module URLs are unchanged.
+
+    Responses also include ``services``: ``[{code, label, inspection_status, remark}, …]``.
+    PATCH with ``services`` merges rows by ``code`` (see serializer docstring).
+    """
+
+    serializer_class = UnifiedStructureEntrySerializer
+    queryset = (
+        StructureEntry.objects.select_related("route_group")
+        .prefetch_related("service_states__service_type")
+        .filter(
+            Q(has_boq=True)
+            | Q(has_lidar=True)
+            | Q(has_sar=True)
+            | Exists(
+                StructureEntryServiceState.objects.filter(
+                    structure_entry_id=OuterRef("pk"),
+                )
+            ),
+        )
+    )
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        project_name = (self.request.query_params.get("project_name") or "").strip()
+        if project_name:
+            qs = qs.filter(project_name__iexact=project_name)
+        route_group = self.request.query_params.get("route_group")
+        if route_group:
+            qs = qs.filter(route_group_id=route_group)
+        return qs
+
+    def create(self, request, *args, **kwargs):
+        with transaction.atomic():
+            return super().create(request, *args, **kwargs)
+
+    def update(self, request, *args, **kwargs):
+        with transaction.atomic():
+            return super().update(request, *args, **kwargs)
+
+    def partial_update(self, request, *args, **kwargs):
+        with transaction.atomic():
+            return super().partial_update(request, *args, **kwargs)
+
+
+class InfraServiceTypeViewSet(viewsets.ModelViewSet):
+    """
+    Service types for structure-entry dropdowns.
+
+    - GET list: active types only, unless ``?include_inactive=true``.
+    - GET retrieve: any type by id (including inactive).
+    - POST / PATCH / PUT / DELETE: authenticated users only.
+    """
+
+    serializer_class = InfraServiceTypeSerializer
+    http_method_names = ["get", "post", "put", "patch", "delete", "head", "options"]
+
+    def get_queryset(self):
+        qs = InfraServiceType.objects.all().order_by("sort_order", "code")
+        if self.action == "list":
+            inc = self.request.query_params.get("include_inactive", "").lower()
+            if inc not in ("1", "true", "yes"):
+                qs = qs.filter(active=True)
+        return qs
+
+    def get_permissions(self):
+        if self.action in ("list", "retrieve"):
+            return [AllowAny()]
+        return [IsAuthenticated()]
 
 
 class ProjectCatalogViewSet(viewsets.ModelViewSet):

@@ -4,6 +4,8 @@ from rest_framework.routers import DefaultRouter
 from . import views
 
 router = DefaultRouter()
+router.register(r"structure-entries", views.UnifiedStructureEntryViewSet, basename="unified-structure-entry")
+router.register(r"service-types", views.InfraServiceTypeViewSet, basename="infra-service-type")
 router.register(r"boq-entries", views.BoqStructureEntryViewSet, basename="boq-structure-entry")
 router.register(r"lidar-entries", views.LidarStructureEntryViewSet, basename="lidar-structure-entry")
 router.register(r"sar-entries", views.SarStructureEntryViewSet, basename="sar-structure-entry")
