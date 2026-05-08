@@ -20,7 +20,7 @@ FIELD_SPECS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("route_corridor", ("route / corridor", "route/corridor", "route corridor", "route_corridor", "route")),
     ("sr_no", ("sr. no", "sr no", "sr_no", "serial no", "serial")),
     ("chainage", ("chainage",)),
-    ("structure_type", ("structure type", "structure_type", "type", "bridge / structure type")),
+    ("structure_type", ("structure type", "structure_type", "type", "bridge / structure type", "bridge type")),
     ("length_of_structure", ("length of structure", "length_of_structure", "length")),
     ("span_arrangement", ("span arrangement", "span_arrangement", "span")),
     ("equipment_notes", ("equipment notes", "equipment_notes", "accessible to / equipment notes", "notes")),

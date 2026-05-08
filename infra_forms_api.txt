@@ -158,13 +158,17 @@ Creates many rows. Import is all-or-nothing:
 POST BASE/boq-entries/bulk-upload-excel/
 POST BASE/lidar-entries/bulk-upload-excel/
 POST BASE/sar-entries/bulk-upload-excel/
+POST BASE/structure-entries/bulk-upload-excel/
 
 Request: multipart/form-data
 - file: required (.xlsx or .xlsm)
 - project_name: optional (if provided, applied to all imported rows)
+- module: optional on unified endpoint only — boq | lidar | sar (default boq). Same serializers as the matching module URL above.
 
 201 response (example):
-{ "created": 42, "detail": "All rows imported successfully." }
+{ "created": 42, "detail": "All rows imported successfully.", "module": "boq" }
+
+Note: ``module`` appears only on the unified bulk-upload response; legacy module URLs already imply the module.
 
 400 response (example):
 {

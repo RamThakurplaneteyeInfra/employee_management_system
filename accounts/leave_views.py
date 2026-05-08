@@ -6,6 +6,7 @@ from decimal import Decimal
 
 from django.utils import timezone
 from django.db import transaction
+from django.db.models import Q
 from rest_framework import status
 from rest_framework.viewsets import ModelViewSet
 from rest_framework.decorators import action
@@ -27,6 +28,7 @@ from .serializers import (
     LeaveApplicationEmergencyCreateSerializer,
     LeaveApplicationUpdateSerializer,
     MenstrualLeaveCreateSerializer,
+    AlternativeRespondSerializer,
 )
 from .filters import _get_user_role_sync
 
@@ -251,6 +253,29 @@ def _set_approvals_by_role(application, applicant, status_map, is_md_approval_by
     application.MD_approval_id = pending.id if pending else None
 
 
+def _set_initial_alternative_approval(application, status_map):
+    """When an alternative cover person is set, they start as Pending; clears when unset."""
+    pending = status_map.get("Pending")
+    if application.alternative_id:
+        application.alternative_approval_id = pending.id if pending else None
+        application.alternative_responded_at = None
+    else:
+        application.alternative_approval_id = None
+        application.alternative_responded_at = None
+
+
+def _resync_alternative_approval_if_alternative_changed(instance, status_map, old_alternative_id):
+    """Reset alternative response when the applicant changes or clears the cover person."""
+    pending = status_map.get("Pending")
+    if not instance.alternative_id:
+        instance.alternative_approval_id = None
+        instance.alternative_responded_at = None
+        return
+    if instance.alternative_id != old_alternative_id:
+        instance.alternative_approval_id = pending.id if pending else None
+        instance.alternative_responded_at = None
+
+
 # ---------- ViewSet ----------
 class LeaveApplicationViewSet(ModelViewSet):
     """
@@ -271,6 +296,7 @@ class LeaveApplicationViewSet(ModelViewSet):
             "HR_approval",
             "MD_approval",
             "admin_approval",
+            "alternative_approval",
         )
         .order_by("-application_date", "-id")
     )
@@ -315,9 +341,10 @@ class LeaveApplicationViewSet(ModelViewSet):
             application = serializer.save()
             _set_team_lead_from_profile(application, applicant)
             _set_approvals_by_role(application, applicant, status_map, is_md_approval_by_default=is_md_applicant)
+            _set_initial_alternative_approval(application, status_map)
             application.save(update_fields=[
                 "team_lead", "team_lead_approval", "HR_approval", "MD_approval", "admin_approval",
-                "approved_by_MD_at",
+                "approved_by_MD_at", "alternative_approval", "alternative_responded_at",
             ])
             # When applicant is MD, leave is auto-approved; deduct from the right bucket.
             if is_md_applicant and not application.is_emergency:
@@ -399,6 +426,7 @@ class LeaveApplicationViewSet(ModelViewSet):
             application.MD_approval = approved
             application.admin_approval = None
             application.approved_by_MD_at = timezone.now()
+            _set_initial_alternative_approval(application, status_map)
             application.save(update_fields=[
                 "is_emergency",
                 "team_lead",
@@ -407,6 +435,8 @@ class LeaveApplicationViewSet(ModelViewSet):
                 "MD_approval",
                 "admin_approval",
                 "approved_by_MD_at",
+                "alternative_approval",
+                "alternative_responded_at",
             ])
 
             if is_menstrual:
@@ -611,10 +641,19 @@ class LeaveApplicationViewSet(ModelViewSet):
             if has_approval and any(k in validated_data for k in draft_fields):
                 raise s.ValidationError({"non_field_errors": ["Cannot edit application after an approval has been granted."]})
             if not has_approval:
+                old_alternative_id = instance.alternative_id
                 for field in draft_fields:
                     if field in validated_data:
                         setattr(instance, field, validated_data[field])
                         updated_fields.append(field)
+                if "alternative" in validated_data:
+                    status_map = _get_leave_status_map()
+                    _resync_alternative_approval_if_alternative_changed(
+                        instance, status_map, old_alternative_id
+                    )
+                    for extra in ("alternative_approval", "alternative_responded_at"):
+                        if extra not in updated_fields:
+                            updated_fields.append(extra)
                 if "duration_of_days" in validated_data:
                     _validate_remaining_leaves(instance.applicant, validated_data["duration_of_days"])
 
@@ -779,12 +818,21 @@ class LeaveApplicationViewSet(ModelViewSet):
                 instance.applicant, serializer.validated_data["duration_of_days"]
             )
 
+        old_alternative_id = instance.alternative_id
         with transaction.atomic():
             updated_fields = []
             for field in DRAFT_FIELDS:
                 if field in serializer.validated_data:
                     setattr(instance, field, serializer.validated_data[field])
                     updated_fields.append(field)
+            if "alternative" in serializer.validated_data:
+                status_map = _get_leave_status_map()
+                _resync_alternative_approval_if_alternative_changed(
+                    instance, status_map, old_alternative_id
+                )
+                for extra in ("alternative_approval", "alternative_responded_at"):
+                    if extra not in updated_fields:
+                        updated_fields.append(extra)
             if updated_fields:
                 instance.save(update_fields=updated_fields)
 
@@ -803,8 +851,6 @@ class LeaveApplicationViewSet(ModelViewSet):
           MD's approval is the final confirmation regardless of other approvers' state.
         Single endpoint: GET /accounts/leave-applications/approval/
         """
-        from django.db.models import Q
-
         role = _get_user_role_sync(request.user)
         base = self.get_queryset()
         q = Q()
@@ -827,3 +873,71 @@ class LeaveApplicationViewSet(ModelViewSet):
         qs = base.filter(q).distinct()
         serializer = LeaveApplicationResponseSerializer(qs, many=True)
         return Response(serializer.data)
+
+    @action(detail=False, methods=["get"], url_path="alternative-requests")
+    def alternative_requests(self, request):
+        """
+        Leave applications where the current user is the designated alternative
+        and has not yet accepted/rejected (Pending or legacy null with alternative set).
+        GET /accounts/leave-applications/alternative-requests/
+        """
+        qs = (
+            self.get_queryset()
+            .filter(alternative=request.user)
+            .filter(Q(alternative_approval__isnull=True) | Q(alternative_approval__name="Pending"))
+            .order_by("-application_date", "-id")
+        )
+        serializer = LeaveApplicationResponseSerializer(qs, many=True)
+        return Response(serializer.data)
+
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="alternative-respond",
+        permission_classes=[IsAuthenticated],
+    )
+    def alternative_respond(self, request, pk=None):
+        """
+        Cover person accepts or rejects the handover request.
+        POST /accounts/leave-applications/{id}/alternative-respond/
+        Body: {"decision": "accept" | "reject"}
+        Does not alter team lead / HR / MD approval state.
+        """
+        from rest_framework import serializers as s
+
+        instance = self.get_object()
+        if not instance.alternative_id:
+            return Response(
+                {"detail": "This application has no designated alternative."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if instance.alternative_id != request.user.id:
+            return Response(
+                {"detail": "Only the designated alternative can respond."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        cur = getattr(getattr(instance, "alternative_approval", None), "name", None)
+        if cur in ("Approved", "Rejected"):
+            return Response(
+                {"detail": "You have already responded to this request."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        ser = AlternativeRespondSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        decision = ser.validated_data["decision"]
+        status_map = _get_leave_status_map()
+        approved = status_map.get("Approved")
+        rejected = status_map.get("Rejected")
+        if decision == "accept":
+            if not approved:
+                raise s.ValidationError({"detail": "Approved status is not configured."})
+            instance.alternative_approval = approved
+        else:
+            if not rejected:
+                raise s.ValidationError({"detail": "Rejected status is not configured."})
+            instance.alternative_approval = rejected
+        instance.alternative_responded_at = timezone.now()
+        instance.save(update_fields=["alternative_approval", "alternative_responded_at"])
+        instance.refresh_from_db()
+        return Response(LeaveApplicationResponseSerializer(instance).data)

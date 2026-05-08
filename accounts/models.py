@@ -326,6 +326,16 @@ class LeaveApplicationData(models.Model):
         blank=True,
         db_column="admin_approval_id",
     )
+    # Cover person accepts/rejects covering for the applicant (parallel to TL/HR/MD rails).
+    alternative_approval = models.ForeignKey(
+        LeaveStatus,
+        on_delete=models.PROTECT,
+        related_name="+",
+        null=True,
+        blank=True,
+        db_column="alternative_approval_id",
+    )
+    alternative_responded_at = models.DateTimeField(null=True, blank=True)
     is_emergency = models.BooleanField(default=False)
     application_date = models.DateField(auto_now_add=True)
     approved_by_MD_at = models.DateTimeField(null=True, blank=True)

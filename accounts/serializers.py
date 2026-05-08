@@ -79,6 +79,10 @@ class LeaveApplicationListSerializer(serializers.ModelSerializer):
     admin_approval_status = serializers.CharField(
         source="admin_approval.name", read_only=True, allow_null=True
     )
+    alternative_approval_status = serializers.CharField(
+        source="alternative_approval.name", read_only=True, allow_null=True
+    )
+    alternative_responded_at = serializers.SerializerMethodField()
     approved_by_MD_at = serializers.SerializerMethodField()
 
     class Meta:
@@ -99,6 +103,8 @@ class LeaveApplicationListSerializer(serializers.ModelSerializer):
             "hr_approval_status",
             "md_approval_status",
             "admin_approval_status",
+            "alternative_approval_status",
+            "alternative_responded_at",
             "is_emergency",
             "application_date",
             "approved_by_MD_at",
@@ -119,6 +125,10 @@ class LeaveApplicationListSerializer(serializers.ModelSerializer):
 
     def get_approved_by_MD_at(self, obj):
         return gmt_to_ist_str(obj.approved_by_MD_at, "%d/%m/%Y %H:%M:%S") if obj.approved_by_MD_at else None
+
+    def get_alternative_responded_at(self, obj):
+        t = getattr(obj, "alternative_responded_at", None)
+        return gmt_to_ist_str(t, "%d/%m/%Y %H:%M:%S") if t else None
 
 
 class LeaveApplicationResponseSerializer(serializers.ModelSerializer):
@@ -144,6 +154,10 @@ class LeaveApplicationResponseSerializer(serializers.ModelSerializer):
     admin_approval_status = serializers.CharField(
         source="admin_approval.name", read_only=True, allow_null=True
     )
+    alternative_approval_status = serializers.CharField(
+        source="alternative_approval.name", read_only=True, allow_null=True
+    )
+    alternative_responded_at = serializers.SerializerMethodField()
     approved_by_MD_at = serializers.SerializerMethodField()
 
     class Meta:
@@ -164,6 +178,8 @@ class LeaveApplicationResponseSerializer(serializers.ModelSerializer):
             "hr_approval_status",
             "md_approval_status",
             "admin_approval_status",
+            "alternative_approval_status",
+            "alternative_responded_at",
             "is_emergency",
             "application_date",
             "approved_by_MD_at",
@@ -186,6 +202,10 @@ class LeaveApplicationResponseSerializer(serializers.ModelSerializer):
 
     def get_approved_by_MD_at(self, obj):
         return gmt_to_ist_str(obj.approved_by_MD_at, "%d/%m/%Y %H:%M:%S") if obj.approved_by_MD_at else None
+
+    def get_alternative_responded_at(self, obj):
+        t = getattr(obj, "alternative_responded_at", None)
+        return gmt_to_ist_str(t, "%d/%m/%Y %H:%M:%S") if t else None
 
 
 class LeaveApplicationCreateSerializer(serializers.ModelSerializer):
@@ -241,43 +261,48 @@ class LeaveApplicationCreateSerializer(serializers.ModelSerializer):
 
     def validate(self, attrs):
         leave_type = attrs.get("leave_type")
-        if not leave_type:
-            return attrs
-        name = getattr(leave_type, "name", None) or str(leave_type)
-        half_day_slots = attrs.get("half_day_slots")
-        if name == "Full_day":
-            # No validation on half_day_slots for Full_day
-            dur = attrs.get("duration_of_days")
-            if dur is not None and dur < 1:
-                raise serializers.ValidationError({"duration_of_days": "duration_of_days must be at least 1 for Full_day."})
-            if dur is None:
+        if leave_type:
+            name = getattr(leave_type, "name", None) or str(leave_type)
+            half_day_slots = attrs.get("half_day_slots")
+            if name == "Full_day":
+                # No validation on half_day_slots for Full_day
+                dur = attrs.get("duration_of_days")
+                if dur is not None and dur < 1:
+                    raise serializers.ValidationError({"duration_of_days": "duration_of_days must be at least 1 for Full_day."})
+                if dur is None:
+                    attrs["duration_of_days"] = 1
+            elif name == "Half_day":
+                # No validation on duration_of_days for Half_day; default to 1
+                if attrs.get("duration_of_days") is None or attrs.get("duration_of_days", 0) < 1:
+                    attrs["duration_of_days"] = 1
+                # Validation on half_day_slots required
+                if not half_day_slots or (isinstance(half_day_slots, str) and not half_day_slots.strip()):
+                    raise serializers.ValidationError(
+                        {"half_day_slots": "half_day_slots is required for Half_day (First_Half or Second_Half)."}
+                    )
+                allowed = {"First_Half", "Second_Half"}
+                if half_day_slots not in allowed and (isinstance(half_day_slots, str) and half_day_slots.strip() not in allowed):
+                    raise serializers.ValidationError(
+                        {"half_day_slots": "half_day_slots must be First_Half or Second_Half for Half_day."}
+                    )
+            elif name == "Menstrual":
+                # Female-only single-day leave from a separate monthly bucket.
+                request = self.context.get("request") if hasattr(self, "context") else None
+                applicant = getattr(request, "user", None) if request else None
+                profile = Profile.objects.filter(Employee_id=applicant).first() if applicant else None
+                gender = (getattr(profile, "gender", "") or "").strip().lower()
+                if gender != "female":
+                    raise serializers.ValidationError(
+                        {"leave_type": "Menstrual leave is available to female employees only."}
+                    )
                 attrs["duration_of_days"] = 1
-        elif name == "Half_day":
-            # No validation on duration_of_days for Half_day; default to 1
-            if attrs.get("duration_of_days") is None or attrs.get("duration_of_days", 0) < 1:
-                attrs["duration_of_days"] = 1
-            # Validation on half_day_slots required
-            if not half_day_slots or (isinstance(half_day_slots, str) and not half_day_slots.strip()):
-                raise serializers.ValidationError(
-                    {"half_day_slots": "half_day_slots is required for Half_day (First_Half or Second_Half)."}
-                )
-            allowed = {"First_Half", "Second_Half"}
-            if half_day_slots not in allowed and (isinstance(half_day_slots, str) and half_day_slots.strip() not in allowed):
-                raise serializers.ValidationError(
-                    {"half_day_slots": "half_day_slots must be First_Half or Second_Half for Half_day."}
-                )
-        elif name == "Menstrual":
-            # Female-only single-day leave from a separate monthly bucket.
-            request = self.context.get("request") if hasattr(self, "context") else None
-            applicant = getattr(request, "user", None) if request else None
-            profile = Profile.objects.filter(Employee_id=applicant).first() if applicant else None
-            gender = (getattr(profile, "gender", "") or "").strip().lower()
-            if gender != "female":
-                raise serializers.ValidationError(
-                    {"leave_type": "Menstrual leave is available to female employees only."}
-                )
-            attrs["duration_of_days"] = 1
-            attrs["half_day_slots"] = None
+                attrs["half_day_slots"] = None
+        applicant = attrs.get("applicant")
+        alt_user = attrs.get("alternative")
+        if alt_user and applicant and alt_user.pk == applicant.pk:
+            raise serializers.ValidationError(
+                {"alternative": "You cannot designate yourself as the alternative cover person."}
+            )
         return attrs
 
 
@@ -348,6 +373,15 @@ class LeaveApplicationEmergencyCreateSerializer(serializers.ModelSerializer):
         if value is not None and value < 1:
             raise serializers.ValidationError("duration_of_days must be at least 1.")
         return value
+
+    def validate(self, attrs):
+        applicant = attrs.get("applicant")
+        alt = attrs.get("alternative")
+        if applicant and alt and getattr(alt, "pk", None) == applicant.pk:
+            raise serializers.ValidationError(
+                {"alternative": "Applicant cannot be their own alternative cover person."}
+            )
+        return attrs
 
     def create(self, validated_data):
         validated_data.pop("hr_approval_status", None)
@@ -422,7 +456,19 @@ class LeaveApplicationUpdateSerializer(serializers.ModelSerializer):
             attrs["leave_type"] = LeaveTypes.objects.get(name=name)
         elif "leave_type" in attrs and (attrs["leave_type"] is None or attrs["leave_type"] == ""):
             attrs.pop("leave_type", None)
+        instance = getattr(self, "instance", None)
+        alt = attrs.get("alternative")
+        if alt is not None and instance and instance.applicant_id and getattr(alt, "pk", None) == instance.applicant_id:
+            raise serializers.ValidationError(
+                {"alternative": "You cannot designate yourself as the alternative cover person."}
+            )
         return attrs
+
+
+class AlternativeRespondSerializer(serializers.Serializer):
+    """Body for POST .../leave-applications/{id}/alternative-respond/."""
+
+    decision = serializers.ChoiceField(choices=["accept", "reject"])
 
 
 class MenstrualLeaveCreateSerializer(serializers.Serializer):
