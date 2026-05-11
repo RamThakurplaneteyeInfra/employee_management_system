@@ -49,6 +49,8 @@ class LeaveSummaryAdmin(admin.ModelAdmin):
         "earn_leaves",
         "menstrual_leaves",
         "unpaid_leaves",
+        "short_leaves_remaining",
+        "short_leave_credit_month_first",
     )
     search_fields = ("user__username", "user__email")
     list_filter = ("total_leaves",)

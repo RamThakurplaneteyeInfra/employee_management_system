@@ -1,8 +1,10 @@
 """
 Serializers for accounts app (leave applications, etc.).
 """
-from decimal import Decimal
+from datetime import datetime, timedelta
+from decimal import Decimal, ROUND_HALF_UP
 
+from django.conf import settings
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
 
@@ -56,6 +58,28 @@ def _resolve_alternative_user(value):
     )
 
 
+def validate_short_leave_time_window(leaving_date, start_time):
+    """
+    Raise serializers.ValidationError if the configured short-leave duration
+    does not fit inside SHORT_LEAVE_DAY_START / SHORT_LEAVE_DAY_END.
+    """
+    hrs = float(getattr(settings, "SHORT_LEAVE_DURATION_HOURS", 2))
+    ws = getattr(settings, "SHORT_LEAVE_DAY_START")
+    we = getattr(settings, "SHORT_LEAVE_DAY_END")
+    day_start = datetime.combine(leaving_date, ws)
+    day_end = datetime.combine(leaving_date, we)
+    start_dt = datetime.combine(leaving_date, start_time)
+    end_dt = start_dt + timedelta(hours=hrs)
+    if start_dt < day_start or end_dt > day_end:
+        raise serializers.ValidationError(
+            {
+                "short_leave_start_time": [
+                    f"The {int(hrs)}-hour slot must fall within office hours ({ws}–{we})."
+                ]
+            }
+        )
+
+
 class LeaveApplicationListSerializer(serializers.ModelSerializer):
     """Read-only serializer for list/retrieve; char/name fields only, no FK ids. User names from Profile.Name."""
     applicant_name = serializers.SerializerMethodField()
@@ -67,21 +91,11 @@ class LeaveApplicationListSerializer(serializers.ModelSerializer):
         max_digits=5, decimal_places=1, coerce_to_string=False, read_only=True
     )
     leave_type_name = serializers.CharField(source="leave_type.name", read_only=True)
-    team_lead_approval_status = serializers.CharField(
-        source="team_lead_approval.name", read_only=True, allow_null=True
-    )
-    hr_approval_status = serializers.CharField(
-        source="HR_approval.name", read_only=True, allow_null=True
-    )
-    md_approval_status = serializers.CharField(
-        source="MD_approval.name", read_only=True, allow_null=True
-    )
-    admin_approval_status = serializers.CharField(
-        source="admin_approval.name", read_only=True, allow_null=True
-    )
-    alternative_approval_status = serializers.CharField(
-        source="alternative_approval.name", read_only=True, allow_null=True
-    )
+    team_lead_approval_status = serializers.SerializerMethodField()
+    hr_approval_status = serializers.SerializerMethodField()
+    md_approval_status = serializers.SerializerMethodField()
+    admin_approval_status = serializers.SerializerMethodField()
+    alternative_approval_status = serializers.SerializerMethodField()
     alternative_responded_at = serializers.SerializerMethodField()
     approved_by_MD_at = serializers.SerializerMethodField()
 
@@ -93,6 +107,7 @@ class LeaveApplicationListSerializer(serializers.ModelSerializer):
             "team_lead_name",
             "alternative_name",
             "start_date",
+            "short_leave_start_time",
             "duration_of_days",
             "leave_subject",
             "reason",
@@ -123,6 +138,26 @@ class LeaveApplicationListSerializer(serializers.ModelSerializer):
         # users with no Profile via Profile.DoesNotExist.
         return _get_applicant_display_name(getattr(obj, "alternative", None))
 
+    def get_team_lead_approval_status(self, obj):
+        st = getattr(getattr(obj, "team_lead_approval", None), "name", None)
+        return st
+
+    def get_hr_approval_status(self, obj):
+        st = getattr(getattr(obj, "HR_approval", None), "name", None)
+        return st
+
+    def get_md_approval_status(self, obj):
+        st = getattr(getattr(obj, "MD_approval", None), "name", None)
+        return st
+
+    def get_admin_approval_status(self, obj):
+        st = getattr(getattr(obj, "admin_approval", None), "name", None)
+        return st
+
+    def get_alternative_approval_status(self, obj):
+        st = getattr(getattr(obj, "alternative_approval", None), "name", None)
+        return st
+
     def get_approved_by_MD_at(self, obj):
         return gmt_to_ist_str(obj.approved_by_MD_at, "%d/%m/%Y %H:%M:%S") if obj.approved_by_MD_at else None
 
@@ -142,21 +177,11 @@ class LeaveApplicationResponseSerializer(serializers.ModelSerializer):
         max_digits=5, decimal_places=1, coerce_to_string=False, read_only=True
     )
     leave_type_name = serializers.CharField(source="leave_type.name", read_only=True)
-    team_lead_approval_status = serializers.CharField(
-        source="team_lead_approval.name", read_only=True, allow_null=True
-    )
-    hr_approval_status = serializers.CharField(
-        source="HR_approval.name", read_only=True, allow_null=True
-    )
-    md_approval_status = serializers.CharField(
-        source="MD_approval.name", read_only=True, allow_null=True
-    )
-    admin_approval_status = serializers.CharField(
-        source="admin_approval.name", read_only=True, allow_null=True
-    )
-    alternative_approval_status = serializers.CharField(
-        source="alternative_approval.name", read_only=True, allow_null=True
-    )
+    team_lead_approval_status = serializers.SerializerMethodField()
+    hr_approval_status = serializers.SerializerMethodField()
+    md_approval_status = serializers.SerializerMethodField()
+    admin_approval_status = serializers.SerializerMethodField()
+    alternative_approval_status = serializers.SerializerMethodField()
     alternative_responded_at = serializers.SerializerMethodField()
     approved_by_MD_at = serializers.SerializerMethodField()
 
@@ -168,6 +193,7 @@ class LeaveApplicationResponseSerializer(serializers.ModelSerializer):
             "team_lead_name",
             "alternative_name",
             "start_date",
+            "short_leave_start_time",
             "duration_of_days",
             "leave_subject",
             "reason",
@@ -199,6 +225,26 @@ class LeaveApplicationResponseSerializer(serializers.ModelSerializer):
         # identical: returns Profile.Name, falls back to username, handles
         # users with no Profile via Profile.DoesNotExist.
         return _get_applicant_display_name(getattr(obj, "alternative", None))
+
+    def get_team_lead_approval_status(self, obj):
+        st = getattr(getattr(obj, "team_lead_approval", None), "name", None)
+        return st
+
+    def get_hr_approval_status(self, obj):
+        st = getattr(getattr(obj, "HR_approval", None), "name", None)
+        return st
+
+    def get_md_approval_status(self, obj):
+        st = getattr(getattr(obj, "MD_approval", None), "name", None)
+        return st
+
+    def get_admin_approval_status(self, obj):
+        st = getattr(getattr(obj, "admin_approval", None), "name", None)
+        return st
+
+    def get_alternative_approval_status(self, obj):
+        st = getattr(getattr(obj, "alternative_approval", None), "name", None)
+        return st
 
     def get_approved_by_MD_at(self, obj):
         return gmt_to_ist_str(obj.approved_by_MD_at, "%d/%m/%Y %H:%M:%S") if obj.approved_by_MD_at else None
@@ -394,7 +440,10 @@ class LeaveApplicationUpdateSerializer(serializers.ModelSerializer):
     HR_approval = serializers.CharField(required=False, allow_blank=False)
     MD_approval = serializers.CharField(required=False, allow_blank=False)
     admin_approval = serializers.CharField(required=False, allow_blank=False)
+    # Cover person only (enforced in leave_views._apply_update_by_role).
+    alternative_approval = serializers.CharField(required=False, allow_blank=False)
     leave_type = serializers.CharField(required=False, allow_blank=True)
+    short_leave_start_time = serializers.TimeField(required=False, allow_null=True)
     # Accept half-day floats on PATCH/PUT; mirrors the model's DecimalField.
     duration_of_days = serializers.DecimalField(
         max_digits=5,
@@ -416,6 +465,7 @@ class LeaveApplicationUpdateSerializer(serializers.ModelSerializer):
         model = LeaveApplicationData
         fields = [
             "start_date",
+            "short_leave_start_time",
             "duration_of_days",
             "leave_subject",
             "reason",
@@ -426,17 +476,24 @@ class LeaveApplicationUpdateSerializer(serializers.ModelSerializer):
             "HR_approval",
             "MD_approval",
             "admin_approval",
+            "alternative_approval",
         ]
 
     def validate_alternative(self, value):
         return _resolve_alternative_user(value)
 
     _APPROVAL_NAMES = {"Approved", "Pending", "Rejected"}
-    _LEAVE_TYPE_NAMES = {"Full_day", "Half_day"}
+    _LEAVE_TYPE_NAMES = {"Full_day", "Half_day", "Short Leave"}
 
     def validate(self, attrs):
         # Resolve approval status names to LeaveStatus
-        for key in ("team_lead_approval", "HR_approval", "MD_approval", "admin_approval"):
+        for key in (
+            "team_lead_approval",
+            "HR_approval",
+            "MD_approval",
+            "admin_approval",
+            "alternative_approval",
+        ):
             val = attrs.get(key)
             if val is not None and val != "":
                 name = (val.strip() if isinstance(val, str) else str(val)).strip()
@@ -451,7 +508,7 @@ class LeaveApplicationUpdateSerializer(serializers.ModelSerializer):
             name = (val.strip() if isinstance(val, str) else str(val)).strip()
             if name not in self._LEAVE_TYPE_NAMES:
                 raise serializers.ValidationError(
-                    {"leave_type": "Must be one of: Full_day, Half_day."}
+                    {"leave_type": "Must be one of: Full_day, Half_day, Short Leave."}
                 )
             attrs["leave_type"] = LeaveTypes.objects.get(name=name)
         elif "leave_type" in attrs and (attrs["leave_type"] is None or attrs["leave_type"] == ""):
@@ -462,6 +519,17 @@ class LeaveApplicationUpdateSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 {"alternative": "You cannot designate yourself as the alternative cover person."}
             )
+        if instance and instance.pk:
+            eff_lt = attrs.get("leave_type") or getattr(instance, "leave_type", None)
+            eff_name = getattr(eff_lt, "name", None) or ""
+            if eff_name == "Short Leave":
+                sd = attrs.get("start_date", getattr(instance, "start_date", None))
+                st = attrs.get(
+                    "short_leave_start_time",
+                    getattr(instance, "short_leave_start_time", None),
+                )
+                if sd and st:
+                    validate_short_leave_time_window(sd, st)
         return attrs
 
 
@@ -489,3 +557,29 @@ class MenstrualLeaveCreateSerializer(serializers.Serializer):
     date = serializers.DateField(required=True)
     leave_subject = serializers.CharField(required=True, max_length=255, allow_blank=False)
     reason = serializers.CharField(required=True, allow_blank=False)
+
+
+class ShortLeaveCreateSerializer(serializers.Serializer):
+    """
+    POST /accounts/leave-applications/short/
+    Fixed-duration short leave (see settings.SHORT_LEAVE_DURATION_HOURS).
+    """
+
+    date = serializers.DateField()
+    short_leave_start_time = serializers.TimeField()
+    leave_subject = serializers.CharField(required=True, max_length=255, allow_blank=False)
+    reason = serializers.CharField(required=True, allow_blank=False)
+
+    def validate(self, attrs):
+        d = attrs["date"]
+        t = attrs["short_leave_start_time"]
+        validate_short_leave_time_window(d, t)
+        return attrs
+
+    @staticmethod
+    def duration_of_days_decimal():
+        h = Decimal(str(getattr(settings, "SHORT_LEAVE_DURATION_HOURS", 2)))
+        day = Decimal(str(getattr(settings, "SHORT_LEAVE_WORKING_DAY_HOURS", 8)))
+        if day <= 0:
+            day = Decimal("8")
+        return (h / day).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)

@@ -95,40 +95,94 @@ def create_profile_from_user(sender, instance: User, created, **kwargs):
 
 
 # ---------------------------------------------------------------------------
-# Leave-approval safety net: debit casual -> earn -> unpaid whenever a
-# LeaveApplicationData row's MD_approval transitions to "Approved", regardless
-# of the path that triggered the save (DRF viewset, Django admin, manage.py
-# shell, fixtures, raw ORM updates, etc.). This complements (and is harmless
-# alongside) the deduction code already running in the viewset.
+# Leave-approval safety net: debit casual -> earn -> unpaid whenever MD_approval
+# transitions to Approved (non-Short-Leave paths). Short Leave debits monthly
+# quota separately. Admin-financed Short Leave sequential path also debited here.
 # ---------------------------------------------------------------------------
 
 @receiver(pre_save, sender=LeaveApplicationData)
 def _capture_old_md_status(sender, instance: LeaveApplicationData, **kwargs):
-    """Stash the row's previous MD_approval_id so the post_save handler can
-    detect a transition from non-Approved -> Approved.
-    """
+    """Stash previous MD/admin approval ids so post_save detects transitions."""
     if instance.pk:
         old = (
             sender.objects
             .filter(pk=instance.pk)
-            .only("MD_approval_id")
+            .only("MD_approval_id", "admin_approval_id")
             .first()
         )
         instance._old_md_approval_id = old.MD_approval_id if old else None
+        instance._old_admin_approval_id = getattr(old, "admin_approval_id", None) if old else None
     else:
         instance._old_md_approval_id = None
+        instance._old_admin_approval_id = None
+
+
+@receiver(post_save, sender=LeaveApplicationData)
+def _debit_on_admin_short_leave_approval(sender, instance: LeaveApplicationData, created, **kwargs):
+    """Sequential short leave finalized by Admin: consume one monthly short-leave slot."""
+    new_ad = instance.admin_approval
+    new_name = getattr(new_ad, "name", None) if new_ad else None
+    if new_name != "Approved":
+        return
+
+    lt = getattr(getattr(instance, "leave_type", None), "name", "") or ""
+    if lt != "Short Leave":
+        return
+
+    from .leave_views import _short_leave_use_sequential_chain, finalize_short_leave_monthly_debit
+
+    if not _short_leave_use_sequential_chain(instance.applicant):
+        return
+
+    if getattr(instance, "short_leave_slot_consumed", False):
+        return
+
+    old_id = getattr(instance, "_old_admin_approval_id", None)
+    if old_id:
+        old_name = (
+            LeaveStatus.objects
+            .filter(pk=old_id)
+            .values_list("name", flat=True)
+            .first()
+        )
+        if old_name == "Approved":
+            return
+
+    if instance.is_emergency:
+        return
+
+    finalize_short_leave_monthly_debit(instance)
 
 
 @receiver(post_save, sender=LeaveApplicationData)
 def _debit_on_md_approval(sender, instance: LeaveApplicationData, created, **kwargs):
-    """Run the casual -> earn -> unpaid waterfall when MD_approval flips to
-    Approved. Idempotent: a row that already carries a debit (casual_used /
-    earn_used / unpaid_used > 0) or that was already Approved before this save
-    is skipped. Emergency rows are skipped (they debit at create time).
-    """
+    """Run casual->earn unpaid on MD approval except Short Leave (monthly slot) / Menstrual."""
     new_md = instance.MD_approval
     new_name = getattr(new_md, "name", None) if new_md else None
     if new_name != "Approved":
+        return
+
+    if instance.is_emergency:
+        return
+
+    leave_type_name = getattr(getattr(instance, "leave_type", None), "name", "") or ""
+
+    if leave_type_name == "Short Leave":
+        if getattr(instance, "short_leave_slot_consumed", False):
+            return
+        old_id = getattr(instance, "_old_md_approval_id", None)
+        if old_id:
+            old_name = (
+                LeaveStatus.objects
+                .filter(pk=old_id)
+                .values_list("name", flat=True)
+                .first()
+            )
+            if old_name == "Approved":
+                return
+        from .leave_views import finalize_short_leave_monthly_debit
+
+        finalize_short_leave_monthly_debit(instance)
         return
 
     already_debited = (
@@ -150,11 +204,6 @@ def _debit_on_md_approval(sender, instance: LeaveApplicationData, created, **kwa
         if old_name == "Approved":
             return
 
-    if instance.is_emergency:
-        return
-
-    leave_type_name = getattr(getattr(instance, "leave_type", None), "name", "") or ""
-
     from .leave_views import (
         _consume_casual_earn_unpaid,
         _consume_menstrual_leave,
@@ -169,8 +218,6 @@ def _debit_on_md_approval(sender, instance: LeaveApplicationData, created, **kwa
         if debit <= 0:
             return
         split = _consume_casual_earn_unpaid(instance.applicant, debit)
-        # Use .update() (not instance.save()) so the post_save signal does NOT
-        # re-fire and recurse on this same row.
         LeaveApplicationData.objects.filter(pk=instance.pk).update(
             casual_used=split["casual"],
             earn_used=split["earn"],

@@ -210,6 +210,11 @@ class LeaveSummary(models.Model):
     # the migration that introduces these columns.
     last_earn_credit_on = models.DateField(null=True, blank=True)
     last_casual_credit_on = models.DateField(null=True, blank=True)
+    # Monthly short-leave quota (`settings.SHORT_LEAVE_MONTHLY_QUOTA`).
+    # at calendar month rollover (lazy on use / GET summary / `credit_short_leave_monthly`).
+    short_leaves_remaining = models.PositiveSmallIntegerField(default=2)
+    # First day of the calendar month for which `short_leaves_remaining` was last refreshed.
+    short_leave_credit_month_first = models.DateField(null=True, blank=True)
 
     class Meta:
         db_table = 'team_management"."leave_summary'
@@ -315,6 +320,8 @@ class LeaveApplicationData(models.Model):
         LeaveStatus,
         on_delete=models.PROTECT,
         related_name="+",
+        null=True,
+        blank=True,
         default=_get_pending_leave_status_id,
         db_column="md_approval_id",
     )
@@ -345,6 +352,10 @@ class LeaveApplicationData(models.Model):
     casual_used = models.DecimalField(max_digits=5, decimal_places=1, default=Decimal("0"))
     earn_used = models.DecimalField(max_digits=5, decimal_places=1, default=Decimal("0"))
     unpaid_used = models.DecimalField(max_digits=5, decimal_places=1, default=Decimal("0"))
+    # True after this row consumed one monthly short-leave slot (idempotent debit).
+    short_leave_slot_consumed = models.BooleanField(default=False)
+    # Two-hour short leave: wall-clock start within configured office hours (leave_type = Short Leave).
+    short_leave_start_time = models.TimeField(null=True, blank=True)
 
     class Meta:
         db_table = 'team_management"."leave_application_data'

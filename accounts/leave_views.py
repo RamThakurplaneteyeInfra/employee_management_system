@@ -5,6 +5,7 @@ Approval hierarchy by applicant role; remaining-leaves validation; HR-only emerg
 from decimal import Decimal
 
 from django.utils import timezone
+from django.conf import settings
 from django.db import transaction
 from django.db.models import Q
 from rest_framework import status
@@ -29,6 +30,7 @@ from .serializers import (
     LeaveApplicationUpdateSerializer,
     MenstrualLeaveCreateSerializer,
     AlternativeRespondSerializer,
+    ShortLeaveCreateSerializer,
 )
 from .filters import _get_user_role_sync
 
@@ -190,11 +192,200 @@ def _consume_casual_earn_unpaid(applicant, duration_days):
 
 
 def _debit_amount_for(application):
-    """Return the Decimal amount to debit for a given (non-Menstrual, non-Emergency) leave."""
+    """Return the Decimal amount to debit for casual/earn/unpaid (not Short Leave / Menstrual)."""
     leave_type_name = getattr(getattr(application, "leave_type", None), "name", "") or ""
     if leave_type_name == "Half_day":
         return Decimal("0.5")
+    if leave_type_name == "Short Leave":
+        return Decimal("0")
     return Decimal(application.duration_of_days or 0)
+
+
+def short_leave_monthly_quota() -> int:
+    return max(0, int(getattr(settings, "SHORT_LEAVE_MONTHLY_QUOTA", 2)))
+
+
+def _current_month_first():
+    return timezone.localdate().replace(day=1)
+
+
+def sync_short_leave_monthly_calendar(user):
+    """If the calendar month changed, reset monthly short leave to the configured quota."""
+    quota = short_leave_monthly_quota()
+    ms = _current_month_first()
+    LeaveSummary.objects.filter(user=user).exclude(short_leave_credit_month_first=ms).update(
+        short_leaves_remaining=quota,
+        short_leave_credit_month_first=ms,
+    )
+
+
+SHORT_LEAVE_TYPE_NAME = "Short Leave"
+
+
+def _leave_type_name_on(instance):
+    if instance is None:
+        return ""
+    return getattr(getattr(instance, "leave_type", None), "name", "") or ""
+
+
+def _is_short_leave_instance(instance):
+    return _leave_type_name_on(instance) == SHORT_LEAVE_TYPE_NAME
+
+
+def validate_short_leave_monthly_quota(applicant):
+    """Raise ValidationError if applicant has no monthly short-leave slots left."""
+    from rest_framework import serializers as ser
+    from django.db.models import Q
+
+    quota = short_leave_monthly_quota()
+    LeaveSummary.objects.get_or_create(
+        user=applicant,
+        defaults={
+            "total_leaves": 0,
+            "used_leaves": 0,
+            "short_leaves_remaining": quota,
+            "short_leave_credit_month_first": _current_month_first(),
+        },
+    )
+    sync_short_leave_monthly_calendar(applicant)
+    summary = LeaveSummary.objects.get(user=applicant)
+
+    awaiting = LeaveApplicationData.objects.filter(
+        applicant=applicant,
+        leave_type__name=SHORT_LEAVE_TYPE_NAME,
+        short_leave_slot_consumed=False,
+    ).exclude(
+        Q(team_lead_approval__name="Rejected")
+        | Q(HR_approval__name="Rejected")
+        | Q(MD_approval__name="Rejected")
+        | Q(admin_approval__name="Rejected"),
+    ).count()
+
+    if summary.short_leaves_remaining <= 0:
+        raise ser.ValidationError(
+            {
+                "non_field_errors": [
+                    f"No short leave slots remaining this month (monthly quota is {quota})."
+                ]
+            }
+        )
+
+    slots_left = summary.short_leaves_remaining
+    if awaiting >= slots_left:
+        raise ser.ValidationError(
+            {
+                "non_field_errors": [
+                    (
+                        "Monthly short-leave quota is already tied up by pending requests. "
+                        "Wait until they resolve before applying again."
+                    )
+                ]
+            }
+        )
+
+
+def finalize_short_leave_monthly_debit(application: LeaveApplicationData) -> None:
+    """
+    Consume one monthly short-leave slot after final approval. Does not touch casual/earn.
+    Idempotent via `short_leave_slot_consumed`.
+    """
+    if not application or not application.pk:
+        return
+    if not _is_short_leave_instance(application):
+        return
+    quota = short_leave_monthly_quota()
+    applicant = application.applicant
+    pk = application.pk
+
+    with transaction.atomic():
+        locked = (
+            LeaveApplicationData.objects.select_for_update()
+            .filter(pk=pk, short_leave_slot_consumed=False)
+            .first()
+        )
+        if not locked:
+            return
+        summary, _ = LeaveSummary.objects.select_for_update().get_or_create(
+            user=applicant,
+            defaults={
+                "total_leaves": 0,
+                "used_leaves": 0,
+                "short_leaves_remaining": quota,
+                "short_leave_credit_month_first": _current_month_first(),
+            },
+        )
+        ms = _current_month_first()
+        if summary.short_leave_credit_month_first != ms:
+            summary.short_leaves_remaining = quota
+            summary.short_leave_credit_month_first = ms
+        if summary.short_leaves_remaining < 1:
+            summary.save(update_fields=["short_leaves_remaining", "short_leave_credit_month_first"])
+            return
+        summary.short_leaves_remaining -= 1
+        summary.save(update_fields=["short_leaves_remaining", "short_leave_credit_month_first"])
+        LeaveApplicationData.objects.filter(pk=pk).update(short_leave_slot_consumed=True)
+
+
+def _role_is_hr(role_name):
+    return role_name in ("HR", "Hr")
+
+
+def _short_leave_use_sequential_chain(applicant):
+    """True when approvals go TL → HR → Admin (short leave without MD)."""
+    role_name, _ = _get_applicant_role_and_teamlead(applicant)
+    if _role_is_hr(role_name):
+        return False
+    if role_name == "MD":
+        return False
+    return True
+
+
+def _short_leave_skip_team_lead_step(applicant):
+    role_name, _ = _get_applicant_role_and_teamlead(applicant)
+    return role_name in ("TeamLead", "Teamlead")
+
+
+def _set_short_leave_approvals(application, applicant, status_map):
+    """
+    Short leave rails:
+      - HR applicant: MD only (Pending).
+      - MD applicant: auto-approved on MD rail.
+      - Others: sequential TL → HR → Admin; MD unset. Team-lead applicant
+        skips TL and starts at HR. Employee without team lead starts at HR;
+        Intern must have a team lead (enforced in the view).
+    """
+    pending = status_map.get("Pending")
+    approved = status_map.get("Approved")
+    role_name, teamlead = _get_applicant_role_and_teamlead(applicant)
+
+    application.team_lead_approval_id = None
+    application.HR_approval_id = None
+    application.admin_approval_id = None
+    application.MD_approval_id = None
+    application.approved_by_MD_at = None
+
+    if role_name == "MD":
+        application.MD_approval_id = approved.id if approved else None
+        application.approved_by_MD_at = timezone.now()
+        return
+    if _role_is_hr(role_name):
+        application.MD_approval_id = pending.id if pending else None
+        return
+    if _short_leave_skip_team_lead_step(applicant):
+        application.HR_approval_id = pending.id if pending else None
+        return
+    if teamlead:
+        application.team_lead_approval_id = pending.id if pending else None
+        return
+    application.HR_approval_id = pending.id if pending else None
+
+
+def _short_leave_requires_tl_approved_before_hr(instance):
+    if not _short_leave_use_sequential_chain(instance.applicant):
+        return False
+    if _short_leave_skip_team_lead_step(instance.applicant):
+        return False
+    return bool(instance.team_lead_id)
 
 
 def _set_approvals_by_role(application, applicant, status_map, is_md_approval_by_default=False):
@@ -307,6 +498,8 @@ class LeaveApplicationViewSet(ModelViewSet):
     def get_serializer_class(self):
         if self.action == "create":
             return LeaveApplicationCreateSerializer
+        if self.action == "short_leave":
+            return ShortLeaveCreateSerializer
         if self.action == "emergency_leave":
             return LeaveApplicationEmergencyCreateSerializer
         if self.action == "menstrual_leave":
@@ -552,6 +745,68 @@ class LeaveApplicationViewSet(ModelViewSet):
             status=status.HTTP_201_CREATED,
         )
 
+    @action(detail=False, methods=["post"], url_path="short", permission_classes=[IsAuthenticated])
+    def short_leave(self, request):
+        """
+        Two-hour short leave inside configured office hours.
+        Sequential approval (except HR applicant → MD only): Team lead → HR → Admin.
+        Interns must have a profile team lead. Short-leave rows cannot be deleted.
+        POST body: ``date``, ``short_leave_start_time``, ``leave_subject``, ``reason``.
+        """
+        from rest_framework import serializers as ser
+
+        serializer = ShortLeaveCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        applicant = request.user
+        role_app, tl_from_profile = _get_applicant_role_and_teamlead(applicant)
+        if role_app == "Intern" and not tl_from_profile:
+            raise ser.ValidationError(
+                {"non_field_errors": ["Interns must have an assigned team lead to request short leave."]}
+            )
+        try:
+            short_type = LeaveTypes.objects.get(name=SHORT_LEAVE_TYPE_NAME)
+        except LeaveTypes.DoesNotExist:
+            raise ser.ValidationError(
+                {"non_field_errors": ["Short Leave leave type is not configured. Contact admin to run migrations."]}
+            )
+        vd = serializer.validated_data
+        dur = ShortLeaveCreateSerializer.duration_of_days_decimal()
+        status_map = _get_leave_status_map()
+        validate_short_leave_monthly_quota(applicant)
+
+        with transaction.atomic():
+            application = LeaveApplicationData.objects.create(
+                applicant=applicant,
+                start_date=vd["date"],
+                duration_of_days=dur,
+                leave_subject=vd["leave_subject"],
+                reason=vd["reason"],
+                leave_type=short_type,
+                half_day_slots=None,
+                is_emergency=False,
+                MD_approval=None,
+                short_leave_start_time=vd["short_leave_start_time"],
+            )
+            _set_team_lead_from_profile(application, applicant)
+            _set_short_leave_approvals(application, applicant, status_map)
+            _set_initial_alternative_approval(application, status_map)
+            application.save(update_fields=[
+                "team_lead",
+                "team_lead_approval",
+                "HR_approval",
+                "MD_approval",
+                "admin_approval",
+                "approved_by_MD_at",
+                "alternative_approval",
+                "alternative_responded_at",
+            ])
+
+        application.refresh_from_db()
+        return Response(
+            LeaveApplicationResponseSerializer(application).data,
+            status=status.HTTP_201_CREATED,
+        )
+
     def update(self, request, *args, **kwargs):
         """PUT: full update; delegate to partial_update logic for allowed fields."""
         partial = kwargs.get("partial", False)
@@ -585,18 +840,39 @@ class LeaveApplicationViewSet(ModelViewSet):
         # leave Pending and skipping the casual->earn->unpaid waterfall.
         is_md = (role == "MD") or bool(getattr(user, "is_superuser", False))
 
+        old_tl_ap = instance.team_lead_approval
+        old_hr_ap = instance.HR_approval
+        old_admin_ap = instance.admin_approval
+
         # Capture MD approval state before we change it (for leave_summary update)
         old_md_approved = (
             instance.MD_approval
             and getattr(instance.MD_approval, "name", None) == "Approved"
+        )
+        old_admin_approved = (
+            old_admin_ap
+            and getattr(old_admin_ap, "name", None) == "Approved"
         )
 
         approval_updates = {}
         if "team_lead_approval" in validated_data and is_teamlead:
             approval_updates["team_lead_approval"] = validated_data.pop("team_lead_approval")
         if "HR_approval" in validated_data and role == "HR":
+            if _is_short_leave_instance(instance) and _short_leave_use_sequential_chain(instance.applicant):
+                if _short_leave_requires_tl_approved_before_hr(instance):
+                    cur_tl = instance.team_lead_approval
+                    if not (cur_tl and cur_tl.name == "Approved"):
+                        raise s.ValidationError(
+                            {"HR_approval": ["Team lead must approve this short leave before HR."]}
+                        )
             approval_updates["HR_approval"] = validated_data.pop("HR_approval")
         if "admin_approval" in validated_data and role == "Admin":
+            if _is_short_leave_instance(instance) and _short_leave_use_sequential_chain(instance.applicant):
+                cur_hr = instance.HR_approval
+                if not (cur_hr and cur_hr.name == "Approved"):
+                    raise s.ValidationError(
+                        {"admin_approval": ["HR must approve this short leave before Admin."]}
+                    )
             approval_updates["admin_approval"] = validated_data.pop("admin_approval")
         if "MD_approval" in validated_data and is_md:
             md_status = validated_data.pop("MD_approval")
@@ -604,11 +880,56 @@ class LeaveApplicationViewSet(ModelViewSet):
             if md_status and md_status.name == "Approved":
                 approval_updates["approved_by_MD_at"] = timezone.now()
 
+        is_alternative = bool(instance.alternative_id and user.id == instance.alternative_id)
+        if "alternative_approval" in validated_data:
+            if not is_alternative:
+                raise s.ValidationError(
+                    {"alternative_approval": ["Only the designated alternative may update this field."]}
+                )
+            alt_status = validated_data.pop("alternative_approval")
+            cur = getattr(getattr(instance, "alternative_approval", None), "name", None)
+            if cur in ("Approved", "Rejected"):
+                raise s.ValidationError(
+                    {"alternative_approval": ["You have already responded to this request."]}
+                )
+            if alt_status.name not in ("Approved", "Rejected"):
+                raise s.ValidationError(
+                    {"alternative_approval": ["Cover response must be Approved or Rejected."]}
+                )
+            approval_updates["alternative_approval"] = alt_status
+            approval_updates["alternative_responded_at"] = timezone.now()
+
         for key, value in approval_updates.items():
             setattr(instance, key, value)
 
-        draft_fields = ("start_date", "duration_of_days", "leave_subject", "reason", "leave_type", "half_day_slots", "alternative")
+        draft_fields = (
+            "start_date",
+            "short_leave_start_time",
+            "duration_of_days",
+            "leave_subject",
+            "reason",
+            "leave_type",
+            "half_day_slots",
+            "alternative",
+        )
         updated_fields = list(approval_updates.keys())
+
+        status_pending = (_get_leave_status_map().get("Pending"))
+
+        # Short leave sequential: advance HR / Admin Pending after prior approver Accepted.
+        if _is_short_leave_instance(instance) and _short_leave_use_sequential_chain(instance.applicant):
+            tl_upd = approval_updates.get("team_lead_approval")
+            tl_was_approved = old_tl_ap and old_tl_ap.name == "Approved"
+            if tl_upd and tl_upd.name == "Approved" and not tl_was_approved and status_pending:
+                if instance.HR_approval_id is None:
+                    instance.HR_approval = status_pending
+                    updated_fields.append("HR_approval")
+            hr_upd = approval_updates.get("HR_approval")
+            hr_was_approved = old_hr_ap and old_hr_ap.name == "Approved"
+            if hr_upd and hr_upd.name == "Approved" and not hr_was_approved and status_pending:
+                if instance.admin_approval_id is None:
+                    instance.admin_approval = status_pending
+                    updated_fields.append("admin_approval")
 
         # When MD just approved (was not already Approved), deduct from the right bucket
         # (non-emergency only; emergency already updated at create).
@@ -621,7 +942,7 @@ class LeaveApplicationViewSet(ModelViewSet):
             leave_type_name = getattr(getattr(instance, "leave_type", None), "name", "") or ""
             if leave_type_name == "Menstrual":
                 _consume_menstrual_leave(instance.applicant)
-            else:
+            elif leave_type_name != "Short Leave":
                 debit = _debit_amount_for(instance)
                 if debit > 0:
                     split = _consume_casual_earn_unpaid(instance.applicant, debit)
@@ -647,21 +968,27 @@ class LeaveApplicationViewSet(ModelViewSet):
                         setattr(instance, field, validated_data[field])
                         updated_fields.append(field)
                 if "alternative" in validated_data:
-                    status_map = _get_leave_status_map()
+                    status_map_sl = _get_leave_status_map()
                     _resync_alternative_approval_if_alternative_changed(
-                        instance, status_map, old_alternative_id
+                        instance, status_map_sl, old_alternative_id
                     )
                     for extra in ("alternative_approval", "alternative_responded_at"):
                         if extra not in updated_fields:
                             updated_fields.append(extra)
-                if "duration_of_days" in validated_data:
+                if "duration_of_days" in validated_data and not _is_short_leave_instance(instance):
                     _validate_remaining_leaves(instance.applicant, validated_data["duration_of_days"])
 
-        instance.save(update_fields=updated_fields)
+        if updated_fields:
+            instance.save(update_fields=list(dict.fromkeys(updated_fields)))
 
     def destroy(self, request, *args, **kwargs):
         """DELETE: applicant can delete own application if MD has not yet approved."""
         instance = self.get_object()
+        if _is_short_leave_instance(instance):
+            return Response(
+                {"detail": "Short leave requests cannot be deleted."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
         if request.user != instance.applicant:
             return Response(
                 {"detail": "You may only delete your own leave application."},
@@ -688,11 +1015,19 @@ class LeaveApplicationViewSet(ModelViewSet):
         `username`, `name`, `gender`, `is_female`, `emergency_leaves`,
         `casual_leaves`, `earn_leaves`, `menstrual_leaves`.
         `menstrual_leaves` is always `0` for non-female employees.
+        `short_leaves_remaining` counts approved short leaves left this month.
         """
         summary, _ = LeaveSummary.objects.get_or_create(
             user=request.user,
-            defaults={"total_leaves": 0, "used_leaves": 0},
+            defaults={
+                "total_leaves": 0,
+                "used_leaves": 0,
+                "short_leaves_remaining": short_leave_monthly_quota(),
+                "short_leave_credit_month_first": _current_month_first(),
+            },
         )
+        sync_short_leave_monthly_calendar(request.user)
+        summary.refresh_from_db()
 
         profile = Profile.objects.filter(Employee_id=request.user).first()
         display_name = (getattr(profile, "Name", None) or request.user.username) if profile else request.user.username
@@ -717,6 +1052,8 @@ class LeaveApplicationViewSet(ModelViewSet):
                 "earn_leaves": summary.earn_leaves,
                 "menstrual_leaves": summary.menstrual_leaves if is_female else 0,
                 "unpaid_leaves": summary.unpaid_leaves,
+                "short_leaves_remaining": summary.short_leaves_remaining,
+                "short_leave_monthly_quota": short_leave_monthly_quota(),
             }
         )
 
@@ -767,6 +1104,11 @@ class LeaveApplicationViewSet(ModelViewSet):
             )
 
         if request.method.upper() == "DELETE":
+            if _is_short_leave_instance(instance):
+                return Response(
+                    {"detail": "Short leave requests cannot be deleted."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
             # Same rule as the standard `destroy`: cannot delete after MD
             # approval. Only this single row is removed.
             if instance.MD_approval and instance.MD_approval.name == "Approved":
@@ -795,6 +1137,7 @@ class LeaveApplicationViewSet(ModelViewSet):
 
         DRAFT_FIELDS = (
             "start_date",
+            "short_leave_start_time",
             "duration_of_days",
             "leave_subject",
             "reason",
@@ -812,11 +1155,14 @@ class LeaveApplicationViewSet(ModelViewSet):
         serializer = LeaveApplicationUpdateSerializer(instance, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
 
-        # Re-validate balance only if duration actually changed.
+        # Re-validate balance only if duration actually changed (not short leave).
         if "duration_of_days" in serializer.validated_data:
-            _validate_remaining_leaves(
-                instance.applicant, serializer.validated_data["duration_of_days"]
-            )
+            lt_after = serializer.validated_data.get("leave_type") or getattr(instance, "leave_type", None)
+            lt_name_after = getattr(lt_after, "name", "") or ""
+            if lt_name_after != SHORT_LEAVE_TYPE_NAME:
+                _validate_remaining_leaves(
+                    instance.applicant, serializer.validated_data["duration_of_days"]
+                )
 
         old_alternative_id = instance.alternative_id
         with transaction.atomic():
@@ -839,7 +1185,7 @@ class LeaveApplicationViewSet(ModelViewSet):
         instance.refresh_from_db()
         return Response(LeaveApplicationResponseSerializer(instance).data)
 
-    # ---------- GET: approval tab (Team lead + HR / Admin / MD – single API) ----------
+    # ---------- GET: approval tab (Team lead + HR / Admin / MD + cover person – single API) ----------
     @action(detail=False, methods=["get"], url_path="approval")
     def approval(self, request):
         """
@@ -849,6 +1195,8 @@ class LeaveApplicationViewSet(ModelViewSet):
         - Admin: ALL applications where Admin is an approver (admin_approval is set), any status.
         - MD: ALL applications where MD is an approver (MD_approval is set), any status.
           MD's approval is the final confirmation regardless of other approvers' state.
+        - Cover person (alternative): applications where this user is the designated alternative
+          and they have not yet accepted/rejected (same rules as alternative-requests/).
         Single endpoint: GET /accounts/leave-applications/approval/
         """
         role = _get_user_role_sync(request.user)
@@ -869,6 +1217,12 @@ class LeaveApplicationViewSet(ModelViewSet):
         # MD's approval is the final confirmation regardless of others' state.
         if role == "MD":
             q |= Q(MD_approval__isnull=False)
+
+        # Cover requests: any authenticated user may be designated alternative (often not TL/HR/MD).
+        # Scoped to pending response only — mirrors GET .../alternative-requests/.
+        q |= Q(alternative=request.user) & (
+            Q(alternative_approval__isnull=True) | Q(alternative_approval__name="Pending")
+        )
 
         qs = base.filter(q).distinct()
         serializer = LeaveApplicationResponseSerializer(qs, many=True)

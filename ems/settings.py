@@ -8,7 +8,7 @@ For more information: https://docs.djangoproject.com/en/4.2/topics/settings/
 from pathlib import Path
 import os
 from dotenv import load_dotenv
-from datetime import timedelta
+from datetime import timedelta, time
 
 # =============================================================================
 # Paths & Environment
@@ -74,6 +74,15 @@ SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(minutes=60),
     "REFRESH_TOKEN_LIFETIME": timedelta(days=1),
 }
+
+# Short leave: fixed duration within daily office window (local wall clock).
+SHORT_LEAVE_DURATION_HOURS = int(os.getenv("SHORT_LEAVE_DURATION_HOURS", "2"))
+SHORT_LEAVE_WORKING_DAY_HOURS = int(os.getenv("SHORT_LEAVE_WORKING_DAY_HOURS", "8"))
+# Inclusive start of window; end is exclusive upper bound for the block end (see leave validation).
+SHORT_LEAVE_DAY_START = time(9, 0)
+SHORT_LEAVE_DAY_END = time(18, 0)
+# Monthly short-leave slots per employee (`LeaveSummary.short_leaves_remaining`).
+SHORT_LEAVE_MONTHLY_QUOTA = int(os.getenv("SHORT_LEAVE_MONTHLY_QUOTA", "2"))
 
 # =============================================================================
 # Application Definition
