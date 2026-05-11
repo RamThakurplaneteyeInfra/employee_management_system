@@ -400,7 +400,7 @@ if os.getenv("is_developement") == "True":
     # CSRF_COOKIE_SECURE = True
     # For cross-origin WS in dev: use SESSION_COOKIE_SAMESITE = "None" and HTTPS.
 else:
-    DEBUG = os.getenv("DEBUG", "False") == "True"
+    DEBUG = True
     CSRF_COOKIE_SECURE = os.getenv("CSRF_COOKIE_SECURE", False)
     # SESSION_COOKIE_SECURE must come from SESSION_COOKIE_SECURE.
     # Using CSRF_COOKIE_SECURE here can prevent cookies being sent on HTTPS
