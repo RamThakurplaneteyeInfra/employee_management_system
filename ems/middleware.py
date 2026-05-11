@@ -3,7 +3,6 @@ Middleware for GET response caching.
 Caches 200 GET responses per (path, query, user).
 Invalidates cache immediately on POST/PUT/PATCH/DELETE (2xx) so next GET returns fresh data.
 """
-import threading
 from django.utils.deprecation import MiddlewareMixin
 from .cache_utils import (
     get_cached_response,
@@ -52,23 +51,14 @@ class CacheGetMiddleware(MiddlewareMixin):
     def process_response(self, request, response):
         if request.path.startswith(CACHE_SKIP_PREFIXES):
             return response
-        # Invalidate GET cache on mutation in a background thread so it doesn't
-        # block the response. delete_pattern does a Redis SCAN (O(N) over all keys)
-        # which adds latency proportional to cache size on every mutation.
+        # Invalidate GET cache on mutation: per-user for most endpoints; all users for GLOBAL_INVALIDATE_GET_PREFIXES (e.g. alerts GET open to all)
         if request.method in MUTATION_METHODS and 200 <= response.status_code < 300:
             user_id = getattr(request.user, "pk", None) if getattr(request.user, "is_authenticated", False) else None
-            prefixes = get_path_prefixes_from_request(request)
-            global_prefixes = GLOBAL_INVALIDATE_GET_PREFIXES
-
-            def _invalidate():
-                for prefix in prefixes:
-                    if prefix in global_prefixes:
-                        invalidate_get_cache_for_prefix_all_users(prefix)
-                    else:
-                        invalidate_get_cache_for_prefix(prefix, user_id=user_id)
-
-            threading.Thread(target=_invalidate, daemon=True).start()
-
+            for prefix in get_path_prefixes_from_request(request):
+                if prefix in GLOBAL_INVALIDATE_GET_PREFIXES:
+                    invalidate_get_cache_for_prefix_all_users(prefix)
+                else:
+                    invalidate_get_cache_for_prefix(prefix, user_id=user_id)
         if request.method == "GET" and getattr(request, "_cache_key", None) is not None and response.status_code == 200:
             set_cached_response(request, response)
         return response
