@@ -6,8 +6,8 @@ cron / Celery Beat). Each successful run does the following, and ONLY the
 following:
 
 * HARD RESET - `LeaveSummary.casual_leaves = Decimal("2")` for every employee
-  whose `Profile.Date_of_join` is on or before today AND whose
-  `last_casual_credit_on` is NOT in the current calendar quarter.
+  whose `Profile.Date_of_join` is on or before today, whose role is not Intern,
+  and whose `last_casual_credit_on` is NOT in the current calendar quarter.
 
   This is an ASSIGNMENT (=), not an addition (+=). Whatever balance the user
   had before (0, 0.5, 1, 1.5, even 2) is DISCARDED and replaced with exactly
@@ -74,6 +74,7 @@ class Command(BaseCommand):
         eligible_usernames = list(
             Profile.objects.filter(Date_of_join__lte=today)
             .exclude(Date_of_join__isnull=True)
+            .exclude(Role__role_name="Intern")
             .values_list("Employee_id__username", flat=True)
         )
 

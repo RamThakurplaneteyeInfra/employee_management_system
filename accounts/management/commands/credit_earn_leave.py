@@ -5,8 +5,8 @@ Run on the 1st of every month (Windows Task Scheduler / cron / Celery Beat).
 Each successful run does the following, and ONLY the following:
 
 * Adds Decimal("1") to `LeaveSummary.earn_leaves` for every employee whose
-  `Profile.Date_of_join` is on or before today AND whose `last_earn_credit_on`
-  is NOT in the current calendar month.
+  `Profile.Date_of_join` is on or before today, whose role is not Intern, and
+  whose `last_earn_credit_on` is NOT in the current calendar month.
 * Stamps `last_earn_credit_on = today` on the same rows so re-runs in the
   same month are no-ops (idempotent).
 
@@ -61,6 +61,7 @@ class Command(BaseCommand):
         eligible_usernames = list(
             Profile.objects.filter(Date_of_join__lte=today)
             .exclude(Date_of_join__isnull=True)
+            .exclude(Role__role_name="Intern")
             .values_list("Employee_id__username", flat=True)
         )
 

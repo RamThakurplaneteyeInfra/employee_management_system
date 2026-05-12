@@ -34,6 +34,8 @@ from .serializers import (
 )
 from .filters import _get_user_role_sync
 
+INTERN_ROLE_NAME = "Intern"
+
 
 # ---------- Role-based permissions for approval tabs ----------
 class IsHR(BasePermission):
@@ -112,6 +114,11 @@ def _get_applicant_role_and_teamlead(applicant):
         return None, None
 
 
+def _is_intern_applicant(applicant):
+    role_name, _ = _get_applicant_role_and_teamlead(applicant)
+    return role_name == INTERN_ROLE_NAME
+
+
 def _set_team_lead_from_profile(application, applicant):
     """Set application.team_lead from applicant's Profile.Teamlead (if any)."""
     _, teamlead = _get_applicant_role_and_teamlead(applicant)
@@ -168,6 +175,12 @@ def _consume_casual_earn_unpaid(applicant, duration_days):
         user=applicant,
         defaults={"total_leaves": 0, "used_leaves": 0},
     )
+    if _is_intern_applicant(applicant):
+        take_unpaid = needed
+        summary.unpaid_leaves = (summary.unpaid_leaves or zero) + take_unpaid
+        summary.save(update_fields=["unpaid_leaves"])
+        return {"casual": zero, "earn": zero, "unpaid": take_unpaid}
+
     casual_balance = summary.casual_leaves or zero
     earn_balance = summary.earn_leaves or zero
 
@@ -1032,8 +1045,10 @@ class LeaveApplicationViewSet(ModelViewSet):
         Backwards-compatible: every key returned by the previous version is preserved
         (`total_leaves`, `used_leaves`, `remaining_leaves`, `remaining_emergency_leave`).
         Extra keys added without breaking existing clients:
-        `username`, `name`, `gender`, `is_female`, `emergency_leaves`,
-        `casual_leaves`, `earn_leaves`, `menstrual_leaves`.
+        `username`, `name`, `gender`, `is_female`, `role`, `leave_policy`,
+        `emergency_leaves`, `casual_leaves`, `earn_leaves`, `menstrual_leaves`.
+        Interns receive `leave_policy` = `intern` and `casual_leaves` / `earn_leaves`
+        as `0` in the response; approved full/half-day debits accrue `unpaid_leaves`.
         `menstrual_leaves` is always `0` for non-female employees.
         `short_leaves_remaining` counts approved short leaves left this month.
         """
@@ -1049,10 +1064,12 @@ class LeaveApplicationViewSet(ModelViewSet):
         sync_short_leave_monthly_calendar(request.user)
         summary.refresh_from_db()
 
-        profile = Profile.objects.filter(Employee_id=request.user).first()
+        profile = Profile.objects.filter(Employee_id=request.user).select_related("Role").first()
         display_name = (getattr(profile, "Name", None) or request.user.username) if profile else request.user.username
         gender_raw = (getattr(profile, "gender", None) or "") if profile else ""
         is_female = gender_raw.strip().lower() == "female"
+        role_name = getattr(getattr(profile, "Role", None), "role_name", None)
+        is_intern = role_name == INTERN_ROLE_NAME
 
         return Response(
             {
@@ -1060,6 +1077,8 @@ class LeaveApplicationViewSet(ModelViewSet):
                 "name": display_name,
                 "gender": gender_raw or None,
                 "is_female": is_female,
+                "role": role_name,
+                "leave_policy": "intern" if is_intern else "employee",
 
                 "total_leaves": summary.total_leaves,
                 "used_leaves": summary.used_leaves,
@@ -1068,8 +1087,8 @@ class LeaveApplicationViewSet(ModelViewSet):
                 "emergency_leaves": summary.emergency_leaves,
                 "remaining_emergency_leave": summary.emergency_leaves,
 
-                "casual_leaves": summary.casual_leaves,
-                "earn_leaves": summary.earn_leaves,
+                "casual_leaves": 0 if is_intern else summary.casual_leaves,
+                "earn_leaves": 0 if is_intern else summary.earn_leaves,
                 "menstrual_leaves": summary.menstrual_leaves if is_female else 0,
                 "unpaid_leaves": summary.unpaid_leaves,
                 "short_leaves_remaining": summary.short_leaves_remaining,
