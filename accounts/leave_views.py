@@ -331,7 +331,7 @@ def _role_is_hr(role_name):
 
 
 def _short_leave_use_sequential_chain(applicant):
-    """True when approvals go TL → HR → Admin (short leave without MD)."""
+    """True when short leave runs TL → HR → MD (HR and MD applicants use other rails)."""
     role_name, _ = _get_applicant_role_and_teamlead(applicant)
     if _role_is_hr(role_name):
         return False
@@ -348,10 +348,10 @@ def _short_leave_skip_team_lead_step(applicant):
 def _set_short_leave_approvals(application, applicant, status_map):
     """
     Short leave rails:
-      - HR applicant: MD only (Pending).
+      - HR applicant: MD only (Pending), same as full-day HR leave.
       - MD applicant: auto-approved on MD rail.
-      - Others: sequential TL → HR → Admin; MD unset. Team-lead applicant
-        skips TL and starts at HR. Employee without team lead starts at HR;
+      - Team-lead applicant: HR first, then MD after HR approves.
+      - Others: sequential TL → HR → MD. Employee without team lead starts at HR;
         Intern must have a team lead (enforced in the view).
     """
     pending = status_map.get("Pending")
@@ -386,6 +386,17 @@ def _short_leave_requires_tl_approved_before_hr(instance):
     if _short_leave_skip_team_lead_step(instance.applicant):
         return False
     return bool(instance.team_lead_id)
+
+
+def _short_leave_requires_hr_approved_before_md(instance):
+    if not _short_leave_use_sequential_chain(instance.applicant):
+        return False
+    return True
+
+
+def _short_leave_on_legacy_admin_rail(instance):
+    """In-flight short leave created before TL→HR→MD routing (Admin final step)."""
+    return _is_short_leave_instance(instance) and instance.admin_approval_id is not None
 
 
 def _set_approvals_by_role(application, applicant, status_map, is_md_approval_by_default=False):
@@ -749,8 +760,9 @@ class LeaveApplicationViewSet(ModelViewSet):
     def short_leave(self, request):
         """
         Two-hour short leave inside configured office hours.
-        Sequential approval (except HR applicant → MD only): Team lead → HR → Admin.
-        Interns must have a profile team lead. Short-leave rows cannot be deleted.
+        Sequential approval: Team lead → HR → MD (team-lead applicant: HR → MD;
+        HR applicant: MD only). Interns must have a profile team lead.
+        Short-leave rows cannot be deleted.
         POST body: ``date``, ``short_leave_start_time``, ``leave_subject``, ``reason``.
         """
         from rest_framework import serializers as ser
@@ -867,7 +879,7 @@ class LeaveApplicationViewSet(ModelViewSet):
                         )
             approval_updates["HR_approval"] = validated_data.pop("HR_approval")
         if "admin_approval" in validated_data and role == "Admin":
-            if _is_short_leave_instance(instance) and _short_leave_use_sequential_chain(instance.applicant):
+            if _short_leave_on_legacy_admin_rail(instance):
                 cur_hr = instance.HR_approval
                 if not (cur_hr and cur_hr.name == "Approved"):
                     raise s.ValidationError(
@@ -875,6 +887,12 @@ class LeaveApplicationViewSet(ModelViewSet):
                     )
             approval_updates["admin_approval"] = validated_data.pop("admin_approval")
         if "MD_approval" in validated_data and is_md:
+            if _is_short_leave_instance(instance) and _short_leave_requires_hr_approved_before_md(instance):
+                cur_hr = instance.HR_approval
+                if not (cur_hr and cur_hr.name == "Approved"):
+                    raise s.ValidationError(
+                        {"MD_approval": ["HR must approve this short leave before MD."]}
+                    )
             md_status = validated_data.pop("MD_approval")
             approval_updates["MD_approval"] = md_status
             if md_status and md_status.name == "Approved":
@@ -916,7 +934,7 @@ class LeaveApplicationViewSet(ModelViewSet):
 
         status_pending = (_get_leave_status_map().get("Pending"))
 
-        # Short leave sequential: advance HR / Admin Pending after prior approver Accepted.
+        # Short leave sequential: advance HR / MD Pending after prior approver Accepted.
         if _is_short_leave_instance(instance) and _short_leave_use_sequential_chain(instance.applicant):
             tl_upd = approval_updates.get("team_lead_approval")
             tl_was_approved = old_tl_ap and old_tl_ap.name == "Approved"
@@ -927,9 +945,11 @@ class LeaveApplicationViewSet(ModelViewSet):
             hr_upd = approval_updates.get("HR_approval")
             hr_was_approved = old_hr_ap and old_hr_ap.name == "Approved"
             if hr_upd and hr_upd.name == "Approved" and not hr_was_approved and status_pending:
-                if instance.admin_approval_id is None:
-                    instance.admin_approval = status_pending
-                    updated_fields.append("admin_approval")
+                if _short_leave_on_legacy_admin_rail(instance):
+                    pass
+                elif instance.MD_approval_id is None:
+                    instance.MD_approval = status_pending
+                    updated_fields.append("MD_approval")
 
         # When MD just approved (was not already Approved), deduct from the right bucket
         # (non-emergency only; emergency already updated at create).

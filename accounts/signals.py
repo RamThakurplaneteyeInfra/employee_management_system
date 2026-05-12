@@ -97,7 +97,7 @@ def create_profile_from_user(sender, instance: User, created, **kwargs):
 # ---------------------------------------------------------------------------
 # Leave-approval safety net: debit casual -> earn -> unpaid whenever MD_approval
 # transitions to Approved (non-Short-Leave paths). Short Leave debits monthly
-# quota separately. Admin-financed Short Leave sequential path also debited here.
+# quota on MD approval. Legacy admin-finalized short leave is handled separately.
 # ---------------------------------------------------------------------------
 
 @receiver(pre_save, sender=LeaveApplicationData)
@@ -119,7 +119,7 @@ def _capture_old_md_status(sender, instance: LeaveApplicationData, **kwargs):
 
 @receiver(post_save, sender=LeaveApplicationData)
 def _debit_on_admin_short_leave_approval(sender, instance: LeaveApplicationData, created, **kwargs):
-    """Sequential short leave finalized by Admin: consume one monthly short-leave slot."""
+    """Legacy short leave rows finalized by Admin before TL→HR→MD routing."""
     new_ad = instance.admin_approval
     new_name = getattr(new_ad, "name", None) if new_ad else None
     if new_name != "Approved":
