@@ -5,7 +5,6 @@ from .models import CustomerPanelAmountLog, CustomerPanelEntry
 
 @admin.register(CustomerPanelEntry)
 class CustomerPanelEntryAdmin(admin.ModelAdmin):
-    filter_horizontal = ("members",)
     list_display = (
         "id",
         "business_name",

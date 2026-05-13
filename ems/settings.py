@@ -183,6 +183,12 @@ ASGI_APPLICATION = "ems.asgi.application"
 # On Render: add the "Redis" add-on and set REDIS_URL in the environment.
 # =============================================================================
 REDIS_URL = os.getenv("REDIS_URL")
+
+# WebSocket presence (/ws/notifications/) — Redis counter, no DB writes.
+# Disable with WS_PRESENCE_ENABLED=False if needed. TTL should exceed ~2× client ping interval.
+WS_PRESENCE_ENABLED = os.getenv("WS_PRESENCE_ENABLED", "True").strip().lower() in ("true", "1", "yes")
+WS_PRESENCE_TTL_SECONDS = int(os.getenv("WS_PRESENCE_TTL_SECONDS", "120"))
+
 if REDIS_URL:
     CHANNEL_LAYERS = {
         "default": {

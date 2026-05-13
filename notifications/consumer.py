@@ -8,8 +8,13 @@ import logging
 from asgiref.sync import sync_to_async
 from channels.generic.websocket import AsyncWebsocketConsumer
 from ems.channel_groups import product_group_name, user_group_name
+from ems.ws_presence import connect_presence, disconnect_presence, refresh_presence_ttl
 
 logger = logging.getLogger(__name__)
+
+_touch_presence = sync_to_async(connect_presence, thread_sensitive=True)
+_release_presence = sync_to_async(disconnect_presence, thread_sensitive=True)
+_refresh_presence = sync_to_async(refresh_presence_ttl, thread_sensitive=True)
 
 
 def _product_group_name(product_label: str) -> str:
@@ -50,6 +55,7 @@ class NotificationConsumer(AsyncWebsocketConsumer):
             await self.close(code=4001)
             return
 
+        self._presence_username = user.username
         self.room_name = user_group_name(user.username)
         await self.channel_layer.group_add(self.room_name, self.channel_name)
 
@@ -63,18 +69,23 @@ class NotificationConsumer(AsyncWebsocketConsumer):
             await self.channel_layer.group_add(group_name, self.channel_name)
 
         await self.accept()
+        self._ws_presence_acquired = await _touch_presence(user.username)
 
     async def disconnect(self, close_code):
         if hasattr(self, "room_name"):
             await self.channel_layer.group_discard(self.room_name, self.channel_name)
         for group_name in getattr(self, "_product_groups_joined", ()):
             await self.channel_layer.group_discard(group_name, self.channel_name)
+        if getattr(self, "_ws_presence_acquired", False) and getattr(self, "_presence_username", None):
+            await _release_presence(self._presence_username)
 
     async def receive(self, text_data):
         """Optional: handle client pings/heartbeats."""
         try:
             data = json.loads(text_data)
             if data.get("type") == "ping":
+                if getattr(self, "_presence_username", None):
+                    await _refresh_presence(self._presence_username)
                 await self.send(text_data=json.dumps({"type": "pong", "message": "ok"}))
         except json.JSONDecodeError:
             pass

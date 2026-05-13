@@ -22,6 +22,7 @@ from ems.RequiredImports import (
     F,
 )
 from ems.verify_methods import *
+from ems.ws_presence import force_presence_offline, ws_online_map
 from .models import *
 from .snippet import admin_required
 from .filters import (
@@ -175,6 +176,10 @@ def _get_all_employees_sync():
                 "Number_of_days_from_joining": completed_years_and_days(start_date=p.Date_of_join),
                 "is_logged_in": getattr(p, "is_logged_in", False),
             })
+        ids = [row["Employee_id"] for row in result]
+        online = ws_online_map(ids)
+        for row in result:
+            row["ws_online"] = online.get(row["Employee_id"], False)
         return result
 
 
@@ -226,6 +231,7 @@ def _logout_existing_sessions(user):
     from django.contrib.sessions.models import Session
 
     Profile.objects.filter(Employee_id=user).update(is_logged_in=False)
+    force_presence_offline(user.username)
     user_id = str(user.pk)
     for s in Session.objects.all():
         try:
@@ -280,16 +286,14 @@ def _employee_dashboard_sync(request: HttpRequest):
         data = list(profile)
         for row in data:
             row["functions"] = []
-        return data
     elif user.is_superuser and user_role and user_role == "MD":
         profile = Profile.objects.select_related("Role").filter(Employee_id=user).annotate(role=F("Role__role_name")).values("Employee_id", "Email_id", "Date_of_birth", "Date_of_join", "Name", "Photo_link", "role", "is_logged_in")
         data = list(profile)
         for row in data:
             row["functions"] = []
-        return data
     else:
         profiles = Profile.objects.select_related("Department", "Branch", "Designation", "Role").prefetch_related("functions").filter(Employee_id=user)
-        return [{
+        data = [{
             "Employee_id": p.Employee_id_id,
             "Email_id": p.Email_id,
             "designation": p.Designation.designation if p.Designation else None,
@@ -304,6 +308,12 @@ def _employee_dashboard_sync(request: HttpRequest):
             "functions": [f.function for f in p.functions.all()],
             "is_logged_in": getattr(p, "is_logged_in", False),
         } for p in profiles]
+    uname = str(user.username)
+    online = ws_online_map([uname])
+    flag = online.get(uname, False)
+    for row in data:
+        row["ws_online"] = flag
+    return data
 
 
 @login_required
@@ -326,6 +336,7 @@ def _user_logout_sync(req):
     user_id = req.user.username
     with transaction.atomic():
         Profile.objects.filter(Employee_id=req.user).update(is_logged_in=False)
+        force_presence_offline(req.user.username)
         logout(req)
         req.session.flush()
     return user_id
@@ -472,6 +483,7 @@ def _view_employee_sync(username):
             "Role": profile.Role.role_name if profile.Role else None,
             "Functions": functions,
             "is_logged_in": getattr(profile, "is_logged_in", False),
+            "ws_online": ws_online_map([username]).get(username, False),
         }]
     return [{}]
 
@@ -518,7 +530,12 @@ def _get_teamleads_sync(query_role):
     if query_role in allowed_roles:
         role = _get_role_object_sync(role="TeamLead")
         teamleads = Profile.objects.filter(Role=role).select_related("Employee_id").order_by("Name")
-        return [{"Name": tl.Name, "Employee_id": tl.Employee_id.username, "is_logged_in": getattr(tl, "is_logged_in", False)} for tl in teamleads]
+        rows = [{"Name": tl.Name, "Employee_id": tl.Employee_id.username, "is_logged_in": getattr(tl, "is_logged_in", False)} for tl in teamleads]
+        ids = [r["Employee_id"] for r in rows]
+        online = ws_online_map(ids)
+        for r in rows:
+            r["ws_online"] = online.get(r["Employee_id"], False)
+        return rows
     return [{}]
 
 
