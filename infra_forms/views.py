@@ -9,6 +9,7 @@ from .excel_bulk_import import parse_excel_workbook
 from .permissions import CanAccessInfraProjectForms
 from .models import (
     InfraProjectForm,
+    InfraProjectFormEntry,
     InfraServiceType,
     ProjectCatalog,
     StructureEntry,
@@ -16,6 +17,7 @@ from .models import (
 )
 from .serializers import (
     BoqStructureEntrySerializer,
+    InfraProjectFormEntrySerializer,
     InfraProjectFormSerializer,
     InfraServiceTypeSerializer,
     LidarStructureEntrySerializer,
@@ -351,6 +353,9 @@ class InfraProjectFormViewSet(viewsets.ModelViewSet):
     """
     Separate endpoint for the project-selected numeric form (header + Entry[]).
     Uses atomic writes so header+entries are never partially saved.
+
+    Append rows (no replace): POST .../project-forms/{id}/entries/ with body
+    ``{ "entries": [ {...}, ... ] }`` or a single entry object.
     """
 
     permission_classes = [IsAuthenticated, CanAccessInfraProjectForms]
@@ -381,6 +386,68 @@ class InfraProjectFormViewSet(viewsets.ModelViewSet):
     def partial_update(self, request, *args, **kwargs):
         with transaction.atomic():
             return super().partial_update(request, *args, **kwargs)
+
+    _ENTRY_READ_ONLY_KEYS = frozenset({"id", "created_at", "updated_at"})
+
+    @action(detail=True, methods=["post"], url_path="entries")
+    def append_entries(self, request, pk=None):
+        """
+        Append one or more InfraProjectFormEntry rows without replacing existing entries.
+
+        POST /api/infra/project-forms/{id}/entries/
+
+        Body (either):
+        - { "entries": [ { "date": "...", "status": "SAR", "MJB": "1", ... }, ... ] }
+        - A single entry object: { "date": "...", "status": "SAR", ... }
+
+        Do not send id/created_at/updated_at for new rows; they are ignored if present.
+        Returns 201 with { "created": [...], "form": <full form> }.
+        """
+        form = self.get_object()
+        data = request.data
+        if isinstance(data, list):
+            rows = data
+        elif isinstance(data, dict) and "entries" in data:
+            rows = data["entries"]
+        elif isinstance(data, dict):
+            rows = [data]
+        else:
+            return Response(
+                {"detail": "Expected JSON object with `entries` array, a single entry object, or a JSON array of entries."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not isinstance(rows, list) or len(rows) == 0:
+            return Response(
+                {"detail": "`entries` must be a non-empty array, or send one entry object."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        created_payload = []
+        with transaction.atomic():
+            for row in rows:
+                if not isinstance(row, dict):
+                    return Response(
+                        {"detail": "Each entry must be a JSON object."},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                clean = {k: v for k, v in row.items() if k not in self._ENTRY_READ_ONLY_KEYS}
+                ser = InfraProjectFormEntrySerializer(data=clean)
+                ser.is_valid(raise_exception=True)
+                entry = InfraProjectFormEntry.objects.create(form=form, **ser.validated_data)
+                created_payload.append(InfraProjectFormEntrySerializer(entry).data)
+
+        form = (
+            InfraProjectForm.objects.prefetch_related("entries")
+            .select_related("project")
+            .get(pk=form.pk)
+        )
+        return Response(
+            {
+                "created": created_payload,
+                "form": InfraProjectFormSerializer(form).data,
+            },
+            status=status.HTTP_201_CREATED,
+        )
 
     @action(detail=False, methods=["get"], url_path="by-project")
     def by_project(self, request):
