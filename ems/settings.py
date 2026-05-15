@@ -124,6 +124,7 @@ INSTALLED_APPS = [
     "ai_summary",
     "infra_forms",
     "assets_request",
+    "asset_management.apps.AssetManagementConfig",
 ]
 
 MIDDLEWARE = [

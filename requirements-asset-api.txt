@@ -1,0 +1,9 @@
+# Merge these lines into your main backend requirements.txt
+djangorestframework>=3.17,<4.0
+django-cors-headers>=4.9,<5.0
+
+# Only if you use PostgreSQL for this app / project:
+# psycopg[binary]>=3.3,<4.0
+
+# Only if you load secrets from .env in settings:
+# python-dotenv>=1.2,<2.0

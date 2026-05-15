@@ -15,6 +15,7 @@ Including another URLconf
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
 from django.contrib import admin
+from attendance.views import daily_attendance
 from .urlImports import *
 from .views import home, metrics_view
 from django.conf.urls.static import static
@@ -37,6 +38,14 @@ urlpatterns = [
     path("alertsapi/", include("Alerts_Announcements.urls"), name="alerts_announcements"),
     path("api/announcements/", include("announcements_app.urls"), name="announcements_app_api"),
     path("notesapi/", include("notes.urls"), name="notesapi"),
+    # Asset booking / scheduling API (mount before recruitment's broader `api/` include)
+    path("api/asset-management/", include("asset_management.urls"), name="asset_management_api"),
+    # Spec alias for daily attendance (GET-only, same handler as /attendanceapi/daily/)
+    path(
+        "api/v1/attendance/daily-fixed/",
+        daily_attendance,
+        name="attendance_daily_fixed",
+    ),
     # Recruitment: /api/jobs/ (canonical) and /jobs/ (alias for legacy / misconfigured clients)
     path("api/", include("recruitment.urls"), name="recruitment"),
     path("", include("recruitment.urls_root")),
