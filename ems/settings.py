@@ -51,7 +51,6 @@ ALLOWED_HOSTS = [
     "employee-management-system-tmrl.onrender.com",
     "https://employee-management-system-1-jwyn.onrender.com",
     "employeemanagementsystem-production-a40c.up.railway.app",
-    "employeemanagementsystem-production-21b6.up.railway.app",
     "api.planeteyeems.com",  # custom domain for iOS cookie fix
     "http://192.168.41.76:3000",
     "http://192.168.41.76:3000/",
@@ -363,7 +362,7 @@ SESSION_EXPIRE_AT_BROWSER_CLOSE = True  # Use SESSION_COOKIE_AGE
 # =============================================================================
 # CORS
 # =============================================================================
-CORS_ALLOW_ALL_ORIGINS = True
+CORS_ALLOW_ALL_ORIGINS = False  # must be False when CORS_ALLOW_CREDENTIALS=True, wildcard + credentials is rejected by all browsers
 CORS_ALLOW_CREDENTIALS = True
 CORS_ALLOWED_ORIGINS = [
     "https://planeteye-employee-portal.onrender.com",
