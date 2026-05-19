@@ -50,8 +50,6 @@ ALLOWED_HOSTS = [
     "*",
     "employee-management-system-tmrl.onrender.com",
     "https://employee-management-system-1-jwyn.onrender.com",
-    "employeemanagementsystem-production-a40c.up.railway.app",
-    "api.planeteyeems.com",  # custom domain for iOS cookie fix
     "http://192.168.41.76:3000",
     "http://192.168.41.76:3000/",
     "http://192.168.42.107:3000/",
@@ -333,7 +331,7 @@ AWS_S3_CORS_RULES = [
         "AllowedHeaders": ["*"],
         "AllowedMethods": ["GET"],
         "AllowedOrigins": [
-            os.getenv("AWS_S3_CORS_ORIGIN", "https://planeteyeems.com"),
+            os.getenv("AWS_S3_CORS_ORIGIN", "https://planeteye-employee-portal.onrender.com"),
         ],
         "ExposeHeaders": ["Content-Disposition", "Content-Type"],
     }
@@ -362,19 +360,15 @@ SESSION_EXPIRE_AT_BROWSER_CLOSE = True  # Use SESSION_COOKIE_AGE
 # =============================================================================
 # CORS
 # =============================================================================
-CORS_ALLOW_ALL_ORIGINS = False  # must be False when CORS_ALLOW_CREDENTIALS=True, wildcard + credentials is rejected by all browsers
+CORS_ALLOW_ALL_ORIGINS = True
 CORS_ALLOW_CREDENTIALS = True
 CORS_ALLOWED_ORIGINS = [
     "https://planeteye-employee-portal.onrender.com",
     "https://employee-management-system-1-jwyn.onrender.com",
-    # Production URLs
-    "https://planeteyeems.com",
-    "https://www.planeteyeems.com",
-    "https://employeemanagementsystem-production-a40c.up.railway.app",
-    "https://api.planeteyeems.com",  # custom subdomain
     "http://localhost:3000",
     "http://127.0.0.1:8000",
     "http://192.168.41.76:3000",
+    # "http://192.168.41.55:3000",
     "http://192.168.42.107:3000",
 ]
 CORS_ALLOW_METHODS = ["DELETE", "GET", "OPTIONS", "PATCH", "POST", "PUT"]
@@ -393,13 +387,12 @@ CORS_ALLOW_HEADERS = [
 CSRF_TRUSTED_ORIGINS = [
     "https://employee-management-system-1-jwyn.onrender.com",
     "https://planeteye-employee-portal.onrender.com",
-    # Production URLs — required for iOS Safari and cross-origin requests
-    "https://planeteyeems.com",
-    "https://www.planeteyeems.com",
-    "https://employeemanagementsystem-production-a40c.up.railway.app",
-    "https://api.planeteyeems.com",  # custom subdomain
     # "http://192.168.41.55:3000",
     "http://192.168.41.76:3000",
+    # "http://localhost:3000/",
+    # "http://localhost:8000/",
+    # "http://127.0.0.1:8000/",
+    # "http://192.168.41.55:3000/",
     "http://192.168.41.120:3000/",
     "http://192.168.42.107:3000",
     "http://localhost:3001",
@@ -416,31 +409,23 @@ CSRF_TRUSTED_ORIGINS = [
 # =============================================================================
 if os.getenv("is_developement") == "True":
     DEBUG = True
-    SESSION_COOKIE_SAMESITE = "None"   # string "None", not Python None — Django needs the string
-    CSRF_COOKIE_SAMESITE = "None"
-    SESSION_COOKIE_SECURE = True       # SameSite=None requires Secure=True even in dev (use HTTPS locally)
-    CSRF_COOKIE_SECURE = True
-    SESSION_COOKIE_HTTPONLY = False
+    SESSION_COOKIE_SAMESITE = None
+    CSRF_COOKIE_SAMESITE = None
+    SESSION_COOKIE_HTTPONLY=False
+    # SESSION_COOKIE_SECURE = True
+    # CSRF_COOKIE_SECURE = True
+    # For cross-origin WS in dev: use SESSION_COOKIE_SAMESITE = "None" and HTTPS.
 else:
     DEBUG = True
-    # os.getenv() returns strings — must convert to bool explicitly.
-    # SameSite=None requires Secure=True on iOS Safari and all modern browsers.
-    _csrf_secure_env = os.getenv("CSRF_COOKIE_SECURE", "True").strip().lower()
-    CSRF_COOKIE_SECURE = _csrf_secure_env not in ("false", "0", "no")
-
-    _session_secure_env = os.getenv("SESSION_COOKIE_SECURE", "True").strip().lower()
-    SESSION_COOKIE_SECURE = _session_secure_env not in ("false", "0", "no")
-
+    CSRF_COOKIE_SECURE = os.getenv("CSRF_COOKIE_SECURE", False)
+    # SESSION_COOKIE_SECURE must come from SESSION_COOKIE_SECURE.
+    # Using CSRF_COOKIE_SECURE here can prevent cookies being sent on HTTPS
+    # WebSocket handshakes when CSRF_COOKIE_SECURE is not configured.
+    SESSION_COOKIE_SECURE = os.getenv("SESSION_COOKIE_SECURE", False)
     SESSION_COOKIE_SAMESITE = os.getenv("SESSION_COOKIE_SAMESITE", "None")
     CSRF_COOKIE_SAMESITE = os.getenv("CSRF_COOKIE_SAMESITE", "None")
     SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
-    SESSION_COOKIE_HTTPONLY = False
-    # Scope cookie to root domain so planeteyeems.com and api.planeteyeems.com share it.
-    # This is the key fix for iOS Safari ITP — same eTLD+1 = first-party cookie.
-    # Only set when SESSION_COOKIE_DOMAIN env var is explicitly provided (not set in local dev).
-    _session_cookie_domain = os.getenv("SESSION_COOKIE_DOMAIN", "").strip()
-    if _session_cookie_domain:
-        SESSION_COOKIE_DOMAIN = _session_cookie_domain
+    SESSION_COOKIE_HTTPONLY=False
     
 # Add Cloudflare Tunnel HTTPS URL when using cloudflared (set in .env: CLOUDFLARE_TUNNEL_ORIGIN=https://xxx.trycloudflare.com)
 _cloudflare_origin = os.getenv("CLOUDFLARE_TUNNEL_ORIGIN", "").strip().rstrip("/")
