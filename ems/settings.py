@@ -416,12 +416,11 @@ CSRF_TRUSTED_ORIGINS = [
 # =============================================================================
 if os.getenv("is_developement") == "True":
     DEBUG = True
-    SESSION_COOKIE_SAMESITE = None
-    CSRF_COOKIE_SAMESITE = None
-    SESSION_COOKIE_HTTPONLY=False
-    # SESSION_COOKIE_SECURE = True
-    # CSRF_COOKIE_SECURE = True
-    # For cross-origin WS in dev: use SESSION_COOKIE_SAMESITE = "None" and HTTPS.
+    SESSION_COOKIE_SAMESITE = "None"   # string "None", not Python None — Django needs the string
+    CSRF_COOKIE_SAMESITE = "None"
+    SESSION_COOKIE_SECURE = True       # SameSite=None requires Secure=True even in dev (use HTTPS locally)
+    CSRF_COOKIE_SECURE = True
+    SESSION_COOKIE_HTTPONLY = False
 else:
     DEBUG = True
     # os.getenv() returns strings — must convert to bool explicitly.
@@ -438,7 +437,10 @@ else:
     SESSION_COOKIE_HTTPONLY = False
     # Scope cookie to root domain so planeteyeems.com and api.planeteyeems.com share it.
     # This is the key fix for iOS Safari ITP — same eTLD+1 = first-party cookie.
-    SESSION_COOKIE_DOMAIN = os.getenv("SESSION_COOKIE_DOMAIN", ".planeteyeems.com")
+    # Only set when SESSION_COOKIE_DOMAIN env var is explicitly provided (not set in local dev).
+    _session_cookie_domain = os.getenv("SESSION_COOKIE_DOMAIN", "").strip()
+    if _session_cookie_domain:
+        SESSION_COOKIE_DOMAIN = _session_cookie_domain
     
 # Add Cloudflare Tunnel HTTPS URL when using cloudflared (set in .env: CLOUDFLARE_TUNNEL_ORIGIN=https://xxx.trycloudflare.com)
 _cloudflare_origin = os.getenv("CLOUDFLARE_TUNNEL_ORIGIN", "").strip().rstrip("/")
