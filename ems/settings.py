@@ -51,6 +51,7 @@ ALLOWED_HOSTS = [
     "employee-management-system-tmrl.onrender.com",
     "https://employee-management-system-1-jwyn.onrender.com",
     "employeemanagementsystem-production-a40c.up.railway.app",
+    "employeemanagementsystem-production-21b6.up.railway.app",
     "api.planeteyeems.com",  # custom domain for iOS cookie fix
     "http://192.168.41.76:3000",
     "http://192.168.41.76:3000/",
