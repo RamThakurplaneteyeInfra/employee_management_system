@@ -50,6 +50,8 @@ ALLOWED_HOSTS = [
     "*",
     "employee-management-system-tmrl.onrender.com",
     "https://employee-management-system-1-jwyn.onrender.com",
+    "api.planeteyeems.com",
+    "employeemanagementsystem-production-21b6.up.railway.app",
     "http://192.168.41.76:3000",
     "http://192.168.41.76:3000/",
     "http://192.168.42.107:3000/",
