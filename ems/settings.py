@@ -127,6 +127,7 @@ INSTALLED_APPS = [
     "infra_forms",
     "assets_request",
     "asset_management.apps.AssetManagementConfig",
+    "tour_advance",
 ]
 
 MIDDLEWARE = [

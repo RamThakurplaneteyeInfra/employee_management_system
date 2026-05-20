@@ -59,6 +59,8 @@ urlpatterns = [
     path("api/infra/", include("infra_forms.urls"), name="infra_forms_api"),
     # Asset / Software requests (TeamLead/HR/Admin/MD only)
     path("api/assets-request/", include("assets_request.urls"), name="assets_request_api"),
+    # Tour advance requests (separate from eventsapi/tours/ team tours)
+    path("api/tour-advance/", include("tour_advance.urls"), name="tour_advance_api"),
 ]
 
 if True:
