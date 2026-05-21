@@ -61,6 +61,7 @@ urlpatterns = [
     path("api/assets-request/", include("assets_request.urls"), name="assets_request_api"),
     # Tour advance requests (separate from eventsapi/tours/ team tours)
     path("api/tour-advance/", include("tour_advance.urls"), name="tour_advance_api"),
+    path("api/certificates/", include("certificates.urls"), name="certificates_api"),
 ]
 
 if True:

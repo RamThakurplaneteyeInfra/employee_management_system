@@ -128,6 +128,7 @@ INSTALLED_APPS = [
     "assets_request",
     "asset_management.apps.AssetManagementConfig",
     "tour_advance",
+    "certificates",
 ]
 
 MIDDLEWARE = [
@@ -316,6 +317,7 @@ AWS_STORAGE_BUCKET_NAME = os.getenv("AWS_STORAGE_BUCKET_NAME", "")
 AWS_S3_REGION_NAME = os.getenv("AWS_S3_REGION_NAME", "ap-south-1")
 AWS_S3_EMPLOYEE_PHOTO_PREFIX = os.getenv("AWS_S3_EMPLOYEE_PHOTO_PREFIX", "Employee_Photo/")
 AWS_S3_FILES_PREFIX = os.getenv("AWS_S3_FILES_PREFIX", "files/")
+AWS_S3_CERTIFICATE_PREFIX = os.getenv("AWS_S3_CERTIFICATE_PREFIX", "Certificate")
 AWS_S3_PRESIGNED_EXPIRY = int(os.getenv("AWS_S3_PRESIGNED_EXPIRY", "3600"))
 
 # Default file storage: S3. Profile Photo_link uses upload_to="Employee_Photo/" so no extra AWS_LOCATION.
