@@ -98,11 +98,39 @@ class TourAdvanceVisibilityTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertNotIn(self.req.id, [r["id"] for r in resp.data])
 
-    def test_delete_disabled(self):
+    def test_admin_can_delete_request(self):
+        req_id = self.req.id
         self.client.force_authenticate(user=self.admin_user)
+        resp = self.client.delete(f"/api/tour-advance/requests/{req_id}/")
+        self.assertEqual(resp.status_code, 204)
+        self.assertFalse(TourAdvanceRequest.objects.filter(pk=req_id).exists())
+
+    def test_creator_can_delete_own_pending_request(self):
+        req_id = self.req.id
+        self.client.force_authenticate(user=self.creator)
+        resp = self.client.delete(f"/api/tour-advance/requests/{req_id}/")
+        self.assertEqual(resp.status_code, 204)
+        self.assertFalse(TourAdvanceRequest.objects.filter(pk=req_id).exists())
+
+    def test_creator_cannot_delete_non_pending_request(self):
+        self.req.status = TourAdvanceRequest.Status.APPROVED
+        self.req.save(update_fields=["status"])
+        self.client.force_authenticate(user=self.creator)
         resp = self.client.delete(f"/api/tour-advance/requests/{self.req.id}/")
-        self.assertEqual(resp.status_code, 405)
+        self.assertEqual(resp.status_code, 403)
+        self.assertIn("pending", resp.data["detail"].lower())
         self.assertTrue(TourAdvanceRequest.objects.filter(pk=self.req.pk).exists())
+
+    def test_member_cannot_delete_request(self):
+        self.client.force_authenticate(user=self.member_b)
+        resp = self.client.delete(f"/api/tour-advance/requests/{self.req.id}/")
+        self.assertEqual(resp.status_code, 403)
+        self.assertTrue(TourAdvanceRequest.objects.filter(pk=self.req.pk).exists())
+
+    def test_other_cannot_delete_request(self):
+        self.client.force_authenticate(user=self.other)
+        resp = self.client.delete(f"/api/tour-advance/requests/{self.req.id}/")
+        self.assertEqual(resp.status_code, 404)
 
     def test_s3_key_validation(self):
         self.assertTrue(

@@ -7,6 +7,7 @@ from rest_framework.response import Response
 
 from accounts.models import Profile
 from ems.auth_utils import CsrfExemptSessionAuthentication
+from ems.s3_utils import delete_file_from_files
 
 from .models import TourAdvanceMember, TourAdvanceRequest
 from .permissions import IsAdminOrMD, is_admin_or_md
@@ -128,10 +129,28 @@ class TourAdvanceRequestViewSet(viewsets.ModelViewSet):
         )
 
     def destroy(self, request, *args, **kwargs):
-        return Response(
-            {"detail": "Delete is disabled for tour advance requests."},
-            status=status.HTTP_405_METHOD_NOT_ALLOWED,
-        )
+        instance = self.get_object()
+        user = request.user
+
+        if is_admin_or_md(user):
+            pass
+        elif instance.created_by_id == user.id:
+            if instance.status != TourAdvanceRequest.Status.PENDING:
+                return Response(
+                    {"detail": "Only pending requests can be deleted."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+        else:
+            return Response(
+                {"detail": "You do not have permission to delete this request."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        s3_keys = list(instance.attachments.values_list("s3_key", flat=True))
+        instance.delete()
+        for key in s3_keys:
+            delete_file_from_files(key)
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
     @action(
         detail=False,
