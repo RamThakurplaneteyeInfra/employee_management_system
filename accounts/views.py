@@ -3,7 +3,8 @@ Accounts API views. Base path: {{baseurl}}/accounts/
 - Session: login (POST), logout (GET), sessiondata (GET), home (GET).
 - Filters: getBranch, getRoles, getDesignations, getDepartmentsandFunctions, getTeamleads (GET, query params).
 - Employee: employee/dashboard (GET), employees (GET), updateUsername (POST).
-- Admin: updateProfile, createEmployeeLogin, viewEmployee, deleteEmployee, changePassword, changePhoto, FetchPhoto.
+- Admin: updateProfile, viewEmployee, deleteEmployee, changePassword, changePhoto, FetchPhoto.
+- createEmployeeLogin: superuser or Admin/MD/HR (HR cannot create privileged roles).
 - Leave: leave-applications (DRF ViewSet) + summary, view_history, approval, emergency.
 """
 import logging
@@ -24,7 +25,7 @@ from ems.RequiredImports import (
 from ems.verify_methods import *
 from ems.ws_presence import force_presence_offline, ws_online_map
 from .models import *
-from .snippet import admin_required
+from .snippet import admin_required, admin_or_hr_required
 from .filters import (
     get_branches,
     get_roles,
@@ -50,9 +51,13 @@ async def home(request: HttpRequest):
     return HttpResponse(status=204)
 
 # ==================== create_employee_login ====================
-# Create new employee login and profile (Admin only).
+# Create new employee login and profile (superuser, Admin, MD, or HR).
+# HR cannot create Admin, MD, or HR accounts.
 # URL: {{baseurl}}/accounts/admin/createEmployeeLogin/
 # Method: POST
+_HR_CANNOT_CREATE_ROLES = frozenset({"Admin", "MD", "HR", "Hr"})
+
+
 def _create_employee_login_sync(req):
     """Sync helper: DB operations. Expects application/x-www-form-urlencoded or multipart/form-data."""
     fields = ['Employee_id', 'password', 'Name', 'Role', 'Email_id', 'Designation', 'Date_of_join', 'Date_of_birth', 'Branch', 'Photo_link', "Department", "Teamlead", "Functions", "gender"]
@@ -92,6 +97,16 @@ def _create_employee_login_sync(req):
         elif i not in not_required_field or field_value:
             if i != "Functions":
                 profile_values[i] = field_value
+    caller_role = _get_user_role_sync(req.user)
+    if caller_role == "HR" and not req.user.is_superuser:
+        new_role = profile_values.get("Role")
+        if new_role in _HR_CANNOT_CREATE_ROLES:
+            return {
+                "error": JsonResponse(
+                    {"messege": "HR cannot create Admin, MD, or HR accounts"},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+            }
     with transaction.atomic():
         check_user = _get_user_object_sync(username=login_values["username"])
         if not isinstance(check_user, User):
@@ -120,7 +135,7 @@ def _create_employee_login_sync(req):
     return {"ok": True}
 
 
-@admin_required
+@admin_or_hr_required
 @csrf_exempt
 async def create_employee_login(request: HttpRequest):
     verify_method = verifyPost(request)

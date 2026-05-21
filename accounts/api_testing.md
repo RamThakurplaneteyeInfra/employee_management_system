@@ -217,7 +217,7 @@
 ```json
 { "messege": "user profile created successfully" }
 ```
-**notes:** Admin only. Creates User and Profile. 400/404/500 on error.
+**notes:** Superuser, or Profile role Admin/MD/HR. HR cannot create Admin/MD/HR roles (403). Other admin endpoints remain superuser-only. Creates User and Profile. 400/403/404/500 on error.
 
 ---
 

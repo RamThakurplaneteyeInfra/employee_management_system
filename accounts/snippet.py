@@ -19,6 +19,20 @@ def _check_auth_sync(request):
     return request.user.is_authenticated
 
 
+def _check_admin_or_hr_sync(request):
+    """Sync helper: returns 'ok' | 'login' | 'forbidden' for create-employee access."""
+    if not request.user.is_authenticated:
+        return "login"
+    if request.user.is_superuser:
+        return "ok"
+    from accounts.filters import _get_user_role_sync
+
+    role = _get_user_role_sync(request.user)
+    if role in ("Admin", "MD", "HR", "Hr"):
+        return "ok"
+    return "forbidden"
+
+
 def admin_required(view_func):
     """Supports both sync and async views."""
     if iscoroutinefunction(view_func):
@@ -48,6 +62,32 @@ def admin_required(view_func):
             return view_func(request, *args, **kwargs)
         return HttpResponseForbidden("Admin access only")
     return wrapper
+
+
+def admin_or_hr_required(view_func):
+    """Superuser or Profile role Admin/MD/HR. Used only for create-employee; other admin views stay admin_required."""
+    if iscoroutinefunction(view_func):
+        @wraps(view_func)
+        async def async_wrapper(request: HttpRequest, *args, **kwargs):
+            access = await sync_to_async(_check_admin_or_hr_sync)(request)
+            if access == "login":
+                return HttpResponseForbidden("Login required")
+            if access == "forbidden":
+                return HttpResponseForbidden("Admin or HR access required")
+            return await view_func(request, *args, **kwargs)
+        return async_wrapper
+
+    @wraps(view_func)
+    def wrapper(request: HttpRequest, *args, **kwargs):
+        access = _check_admin_or_hr_sync(request)
+        if access == "login":
+            return HttpResponseForbidden("Login required")
+        if access == "forbidden":
+            return HttpResponseForbidden("Admin or HR access required")
+        return view_func(request, *args, **kwargs)
+
+    return wrapper
+
 
 def login_required(view_func):
     """Async-safe login required. Redirects unauthenticated users or returns 401."""
