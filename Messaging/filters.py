@@ -102,6 +102,41 @@ def _message_content_for_response(content):
     return content
 
 
+def _parse_pagination_params(request: HttpRequest):
+    """
+    Parse optional pagination params from query string.
+    Returns (limit, offset, paginate_enabled).
+    """
+    raw_limit = request.GET.get("limit")
+    raw_offset = request.GET.get("offset")
+    paginate_enabled = raw_limit is not None or raw_offset is not None
+
+    if not paginate_enabled:
+        return 0, 0, False
+
+    default_limit = 30
+    max_limit = 100
+
+    try:
+        limit = int(raw_limit) if raw_limit is not None else default_limit
+    except (TypeError, ValueError):
+        limit = default_limit
+
+    try:
+        offset = int(raw_offset) if raw_offset is not None else 0
+    except (TypeError, ValueError):
+        offset = 0
+
+    if limit < 1:
+        limit = default_limit
+    if limit > max_limit:
+        limit = max_limit
+    if offset < 0:
+        offset = 0
+
+    return limit, offset, True
+
+
 # ==================== get_messages ====================
 def _get_messages_sync(request: HttpRequest, chat_id: str):
     """Unified timeline: message (with optional attachment), or attachment-only (standalone MessageAttachment in group/chat)."""
@@ -209,6 +244,28 @@ def _get_messages_sync(request: HttpRequest, chat_id: str):
     items.sort(key=lambda x: x["_sort_at"], reverse=True)
     for it in items:
         del it["_sort_at"]
+
+    limit, offset, paginate_enabled = _parse_pagination_params(request)
+    if paginate_enabled:
+        total = len(items)
+        page_items = items[offset: offset + limit]
+        next_offset = offset + limit if (offset + limit) < total else None
+        prev_offset = offset - limit if offset - limit >= 0 else None
+        return JsonResponse(
+            {
+                "items": page_items,
+                "pagination": {
+                    "limit": limit,
+                    "offset": offset,
+                    "next_offset": next_offset,
+                    "prev_offset": prev_offset,
+                    "has_next": next_offset is not None,
+                    "has_prev": offset > 0,
+                    "total": total,
+                },
+            },
+            safe=False,
+        )
 
     return JsonResponse(items, safe=False)
 
