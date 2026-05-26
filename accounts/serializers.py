@@ -9,9 +9,51 @@ from rest_framework import serializers
 from django.contrib.auth import get_user_model
 
 from ems.utils import gmt_to_ist_str
-from .models import LeaveApplicationData, LeaveTypes, LeaveStatus, Profile
+from .models import LeaveApplicationData, LeaveTypes, LeaveStatus, Profile, LeaveSummary
 
 User = get_user_model()
+
+INTERN_ROLE_NAME = "Intern"
+_HR_MD_LEAVE_BALANCE_VIEW_ROLES = frozenset({"HR", "Hr", "MD"})
+
+
+def _viewer_can_see_applicant_leave_balances(serializer_context) -> bool:
+    """HR / MD (and superuser) may see applicant casual / earn / unpaid on approval views."""
+    request = serializer_context.get("request")
+    if not request or not getattr(request.user, "is_authenticated", False):
+        return False
+    if request.user.is_superuser:
+        return True
+    from accounts.filters import _get_user_role_sync
+
+    return _get_user_role_sync(request.user) in _HR_MD_LEAVE_BALANCE_VIEW_ROLES
+
+
+def _build_applicant_leave_balances(applicant):
+    """Read-only snapshot from LeaveSummary; no DB writes."""
+    if not applicant:
+        return None
+    is_intern = False
+    try:
+        profile = applicant.accounts_profile
+        role_name = getattr(getattr(profile, "Role", None), "role_name", None)
+        is_intern = role_name == INTERN_ROLE_NAME
+    except Profile.DoesNotExist:
+        pass
+    try:
+        summary = applicant.leave_summary
+        casual = summary.casual_leaves or Decimal("0")
+        earn = summary.earn_leaves or Decimal("0")
+        unpaid = summary.unpaid_leaves or Decimal("0")
+    except LeaveSummary.DoesNotExist:
+        casual = earn = unpaid = Decimal("0")
+    if is_intern:
+        casual = earn = Decimal("0")
+    return {
+        "casual_leaves": casual,
+        "earn_leaves": earn,
+        "unpaid_leaves": unpaid,
+    }
 
 
 def _get_applicant_display_name(applicant):
@@ -169,6 +211,8 @@ class LeaveApplicationListSerializer(serializers.ModelSerializer):
 class LeaveApplicationResponseSerializer(serializers.ModelSerializer):
     """POST/GET response: char/name fields only (no FK ids). User names from Profile.Name."""
     applicant_name = serializers.SerializerMethodField()
+    applicant_username = serializers.SerializerMethodField()
+    applicant_leave_balances = serializers.SerializerMethodField()
     team_lead_name = serializers.SerializerMethodField()
     alternative_name = serializers.SerializerMethodField()
     # Emit duration_of_days as a JSON number (e.g. 1.0, 0.5) instead of the
@@ -190,6 +234,8 @@ class LeaveApplicationResponseSerializer(serializers.ModelSerializer):
         fields = [
             "id",
             "applicant_name",
+            "applicant_username",
+            "applicant_leave_balances",
             "team_lead_name",
             "alternative_name",
             "start_date",
@@ -216,6 +262,17 @@ class LeaveApplicationResponseSerializer(serializers.ModelSerializer):
 
     def get_applicant_name(self, obj):
         return _get_applicant_display_name(getattr(obj, "applicant", None))
+
+    def get_applicant_username(self, obj):
+        if not _viewer_can_see_applicant_leave_balances(self.context):
+            return None
+        applicant = getattr(obj, "applicant", None)
+        return applicant.username if applicant else None
+
+    def get_applicant_leave_balances(self, obj):
+        if not _viewer_can_see_applicant_leave_balances(self.context):
+            return None
+        return _build_applicant_leave_balances(getattr(obj, "applicant", None))
 
     def get_team_lead_name(self, obj):
         return _get_applicant_display_name(getattr(obj, "team_lead", None))

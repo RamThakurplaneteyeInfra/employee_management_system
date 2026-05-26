@@ -519,6 +519,9 @@ class LeaveApplicationViewSet(ModelViewSet):
     authentication_classes = [CsrfExemptSessionAuthentication]
     permission_classes = [IsAuthenticated]
 
+    def get_serializer_context(self):
+        return {**super().get_serializer_context(), "request": self.request}
+
     def get_serializer_class(self):
         if self.action == "create":
             return LeaveApplicationCreateSerializer
@@ -1263,8 +1266,15 @@ class LeaveApplicationViewSet(ModelViewSet):
             Q(alternative_approval__isnull=True) | Q(alternative_approval__name="Pending")
         )
 
-        qs = base.filter(q).distinct()
-        serializer = LeaveApplicationResponseSerializer(qs, many=True)
+        qs = (
+            base.filter(q)
+            .distinct()
+            .select_related(
+                "applicant__leave_summary",
+                "applicant__accounts_profile__Role",
+            )
+        )
+        serializer = self.get_serializer(qs, many=True)
         return Response(serializer.data)
 
     @action(detail=False, methods=["get"], url_path="alternative-requests")
