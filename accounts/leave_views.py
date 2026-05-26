@@ -33,6 +33,13 @@ from .serializers import (
     ShortLeaveCreateSerializer,
 )
 from .filters import _get_user_role_sync
+from .leave_notifications import (
+    notify_alternative_on_submission,
+    notify_after_alternative_approved,
+    notify_hr_after_team_lead_approved,
+    notify_md_after_hr_approved,
+    notify_applicant_final_approval,
+)
 
 INTERN_ROLE_NAME = "Intern"
 
@@ -580,6 +587,8 @@ class LeaveApplicationViewSet(ModelViewSet):
                         application.save(update_fields=[
                             "casual_used", "earn_used", "unpaid_used",
                         ])
+            # Regular leave submission -> notify designated alternative once.
+            notify_alternative_on_submission(application)
         application.refresh_from_db()
         return Response(
             LeaveApplicationResponseSerializer(application).data,
@@ -871,6 +880,7 @@ class LeaveApplicationViewSet(ModelViewSet):
         old_tl_ap = instance.team_lead_approval
         old_hr_ap = instance.HR_approval
         old_admin_ap = instance.admin_approval
+        old_alt_ap = instance.alternative_approval
 
         # Capture MD approval state before we change it (for leave_summary update)
         old_md_approved = (
@@ -1016,6 +1026,28 @@ class LeaveApplicationViewSet(ModelViewSet):
 
         if updated_fields:
             instance.save(update_fields=list(dict.fromkeys(updated_fields)))
+
+        # ---- transition-based leave notifications (idempotent) ----
+        # Notify only when rail transitions from non-Approved -> Approved.
+        # Keep short/emergency flow untouched via helpers' internal guards.
+        new_alt_name = getattr(getattr(instance, "alternative_approval", None), "name", None)
+        old_alt_name = getattr(old_alt_ap, "name", None) if old_alt_ap else None
+        if new_alt_name == "Approved" and old_alt_name != "Approved":
+            notify_after_alternative_approved(instance, user)
+
+        new_tl_name = getattr(getattr(instance, "team_lead_approval", None), "name", None)
+        old_tl_name = getattr(old_tl_ap, "name", None) if old_tl_ap else None
+        if new_tl_name == "Approved" and old_tl_name != "Approved":
+            notify_hr_after_team_lead_approved(instance, user)
+
+        new_hr_name = getattr(getattr(instance, "HR_approval", None), "name", None)
+        old_hr_name = getattr(old_hr_ap, "name", None) if old_hr_ap else None
+        if new_hr_name == "Approved" and old_hr_name != "Approved":
+            notify_md_after_hr_approved(instance, user)
+
+        new_md_name = getattr(getattr(instance, "MD_approval", None), "name", None)
+        if new_md_name == "Approved" and not old_md_approved:
+            notify_applicant_final_approval(instance, user)
 
     def destroy(self, request, *args, **kwargs):
         """DELETE: applicant can delete own application if MD has not yet approved."""
