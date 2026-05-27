@@ -57,6 +57,8 @@ urlpatterns = [
     path("ai/", include("insight.urls"), name="insight_ai"),
     # INFRA structure forms API (same routes as standalone backend, under /api/infra/)
     path("api/infra/", include("infra_forms.urls"), name="infra_forms_api"),
+    # Farm services task capture API (separate app, isolated from infra_forms)
+    path("api/farm-services/", include("farm_services.urls"), name="farm_services_api"),
     # Asset / Software requests (TeamLead/HR/Admin/MD only)
     path("api/assets-request/", include("assets_request.urls"), name="assets_request_api"),
     # Tour advance requests (separate from eventsapi/tours/ team tours)

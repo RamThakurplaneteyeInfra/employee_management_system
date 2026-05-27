@@ -125,6 +125,7 @@ INSTALLED_APPS = [
     "insight",
     "ai_summary",
     "infra_forms",
+    "farm_services",
     "assets_request",
     "asset_management.apps.AssetManagementConfig",
     "tour_advance",
