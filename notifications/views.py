@@ -22,6 +22,7 @@ from ems.RequiredImports import (
     status,
     date,
 )
+from rest_framework.pagination import PageNumberPagination
 from .models import Notification, notification_type
 from .Serializers import NotificationSerializer
 
@@ -33,8 +34,21 @@ from .Serializers import NotificationSerializer
 def get_notifications(request):
     # print("get notifications not from cache")
     qs = Notification.objects.filter(receipient=request.user).select_related("type_of_notification", "from_user__accounts_profile", "receipient__accounts_profile").order_by("-created_at")
-    data = NotificationSerializer(qs, many=True).data
-    return Response(data)
+
+    # Backward-compatible: paginate only when page or page_size is explicitly requested.
+    use_pagination = ("page" in request.query_params) or ("page_size" in request.query_params)
+    if not use_pagination:
+        data = NotificationSerializer(qs, many=True).data
+        return Response(data)
+
+    paginator = PageNumberPagination()
+    paginator.page_size = 20
+    paginator.page_size_query_param = "page_size"
+    paginator.max_page_size = 100
+
+    page = paginator.paginate_queryset(qs, request)
+    data = NotificationSerializer(page, many=True).data
+    return paginator.get_paginated_response(data)
 
 
 # ==================== mark_as_read ====================
