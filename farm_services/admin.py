@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import FarmServiceRequest, FarmServiceTask
+from .models import FarmServiceRequest, FarmServiceSubtask, FarmServiceTask
 
 
 class FarmServiceTaskInline(admin.TabularInline):
@@ -23,4 +23,20 @@ class FarmServiceTaskAdmin(admin.ModelAdmin):
     search_fields = ("task_name", "request__service_name")
     list_filter = ("status", "created_at")
     filter_horizontal = ("team_members",)
+
+
+@admin.register(FarmServiceSubtask)
+class FarmServiceSubtaskAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "task",
+        "subtask_name",
+        "assigned_member",
+        "created_by",
+        "status",
+        "created_at",
+        "updated_at",
+    )
+    search_fields = ("subtask_name", "task__task_name", "task__request__service_name")
+    list_filter = ("status", "created_at")
 

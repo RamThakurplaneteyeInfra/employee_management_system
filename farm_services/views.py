@@ -8,7 +8,11 @@ from accounts.models import Profile
 
 from .models import FarmServiceRequest
 from .permissions import CanEditFarmServiceRequest
-from .serializers import EmployeeDropdownSerializer, FarmServiceRequestSerializer
+from .serializers import (
+    EmployeeDropdownSerializer,
+    FarmServiceRequestListSerializer,
+    FarmServiceRequestSerializer,
+)
 
 
 class FarmServiceRequestViewSet(viewsets.ModelViewSet):
@@ -21,8 +25,15 @@ class FarmServiceRequestViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated, CanEditFarmServiceRequest]
     http_method_names = ["get", "post", "patch", "put", "head", "options"]
     queryset = FarmServiceRequest.objects.select_related("created_by").prefetch_related(
-        "tasks__team_members"
+        "tasks__team_members",
+        "tasks__subtasks__assigned_member",
+        "tasks__subtasks__created_by",
     )
+
+    def get_serializer_class(self):
+        if self.action == "list":
+            return FarmServiceRequestListSerializer
+        return FarmServiceRequestSerializer
 
     def get_queryset(self):
         qs = super().get_queryset()
