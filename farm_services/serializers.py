@@ -161,6 +161,7 @@ class FarmServiceTaskReadSerializer(serializers.ModelSerializer):
 
 class FarmServiceRequestSerializer(serializers.ModelSerializer):
     tasks = serializers.ListField(write_only=True, required=False)
+    puc = serializers.BooleanField(required=False)
     created_by = serializers.SerializerMethodField(read_only=True)
     no_of_tasks = serializers.SerializerMethodField(read_only=True)
     completed = serializers.SerializerMethodField(read_only=True)
@@ -209,6 +210,20 @@ class FarmServiceRequestSerializer(serializers.ModelSerializer):
         if self.instance is None and "tasks" not in attrs:
             raise serializers.ValidationError({"tasks": "At least one task is required."})
         return attrs
+
+    def to_internal_value(self, data):
+        # Backward compatibility: accept `PUC` from older clients.
+        if hasattr(data, "copy"):
+            incoming = data.copy()
+        elif isinstance(data, dict):
+            incoming = dict(data)
+        else:
+            incoming = data
+
+        if isinstance(incoming, dict) and "puc" not in incoming and "PUC" in incoming:
+            incoming["puc"] = incoming.get("PUC")
+
+        return super().to_internal_value(incoming)
 
     def get_created_by(self, obj):
         user = obj.created_by
@@ -263,9 +278,18 @@ class FarmServiceRequestSerializer(serializers.ModelSerializer):
     def update(self, instance, validated_data):
         tasks_data = validated_data.pop("tasks", None)
         request_user = self.context["request"].user
+        updatable_fields = []
+
         if "service_name" in validated_data:
             instance.service_name = validated_data["service_name"]
-            instance.save(update_fields=["service_name", "updated_at"])
+            updatable_fields.append("service_name")
+        if "puc" in validated_data:
+            instance.puc = validated_data["puc"]
+            updatable_fields.append("puc")
+
+        if updatable_fields:
+            updatable_fields.append("updated_at")
+            instance.save(update_fields=updatable_fields)
 
         if tasks_data is not None:
             for row in tasks_data:
