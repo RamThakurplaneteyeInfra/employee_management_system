@@ -278,18 +278,16 @@ class FarmServiceRequestSerializer(serializers.ModelSerializer):
     def update(self, instance, validated_data):
         tasks_data = validated_data.pop("tasks", None)
         request_user = self.context["request"].user
-        updatable_fields = []
-
+        request_fields_to_update = []
         if "service_name" in validated_data:
             instance.service_name = validated_data["service_name"]
-            updatable_fields.append("service_name")
+            request_fields_to_update.append("service_name")
         if "puc" in validated_data:
             instance.puc = validated_data["puc"]
-            updatable_fields.append("puc")
-
-        if updatable_fields:
-            updatable_fields.append("updated_at")
-            instance.save(update_fields=updatable_fields)
+            request_fields_to_update.append("puc")
+        if request_fields_to_update:
+            request_fields_to_update.append("updated_at")
+            instance.save(update_fields=request_fields_to_update)
 
         if tasks_data is not None:
             for row in tasks_data:
