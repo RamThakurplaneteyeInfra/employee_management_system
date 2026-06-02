@@ -298,7 +298,32 @@ No body. Returns list of **active** group calls where current user is creator or
 
 No body. Returns combined history of 1:1 and group calls for the current user, sorted by time (newest first).
 
-**Response (200):** Array of items. Each item has:
+**Pagination (optional, backward-compatible):** Add query params `limit` and/or `offset`. If neither is sent, response is unchanged (plain array). If either is sent:
+
+| Param   | Default | Max  | Description |
+|---------|---------|------|-------------|
+| `limit` | 30      | 100  | Page size   |
+| `offset`| 0       | —    | Skip N items (newest first) |
+
+Example: `GET {{baseurl}}/messaging/callHistory/?limit=20&offset=0`
+
+**Paginated response (200):**
+```json
+{
+  "items": [ /* same item shape as below */ ],
+  "pagination": {
+    "limit": 20,
+    "offset": 0,
+    "next_offset": 20,
+    "prev_offset": null,
+    "has_next": true,
+    "has_prev": false,
+    "total": 87
+  }
+}
+```
+
+**Response (200, no pagination params):** Array of items. Each item has:
 - **Individual:** `call_kind`: `"individual"`, `id`, `sender`, `receiver`, `call_type`, `status`, `is_screen_shared`, `timestamp`, `initiator`, `initiator_name`, `participant` (list of names).
 - **Group:** `call_kind`: `"group"`, `id`, `creator`, `call_type`, `status`, `is_screen_shared`, `created_at`, `initiator`, `initiator_name`, `participant` (list of names).
 

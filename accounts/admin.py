@@ -76,6 +76,7 @@ class LeaveApplicationDataAdmin(admin.ModelAdmin):
         "admin_approval",
         "alternative_approval",
         "application_date",
+        "applied_at",
     )
     list_filter = (
         "leave_type",
@@ -94,6 +95,6 @@ class LeaveApplicationDataAdmin(admin.ModelAdmin):
     )
     autocomplete_fields = ("applicant", "team_lead", "alternative", "alternative_approval")
     date_hierarchy = "application_date"
-    readonly_fields = ("application_date", "approved_by_MD_at")
+    readonly_fields = ("application_date", "applied_at", "approved_by_MD_at")
     ordering = ("-application_date", "-id")
 

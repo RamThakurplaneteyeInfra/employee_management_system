@@ -592,7 +592,10 @@ For React integration and WebSocket chat flow, see **`Messaging/REACT_INTEGRATIO
 **url:** `{{baseurl}}/messaging/callHistory/`  
 **method:** GET  
 **body:** None  
-**sample_response:**
+
+**pagination (optional):** `?limit=20&offset=0` — same pattern as `getMessages`. Without `limit`/`offset`, response is a plain array (legacy). With either param, response is `{ "items": [...], "pagination": { "limit", "offset", "next_offset", "prev_offset", "has_next", "has_prev", "total" } }`.
+
+**sample_response (no pagination):**
 ```json
 [
   {

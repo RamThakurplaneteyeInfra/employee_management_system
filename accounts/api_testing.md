@@ -308,7 +308,7 @@
 **url:** `{{baseurl}}/accounts/leave-applications/`  
 **method:** GET  
 **body:** None  
-**sample_response:** Array of leave application objects (id, applicant_name, team_lead_name, alternative_name, start_date, duration_of_days, leave_subject, reason, note, leave_type_name, half_day_slots, team_lead_approval_status, hr_approval_status, md_approval_status, admin_approval_status, is_emergency, application_date, approved_by_MD_at).  
+**sample_response:** Array of leave application objects (id, applicant_name, team_lead_name, alternative_name, start_date, duration_of_days, leave_subject, reason, note, leave_type_name, half_day_slots, team_lead_approval_status, hr_approval_status, md_approval_status, admin_approval_status, is_emergency, application_date, applied_at, approved_by_MD_at).  
 **notes:** Authenticated. Names from Profile; no FK ids in response.
 
 ---
@@ -420,4 +420,25 @@
 **method:** GET  
 **body:** None  
 **sample_response:** Array of leave applications for current user's approval queue.  
-**notes:** Team lead: entries where team_lead = user. HR: entries with team_lead_approval = Approved. Admin: same. MD: entries with HR_approval = Approved or admin_approval = Approved.
+**notes:** Team lead: entries where team_lead = user. HR: all rows where HR is an approver. Admin: admin approver rows. MD: MD approver rows. Cover person: pending alternative handover.
+
+**pagination (optional, backward-compatible):** `?limit=20&offset=0` — if neither `limit` nor `offset` is sent, response is a plain array (legacy). If either is sent:
+
+```json
+{
+  "items": [ /* leave application objects */ ],
+  "pagination": {
+    "limit": 20,
+    "offset": 0,
+    "next_offset": 20,
+    "prev_offset": null,
+    "has_next": true,
+    "has_prev": false,
+    "total": 45
+  }
+}
+```
+
+Default `limit` 30, max 100.
+
+**applied_at:** IST datetime string (`DD/MM/YYYY HH:MM:SS`) for exact submission time. `application_date` remains date-only (`YYYY-MM-DD`) for backward compatibility. Legacy rows: `applied_at` set to midnight IST on `application_date` (migration 0059). New rows: real submit time from `auto_now_add`.

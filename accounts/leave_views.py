@@ -44,6 +44,61 @@ from .leave_notifications import (
 INTERN_ROLE_NAME = "Intern"
 
 
+def _parse_pagination_params(request):
+    """
+    Optional limit/offset pagination (backward-compatible).
+    Enabled when either query param is present. Same contract as Messaging getMessages / callHistory.
+    """
+    raw_limit = request.query_params.get("limit")
+    raw_offset = request.query_params.get("offset")
+    paginate_enabled = raw_limit is not None or raw_offset is not None
+
+    if not paginate_enabled:
+        return 0, 0, False
+
+    default_limit = 30
+    max_limit = 100
+
+    try:
+        limit = int(raw_limit) if raw_limit is not None else default_limit
+    except (TypeError, ValueError):
+        limit = default_limit
+
+    try:
+        offset = int(raw_offset) if raw_offset is not None else 0
+    except (TypeError, ValueError):
+        offset = 0
+
+    if limit < 1:
+        limit = default_limit
+    if limit > max_limit:
+        limit = max_limit
+    if offset < 0:
+        offset = 0
+
+    return limit, offset, True
+
+
+def _paginated_response(queryset, serializer_data, limit, offset):
+    total = queryset.count()
+    next_offset = offset + limit if (offset + limit) < total else None
+    prev_offset = offset - limit if offset - limit >= 0 else None
+    return Response(
+        {
+            "items": serializer_data,
+            "pagination": {
+                "limit": limit,
+                "offset": offset,
+                "next_offset": next_offset,
+                "prev_offset": prev_offset,
+                "has_next": next_offset is not None,
+                "has_prev": offset > 0,
+                "total": total,
+            },
+        }
+    )
+
+
 # ---------- Role-based permissions for approval tabs ----------
 class IsHR(BasePermission):
     """Allow only users with role HR (or superuser)."""
@@ -1272,6 +1327,7 @@ class LeaveApplicationViewSet(ModelViewSet):
         - Cover person (alternative): applications where this user is the designated alternative
           and they have not yet accepted/rejected (same rules as alternative-requests/).
         Single endpoint: GET /accounts/leave-applications/approval/
+        Optional pagination: ?limit=&offset= (plain array when omitted).
         """
         role = _get_user_role_sync(request.user)
         base = self.get_queryset()
@@ -1306,8 +1362,14 @@ class LeaveApplicationViewSet(ModelViewSet):
                 "applicant__accounts_profile__Role",
             )
         )
-        serializer = self.get_serializer(qs, many=True)
-        return Response(serializer.data)
+        limit, offset, paginate_enabled = _parse_pagination_params(request)
+        if not paginate_enabled:
+            serializer = self.get_serializer(qs, many=True)
+            return Response(serializer.data)
+
+        page_qs = qs[offset : offset + limit]
+        serializer = self.get_serializer(page_qs, many=True)
+        return _paginated_response(qs, serializer.data, limit, offset)
 
     @action(detail=False, methods=["get"], url_path="alternative-requests")
     def alternative_requests(self, request):

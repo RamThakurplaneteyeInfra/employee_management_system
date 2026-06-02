@@ -3,7 +3,7 @@ Calling API views. Base path: {{baseurl}}/messaging/ (same prefix as Messaging).
 - 1:1: callableUsers, initiateCall, acceptCall, declineCall, endCall, screenShare, stopScreenShare.
 - 1:1 list/state: pendingCalls, activeCalls, missedCallsCount, resetMissedCallsCount, endAllMyCalls.
 - Group: initiateGroupCall, joinGroupCall, leaveGroupCall, endGroupCall, activeGroupCalls.
-- GET callHistory — combined individual + group call history. All require login.
+- GET callHistory — combined individual + group call history; optional limit/offset pagination. All require login.
 """
 from django.shortcuts import render
 from django.db.models import Q
@@ -17,6 +17,7 @@ from accounts.models import User, Profile
 from ems.verify_methods import *
 from ems.utils import gmt_to_ist_str
 from ems.channel_groups import call_group_name
+from Messaging.filters import _parse_pagination_params
 from .models import Call, GroupCall, GroupCallParticipant, MissedCallCount
 
 # ==================== Voice/Video Call APIs ====================
@@ -1222,8 +1223,37 @@ def _get_call_history_sync(user):
 
 @login_required
 async def get_call_history(request: HttpRequest):
-    """GET: Call history for current user. Individual and group calls sorted by time (newest first)."""
+    """
+    GET: Call history for current user. Individual and group calls sorted by time (newest first).
+
+    Optional pagination (backward-compatible): pass limit and/or offset query params.
+    Without them, returns the full array as before.
+    With them, returns {"items": [...], "pagination": {...}}.
+    """
     if verifyGet(request):
         return verifyGet(request)
-    result = await sync_to_async(_get_call_history_sync)(request.user)
-    return JsonResponse(result, safe=False)
+    history = await sync_to_async(_get_call_history_sync)(request.user)
+
+    limit, offset, paginate_enabled = _parse_pagination_params(request)
+    if not paginate_enabled:
+        return JsonResponse(history, safe=False)
+
+    total = len(history)
+    page_items = history[offset : offset + limit]
+    next_offset = offset + limit if (offset + limit) < total else None
+    prev_offset = offset - limit if offset - limit >= 0 else None
+    return JsonResponse(
+        {
+            "items": page_items,
+            "pagination": {
+                "limit": limit,
+                "offset": offset,
+                "next_offset": next_offset,
+                "prev_offset": prev_offset,
+                "has_next": next_offset is not None,
+                "has_prev": offset > 0,
+                "total": total,
+            },
+        },
+        safe=False,
+    )

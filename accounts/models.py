@@ -345,6 +345,8 @@ class LeaveApplicationData(models.Model):
     alternative_responded_at = models.DateTimeField(null=True, blank=True)
     is_emergency = models.BooleanField(default=False)
     application_date = models.DateField(auto_now_add=True)
+    # Exact submission timestamp (IST in API). Legacy rows backfilled from application_date at midnight.
+    applied_at = models.DateTimeField(auto_now_add=True, null=True, blank=True)
     approved_by_MD_at = models.DateTimeField(null=True, blank=True)
     note=models.TextField(null=True,blank=True)
     # Per-application split filled at MD-approval time (waterfall casual -> earn -> unpaid).

@@ -140,6 +140,7 @@ class LeaveApplicationListSerializer(serializers.ModelSerializer):
     alternative_approval_status = serializers.SerializerMethodField()
     alternative_responded_at = serializers.SerializerMethodField()
     approved_by_MD_at = serializers.SerializerMethodField()
+    applied_at = serializers.SerializerMethodField()
 
     class Meta:
         model = LeaveApplicationData
@@ -164,6 +165,7 @@ class LeaveApplicationListSerializer(serializers.ModelSerializer):
             "alternative_responded_at",
             "is_emergency",
             "application_date",
+            "applied_at",
             "approved_by_MD_at",
         ]
         read_only_fields = fields
@@ -207,6 +209,10 @@ class LeaveApplicationListSerializer(serializers.ModelSerializer):
         t = getattr(obj, "alternative_responded_at", None)
         return gmt_to_ist_str(t, "%d/%m/%Y %H:%M:%S") if t else None
 
+    def get_applied_at(self, obj):
+        t = getattr(obj, "applied_at", None)
+        return gmt_to_ist_str(t, "%d/%m/%Y %H:%M:%S") if t else None
+
 
 class LeaveApplicationResponseSerializer(serializers.ModelSerializer):
     """POST/GET response: char/name fields only (no FK ids). User names from Profile.Name."""
@@ -228,6 +234,7 @@ class LeaveApplicationResponseSerializer(serializers.ModelSerializer):
     alternative_approval_status = serializers.SerializerMethodField()
     alternative_responded_at = serializers.SerializerMethodField()
     approved_by_MD_at = serializers.SerializerMethodField()
+    applied_at = serializers.SerializerMethodField()
 
     class Meta:
         model = LeaveApplicationData
@@ -254,6 +261,7 @@ class LeaveApplicationResponseSerializer(serializers.ModelSerializer):
             "alternative_responded_at",
             "is_emergency",
             "application_date",
+            "applied_at",
             "approved_by_MD_at",
             "casual_used",
             "earn_used",
@@ -308,6 +316,10 @@ class LeaveApplicationResponseSerializer(serializers.ModelSerializer):
 
     def get_alternative_responded_at(self, obj):
         t = getattr(obj, "alternative_responded_at", None)
+        return gmt_to_ist_str(t, "%d/%m/%Y %H:%M:%S") if t else None
+
+    def get_applied_at(self, obj):
+        t = getattr(obj, "applied_at", None)
         return gmt_to_ist_str(t, "%d/%m/%Y %H:%M:%S") if t else None
 
 
