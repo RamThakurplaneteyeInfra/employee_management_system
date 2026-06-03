@@ -290,6 +290,7 @@ class FarmServiceRequestSerializer(serializers.ModelSerializer):
             instance.save(update_fields=request_fields_to_update)
 
         if tasks_data is not None:
+            kept_task_ids = []
             for row in tasks_data:
                 task_id = row.pop("id", None)
                 members = row.pop("team_members", None)
@@ -320,10 +321,13 @@ class FarmServiceRequestSerializer(serializers.ModelSerializer):
                         updatable_fields.append("updated_at")
                         task.save(update_fields=updatable_fields)
 
+                kept_task_ids.append(task.id)
+
                 if members is not None:
                     task.team_members.set(members)
 
                 if subtasks is not None:
+                    kept_subtask_ids = []
                     for subtask_row in subtasks:
                         subtask_id = subtask_row.pop("id", None)
                         assigned_member = subtask_row.pop("assigned_member", None)
@@ -337,14 +341,16 @@ class FarmServiceRequestSerializer(serializers.ModelSerializer):
                                 )
 
                         if subtask is None:
-                            FarmServiceSubtask.objects.create(
+                            subtask = FarmServiceSubtask.objects.create(
                                 task=task,
                                 assigned_member=assigned_member,
                                 created_by=request_user,
                                 **subtask_row,
                             )
+                            kept_subtask_ids.append(subtask.id)
                             continue
 
+                        kept_subtask_ids.append(subtask.id)
                         subtask_fields = []
                         if "subtask_name" in subtask_row:
                             subtask.subtask_name = subtask_row["subtask_name"]
@@ -358,6 +364,10 @@ class FarmServiceRequestSerializer(serializers.ModelSerializer):
                         if subtask_fields:
                             subtask_fields.append("updated_at")
                             subtask.save(update_fields=subtask_fields)
+
+                    task.subtasks.exclude(id__in=kept_subtask_ids).delete()
+
+            instance.tasks.exclude(id__in=kept_task_ids).delete()
         return instance
 
 
