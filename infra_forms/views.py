@@ -356,6 +356,9 @@ class InfraProjectFormViewSet(viewsets.ModelViewSet):
 
     Append rows (no replace): POST .../project-forms/{id}/entries/ with body
     ``{ "entries": [ {...}, ... ] }`` or a single entry object.
+
+    Update one row: PATCH or PUT .../project-forms/{id}/entries/{entry_id}/
+    Delete one row: DELETE .../project-forms/{id}/entries/{entry_id}/
     """
 
     permission_classes = [IsAuthenticated, CanAccessInfraProjectForms]
@@ -387,7 +390,14 @@ class InfraProjectFormViewSet(viewsets.ModelViewSet):
         with transaction.atomic():
             return super().partial_update(request, *args, **kwargs)
 
-    _ENTRY_READ_ONLY_KEYS = frozenset({"id", "created_at", "updated_at"})
+    _ENTRY_READ_ONLY_KEYS = frozenset({"id", "created_at", "updated_at", "form"})
+
+    def _get_form_entry(self, form, entry_id):
+        try:
+            eid = int(entry_id)
+        except (TypeError, ValueError):
+            return None
+        return InfraProjectFormEntry.objects.filter(form=form, pk=eid).first()
 
     @action(detail=True, methods=["post"], url_path="entries")
     def append_entries(self, request, pk=None):
@@ -448,6 +458,43 @@ class InfraProjectFormViewSet(viewsets.ModelViewSet):
             },
             status=status.HTTP_201_CREATED,
         )
+
+    @action(
+        detail=True,
+        methods=["patch", "put", "delete"],
+        url_path=r"entries/(?P<entry_id>[^/.]+)",
+    )
+    def update_entry(self, request, pk=None, entry_id=None):
+        """
+        PATCH / PUT / DELETE /api/infra/project-forms/{id}/entries/{entry_id}/
+
+        Update or delete a single InfraProjectFormEntry without replacing other rows.
+        Body: partial entry fields (date, status, MJB, MNB, VUP, PUP, BOX_Slab_Culvert, ROB, FO).
+        id / created_at / updated_at / form in body are ignored.
+        """
+        form = self.get_object()
+        entry = self._get_form_entry(form, entry_id)
+        if not entry:
+            return Response({"detail": "Entry not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        if request.method == "DELETE":
+            entry.delete()
+            return Response(status=status.HTTP_204_NO_CONTENT)
+
+        if not isinstance(request.data, dict):
+            return Response(
+                {"detail": "Expected a JSON object."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        clean = {k: v for k, v in request.data.items() if k not in self._ENTRY_READ_ONLY_KEYS}
+        partial = request.method == "PATCH"
+        with transaction.atomic():
+            ser = InfraProjectFormEntrySerializer(entry, data=clean, partial=partial)
+            ser.is_valid(raise_exception=True)
+            entry = ser.save()
+
+        return Response(InfraProjectFormEntrySerializer(entry).data, status=status.HTTP_200_OK)
 
     @action(detail=False, methods=["get"], url_path="by-project")
     def by_project(self, request):
