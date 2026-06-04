@@ -2,6 +2,8 @@
 Leave application APIs: POST (regular + emergency), GET, PATCH, PUT, DELETE.
 Approval hierarchy by applicant role; remaining-leaves validation; HR-only emergency leave.
 """
+import math
+from datetime import datetime, timedelta
 from decimal import Decimal
 
 from django.utils import timezone
@@ -32,7 +34,9 @@ from .serializers import (
     AlternativeRespondSerializer,
     ShortLeaveCreateSerializer,
 )
+from ems.utils import gmt_to_ist_str
 from .filters import _get_user_role_sync
+from .serializers import _get_applicant_display_name
 from .leave_notifications import (
     notify_alternative_on_submission,
     notify_after_alternative_approved,
@@ -42,6 +46,88 @@ from .leave_notifications import (
 )
 
 INTERN_ROLE_NAME = "Intern"
+_ON_LEAVE_VIEW_ROLES = frozenset({"HR", "Hr", "Admin", "MD", "TeamLead", "Teamlead"})
+
+
+def _leave_end_date(start_date, duration_of_days):
+    """Last calendar day of leave (inclusive)."""
+    days = max(1, int(math.ceil(float(duration_of_days or 1))))
+    return start_date + timedelta(days=days - 1)
+
+
+def _is_on_leave_on_date(application, target_date):
+    return (
+        application.start_date <= target_date
+        <= _leave_end_date(application.start_date, application.duration_of_days)
+    )
+
+
+def _parse_on_leave_date(request):
+    raw = (request.query_params.get("date") or "").strip()
+    if not raw:
+        return timezone.localdate()
+    try:
+        return datetime.strptime(raw, "%Y-%m-%d").date()
+    except ValueError as exc:
+        raise ValueError("date must be YYYY-MM-DD.") from exc
+
+
+def _user_can_view_on_leave(user) -> bool:
+    if not user or not user.is_authenticated:
+        return False
+    if user.is_superuser:
+        return True
+    return (_get_user_role_sync(user) or "").strip() in _ON_LEAVE_VIEW_ROLES
+
+
+def _serialize_on_leave_row(application):
+    applicant = application.applicant
+    md_status = getattr(getattr(application, "MD_approval", None), "name", None)
+    end = _leave_end_date(application.start_date, application.duration_of_days)
+    return {
+        "id": application.id,
+        "applicant_name": _get_applicant_display_name(applicant),
+        "applicant_username": applicant.username if applicant else None,
+        "start_date": application.start_date.isoformat(),
+        "end_date": end.isoformat(),
+        "duration_of_days": float(application.duration_of_days or 0),
+        "leave_type_name": getattr(getattr(application, "leave_type", None), "name", None),
+        "leave_subject": application.leave_subject,
+        "md_approval_status": md_status,
+        "approved_by_MD_at": (
+            gmt_to_ist_str(application.approved_by_MD_at, "%d/%m/%Y %H:%M:%S")
+            if application.approved_by_MD_at
+            else None
+        ),
+        "half_day_slots": application.half_day_slots,
+        "short_leave_start_time": (
+            application.short_leave_start_time.isoformat()
+            if application.short_leave_start_time
+            else None
+        ),
+    }
+
+
+def _on_leave_paginated_response(target_date, items, limit, offset):
+    total = len(items)
+    page = items[offset : offset + limit]
+    next_offset = offset + limit if (offset + limit) < total else None
+    prev_offset = offset - limit if offset - limit >= 0 else None
+    return Response(
+        {
+            "date": target_date.isoformat(),
+            "items": page,
+            "pagination": {
+                "limit": limit,
+                "offset": offset,
+                "next_offset": next_offset,
+                "prev_offset": prev_offset,
+                "has_next": next_offset is not None,
+                "has_prev": offset > 0,
+                "total": total,
+            },
+        }
+    )
 
 
 def _parse_pagination_params(request):
@@ -1370,6 +1456,45 @@ class LeaveApplicationViewSet(ModelViewSet):
         page_qs = qs[offset : offset + limit]
         serializer = self.get_serializer(page_qs, many=True)
         return _paginated_response(qs, serializer.data, limit, offset)
+
+    @action(detail=False, methods=["get"], url_path="on-leave")
+    def on_leave(self, request):
+        """
+        MD-approved employees on leave for a given day (default: today, local timezone).
+        GET /accounts/leave-applications/on-leave/?date=YYYY-MM-DD
+        Optional pagination: ?limit=&offset=
+        HR / Admin / MD / superuser: all; Team lead: their team only.
+        """
+        if not _user_can_view_on_leave(request.user):
+            return Response(
+                {"detail": "You do not have permission to view on-leave employees."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        try:
+            target_date = _parse_on_leave_date(request)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        role = (_get_user_role_sync(request.user) or "").strip()
+        qs = (
+            self.get_queryset()
+            .filter(MD_approval__name="Approved", start_date__lte=target_date)
+            .order_by("start_date", "id")
+        )
+        if role in ("TeamLead", "Teamlead"):
+            qs = qs.filter(team_lead=request.user)
+
+        items = [
+            _serialize_on_leave_row(row)
+            for row in qs
+            if _is_on_leave_on_date(row, target_date)
+        ]
+
+        limit, offset, paginate_enabled = _parse_pagination_params(request)
+        if not paginate_enabled:
+            return Response({"date": target_date.isoformat(), "items": items})
+
+        return _on_leave_paginated_response(target_date, items, limit, offset)
 
     @action(detail=False, methods=["get"], url_path="alternative-requests")
     def alternative_requests(self, request):

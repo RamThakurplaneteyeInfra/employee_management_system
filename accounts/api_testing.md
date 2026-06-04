@@ -442,3 +442,35 @@
 Default `limit` 30, max 100.
 
 **applied_at:** IST datetime string (`DD/MM/YYYY HH:MM:SS`) for exact submission time. `application_date` remains date-only (`YYYY-MM-DD`) for backward compatibility. Legacy rows: `applied_at` set to midnight IST on `application_date` (migration 0059). New rows: real submit time from `auto_now_add`.
+
+---
+
+### On leave (MD-approved, absent on a day)
+
+**url:** `{{baseurl}}/accounts/leave-applications/on-leave/`  
+**method:** GET  
+**query:** `date=YYYY-MM-DD` (optional; default today). `limit` / `offset` optional (same pagination as approval).  
+**notes:** Only `MD_approval_status = Approved` and the given date falls within `start_date` … `end_date` (from `duration_of_days`). HR / Admin / MD / superuser: all employees; Team lead: their team only. Others: 403.
+
+**sample_response (no pagination):**
+```json
+{
+  "date": "2026-06-03",
+  "items": [
+    {
+      "id": 42,
+      "applicant_name": "John Doe",
+      "applicant_username": "200012",
+      "start_date": "2026-06-03",
+      "end_date": "2026-06-04",
+      "duration_of_days": 2.0,
+      "leave_type_name": "Full_day",
+      "leave_subject": "Personal",
+      "md_approval_status": "Approved",
+      "approved_by_MD_at": "02/06/2026 14:30:00",
+      "half_day_slots": null,
+      "short_leave_start_time": null
+    }
+  ]
+}
+```
