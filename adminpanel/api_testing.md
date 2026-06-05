@@ -194,9 +194,9 @@
 
 **url:** `{{baseurl}}/adminapi/expenses/`  
 **method:** POST  
-**body:** Expense fields per ExpenseTrackerSerializer.  
-**sample_response:** Created expense. 201.  
-**notes:** AdminPermission.
+**body:** Expense fields per ExpenseTrackerSerializer. Optional `vendor`: vendor id or `business_name`.  
+**sample_response:** Created expense (`vendor`, `vendor_name` included). 201.  
+**notes:** AdminPermission. `category` remains expense category; `vendor` links to Vendor table.
 
 ---
 
@@ -218,11 +218,19 @@
 
 ## 6. Vendors (CRUD)
 
+**url:** `{{baseurl}}/adminapi/vendors/dropdown/`  
+**method:** GET  
+**body:** None  
+**sample_response:** `[{ "id": 1, "name": "ACME Suppliers" }, ...]`  
+**notes:** AdminPermission. Id + business name only (for expense dropdowns).
+
+---
+
 **url:** `{{baseurl}}/adminapi/vendors/`  
 **method:** GET  
 **body:** None  
-**sample_response:** Array of vendor objects.  
-**notes:** AdminPermission.
+**sample_response:** Array of vendor objects (`total_service_price`, `expense_count` = all-time sum/count of linked expenses).  
+**notes:** AdminPermission. Totals recomputed on each GET from expenses where `vendor` is set.
 
 ---
 

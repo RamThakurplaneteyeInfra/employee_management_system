@@ -369,6 +369,44 @@ class ExpenseMonthlyAdvanceSerializer(serializers.ModelSerializer):
         return attrs
 
 
+class VendorExpenseField(serializers.Field):
+    """Accept vendor id (number/string) or business_name on write; emit vendor id on read."""
+
+    def to_internal_value(self, data):
+        if data is None or data == "":
+            return None
+        if isinstance(data, bool):
+            raise serializers.ValidationError("Vendor must be a valid id or business name.")
+        if isinstance(data, int) or (isinstance(data, str) and str(data).strip().isdigit()):
+            pk = int(data)
+            try:
+                return Vendor.objects.get(pk=pk)
+            except Vendor.DoesNotExist as exc:
+                raise serializers.ValidationError(
+                    f"Vendor with id={pk} does not exist."
+                ) from exc
+        name = str(data).strip()
+        if not name:
+            return None
+        try:
+            return Vendor.objects.get(business_name=name)
+        except Vendor.DoesNotExist as exc:
+            raise serializers.ValidationError(
+                f"Vendor with business_name={name} does not exist."
+            ) from exc
+
+    def to_representation(self, value):
+        return value.pk if value else None
+
+
+class VendorDropdownSerializer(serializers.ModelSerializer):
+    name = serializers.CharField(source="business_name", read_only=True)
+
+    class Meta:
+        model = Vendor
+        fields = ["id", "name"]
+
+
 # 5 Expense Tracker
 class ExpenseTrackerSerializer(_AdminFileAttachmentResponseMixin, serializers.ModelSerializer):
     status = serializers.SlugRelatedField(
@@ -381,6 +419,8 @@ class ExpenseTrackerSerializer(_AdminFileAttachmentResponseMixin, serializers.Mo
         required=False,
         allow_null=True,
     )
+    vendor = VendorExpenseField(required=False, allow_null=True)
+    vendor_name = serializers.SerializerMethodField()
     attachment = MultipartOrDataUrlFileField(
         required=False,
         allow_null=True,
@@ -399,12 +439,18 @@ class ExpenseTrackerSerializer(_AdminFileAttachmentResponseMixin, serializers.Mo
             "amount",
             "note",
             "category",
+            "vendor",
+            "vendor_name",
             "attachment",
             "paid_date",
             "created_at",
             "status",
         ]
-        read_only_fields = ["created_at"]
+        read_only_fields = ["created_at", "vendor_name"]
+
+    def get_vendor_name(self, obj):
+        vendor = getattr(obj, "vendor", None)
+        return vendor.business_name if vendor else None
 
     def validate_attachment(self, value):
         if not value:
@@ -428,6 +474,8 @@ class ExpenseTrackerSerializer(_AdminFileAttachmentResponseMixin, serializers.Mo
 
 # 6 Vendor
 class VendorSerializer(_AdminFileAttachmentResponseMixin, serializers.ModelSerializer):
+    total_service_price = serializers.SerializerMethodField()
+    expense_count = serializers.SerializerMethodField()
     attachment = MultipartOrDataUrlFileField(
         required=False,
         allow_null=True,
@@ -449,10 +497,22 @@ class VendorSerializer(_AdminFileAttachmentResponseMixin, serializers.ModelSeria
             'primary_phone',
             'alternate_phone',
             'service',
+            'total_service_price',
+            'expense_count',
             'attachment',
             'created_at',
         ]
-        read_only_fields = ['created_at']
+        read_only_fields = ['created_at', 'total_service_price', 'expense_count']
+
+    def get_total_service_price(self, obj):
+        val = getattr(obj, "total_service_price", None)
+        if val is None:
+            return "0.00"
+        return format(val, ".2f")
+
+    def get_expense_count(self, obj):
+        count = getattr(obj, "expense_count", None)
+        return count or 0
 
     def validate_attachment(self, value):
         if not value:

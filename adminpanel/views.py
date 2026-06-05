@@ -12,7 +12,10 @@ import os
 import uuid
 
 from django.conf import settings
-from django.db.models import Count, Sum
+from decimal import Decimal
+
+from django.db.models import Count, DecimalField, Sum, Value
+from django.db.models.functions import Coalesce
 from rest_framework import status, viewsets
 from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
@@ -45,6 +48,7 @@ from .serializers import (
     ExpenseCategorySerializer,
     ExpenseMonthlyAdvanceSerializer,
     ExpenseTrackerSerializer,
+    VendorDropdownSerializer,
     VendorSerializer,
 )
 
@@ -184,7 +188,7 @@ class ExpenseMonthlyAdvanceViewSet(viewsets.ModelViewSet):
 # URL: {{baseurl}}/adminapi/expenses/  | CRUD
 # Optional query: ?year=2026&month=4 filters by expense paid_date
 class ExpenseTrackerViewSet(viewsets.ModelViewSet):
-    queryset = ExpenseTracker.objects.select_related("status", "category")
+    queryset = ExpenseTracker.objects.select_related("status", "category", "vendor")
     serializer_class = ExpenseTrackerSerializer
     permission_classes = [AdminPermission]
     parser_classes = [JSONParser, MultiPartParser, FormParser]
@@ -267,6 +271,25 @@ class VendorViewSet(viewsets.ModelViewSet):
     serializer_class = VendorSerializer
     permission_classes = [AdminPermission]
     parser_classes = [JSONParser, MultiPartParser, FormParser]
+
+    def get_queryset(self):
+        return (
+            Vendor.objects.annotate(
+                total_service_price=Coalesce(
+                    Sum("expenses__amount"),
+                    Value(Decimal("0")),
+                    output_field=DecimalField(max_digits=12, decimal_places=2),
+                ),
+                expense_count=Count("expenses"),
+            )
+            .order_by("-created_at")
+        )
+
+    @action(detail=False, methods=["get"], url_path="dropdown")
+    def dropdown(self, request):
+        """GET /adminapi/vendors/dropdown/ — id and business name only."""
+        qs = Vendor.objects.order_by("business_name")
+        return Response(VendorDropdownSerializer(qs, many=True).data)
 
     # Upload-only endpoint (messaging-style): POST /adminapi/vendors/uploadFile/ with multipart field "file"
     @action(detail=False, methods=["post"], url_path="uploadFile", parser_classes=[MultiPartParser, FormParser])

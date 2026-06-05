@@ -180,7 +180,7 @@ class ExpenseMonthlyAdvance(models.Model):
 
 # ExpenseTracker
 class ExpenseTracker(models.Model):
-    """Expense record: title, amount, note, paid date, status, optional category and attachment."""
+    """Expense record: title, amount, note, paid date, status, optional category, vendor, attachment."""
     title = models.CharField(max_length=200)
     amount = models.DecimalField(max_digits=10, decimal_places=2)
     note = models.TextField(blank=True)
@@ -191,6 +191,14 @@ class ExpenseTracker(models.Model):
         null=True,
         blank=True,
         related_name="expenses",
+    )
+    vendor = models.ForeignKey(
+        "Vendor",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="expenses",
+        db_column="vendor_id",
     )
     attachment = models.FileField(
         upload_to=expense_attachment_upload_to,
