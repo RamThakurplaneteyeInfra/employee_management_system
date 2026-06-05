@@ -80,6 +80,17 @@ def _user_can_view_on_leave(user) -> bool:
     return (_get_user_role_sync(user) or "").strip() in _ON_LEAVE_VIEW_ROLES
 
 
+def _get_applicant_role(applicant):
+    if not applicant:
+        return None
+    try:
+        profile = applicant.accounts_profile
+    except Profile.DoesNotExist:
+        return None
+    role = getattr(getattr(profile, "Role", None), "role_name", None)
+    return (role or "").strip() or None
+
+
 def _serialize_on_leave_row(application):
     applicant = application.applicant
     md_status = getattr(getattr(application, "MD_approval", None), "name", None)
@@ -88,6 +99,7 @@ def _serialize_on_leave_row(application):
         "id": application.id,
         "applicant_name": _get_applicant_display_name(applicant),
         "applicant_username": applicant.username if applicant else None,
+        "applicant_role": _get_applicant_role(applicant),
         "start_date": application.start_date.isoformat(),
         "end_date": end.isoformat(),
         "duration_of_days": float(application.duration_of_days or 0),
@@ -1479,6 +1491,7 @@ class LeaveApplicationViewSet(ModelViewSet):
         qs = (
             self.get_queryset()
             .filter(MD_approval__name="Approved", start_date__lte=target_date)
+            .select_related("applicant__accounts_profile__Role")
             .order_by("start_date", "id")
         )
         if role in ("TeamLead", "Teamlead"):

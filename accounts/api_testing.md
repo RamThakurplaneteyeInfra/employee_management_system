@@ -450,7 +450,7 @@ Default `limit` 30, max 100.
 **url:** `{{baseurl}}/accounts/leave-applications/on-leave/`  
 **method:** GET  
 **query:** `date=YYYY-MM-DD` (optional; default today). `limit` / `offset` optional (same pagination as approval).  
-**notes:** Only `MD_approval_status = Approved` and the given date falls within `start_date` … `end_date` (from `duration_of_days`). HR / Admin / MD / superuser: all employees; Team lead: their team only. Others: 403.
+**notes:** Only `MD_approval_status = Approved` and the given date falls within `start_date` … `end_date` (from `duration_of_days`). Each item includes `applicant_role` from Profile (e.g. Intern, Employee, TeamLead, HR, Admin, MD). HR / Admin / MD / superuser: all employees; Team lead: their team only. Others: 403.
 
 **sample_response (no pagination):**
 ```json
@@ -461,6 +461,7 @@ Default `limit` 30, max 100.
       "id": 42,
       "applicant_name": "John Doe",
       "applicant_username": "200012",
+      "applicant_role": "Employee",
       "start_date": "2026-06-03",
       "end_date": "2026-06-04",
       "duration_of_days": 2.0,
