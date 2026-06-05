@@ -4,15 +4,15 @@ Admin panel API views. Base path: {{baseurl}}/adminapi/
   expense-advances, vendors. AdminPermission.
 - GET /dashboard/ — summary counts/amounts for assets, bills, expenses, vendors.
 - GET /expenses/month_summary/?year=&month= — advance, spent, remaining for that month.
+- GET /expenses/range_summary/?year=&start_month=&end_month= — total spent across a month range.
 - GET /expenses/?year=&month= — filter list by paid_date (optional).
 """
-from decimal import Decimal
 import mimetypes
 import os
 import uuid
+from decimal import Decimal
 
 from django.conf import settings
-from decimal import Decimal
 
 from django.db.models import Count, DecimalField, Sum, Value
 from django.db.models.functions import Coalesce
@@ -56,6 +56,67 @@ from .serializers import (
 # Sync views work under ASGI; Django runs them in a thread pool automatically.
 
 _MAX_ADMIN_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MiB (keep aligned with adminpanel.serializers)
+
+
+def _parse_year_month_range(request):
+    """
+    Parse year + start_month + end_month query params.
+    Returns (year, start_month, end_month, error_response).
+    error_response is a DRF Response when invalid, else None.
+    """
+    year = request.query_params.get("year")
+    start_month = request.query_params.get("start_month")
+    end_month = request.query_params.get("end_month")
+    missing = [
+        name
+        for name, val in (("year", year), ("start_month", start_month), ("end_month", end_month))
+        if val is None or str(val).strip() == ""
+    ]
+    if missing:
+        return (
+            None,
+            None,
+            None,
+            Response(
+                {"detail": "Query parameters year, start_month, and end_month are required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            ),
+        )
+    try:
+        y = int(year)
+        start_m = int(start_month)
+        end_m = int(end_month)
+    except (TypeError, ValueError):
+        return (
+            None,
+            None,
+            None,
+            Response(
+                {"detail": "year, start_month, and end_month must be integers."},
+                status=status.HTTP_400_BAD_REQUEST,
+            ),
+        )
+    if start_m < 1 or start_m > 12 or end_m < 1 or end_m > 12:
+        return (
+            None,
+            None,
+            None,
+            Response(
+                {"detail": "start_month and end_month must be between 1 and 12."},
+                status=status.HTTP_400_BAD_REQUEST,
+            ),
+        )
+    if end_m < start_m:
+        return (
+            None,
+            None,
+            None,
+            Response(
+                {"detail": "end_month must be greater than or equal to start_month."},
+                status=status.HTTP_400_BAD_REQUEST,
+            ),
+        )
+    return y, start_m, end_m, None
 
 
 def _upload_admin_attachment_to_s3(file_obj, key_prefix: str) -> str:
@@ -197,6 +258,24 @@ class ExpenseTrackerViewSet(viewsets.ModelViewSet):
         qs = super().get_queryset()
         year = self.request.query_params.get("year")
         month = self.request.query_params.get("month")
+        start_month = self.request.query_params.get("start_month")
+        end_month = self.request.query_params.get("end_month")
+        if (
+            year is not None
+            and str(year).strip() != ""
+            and start_month is not None
+            and str(start_month).strip() != ""
+            and end_month is not None
+            and str(end_month).strip() != ""
+        ):
+            y, start_m, end_m, _err = _parse_year_month_range(self.request)
+            if y is not None:
+                qs = qs.filter(
+                    paid_date__year=y,
+                    paid_date__month__gte=start_m,
+                    paid_date__month__lte=end_m,
+                )
+            return qs
         if year is not None and str(year).strip() != "":
             try:
                 qs = qs.filter(paid_date__year=int(year))
@@ -247,6 +326,49 @@ class ExpenseTrackerViewSet(viewsets.ModelViewSet):
                 "remaining": str(remaining),
                 "expense_count": agg["count"] or 0,
                 "advance_note": advance_row.note if advance_row else "",
+            }
+        )
+
+    @action(detail=False, methods=["get"], url_path="range_summary")
+    def range_summary(self, request):
+        """
+        Total expenses for a month range within a calendar year (by paid_date).
+        GET /adminapi/expenses/range_summary/?year=2026&start_month=4&end_month=6
+        """
+        y, start_m, end_m, err = _parse_year_month_range(request)
+        if err is not None:
+            return err
+
+        base_qs = ExpenseTracker.objects.filter(
+            paid_date__year=y,
+            paid_date__month__gte=start_m,
+            paid_date__month__lte=end_m,
+        )
+        agg = base_qs.aggregate(total=Sum("amount"), count=Count("id"))
+        total_spent = agg["total"] or Decimal("0")
+
+        months = []
+        for m in range(start_m, end_m + 1):
+            month_agg = base_qs.filter(paid_date__month=m).aggregate(
+                total=Sum("amount"),
+                count=Count("id"),
+            )
+            months.append(
+                {
+                    "month": m,
+                    "total_spent": str(month_agg["total"] or Decimal("0")),
+                    "expense_count": month_agg["count"] or 0,
+                }
+            )
+
+        return Response(
+            {
+                "year": y,
+                "start_month": start_m,
+                "end_month": end_m,
+                "total_spent": str(total_spent),
+                "expense_count": agg["count"] or 0,
+                "months": months,
             }
         )
 

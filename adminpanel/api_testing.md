@@ -216,6 +216,30 @@
 
 ---
 
+### Expense range summary (month range in one year)
+
+**url:** `{{baseurl}}/adminapi/expenses/range_summary/`  
+**method:** GET  
+**query:** `year=2026&start_month=4&end_month=6` (all required; months 1–12; `end_month` ≥ `start_month`)  
+**sample_response:**
+```json
+{
+  "year": 2026,
+  "start_month": 4,
+  "end_month": 6,
+  "total_spent": "3250.50",
+  "expense_count": 42,
+  "months": [
+    { "month": 4, "total_spent": "1200.00", "expense_count": 15 },
+    { "month": 5, "total_spent": "1050.50", "expense_count": 14 },
+    { "month": 6, "total_spent": "1000.00", "expense_count": 13 }
+  ]
+}
+```
+**notes:** Totals use expense `paid_date`. Optional list filter: `GET .../expenses/?year=2026&start_month=4&end_month=6`.
+
+---
+
 ## 6. Vendors (CRUD)
 
 **url:** `{{baseurl}}/adminapi/vendors/dropdown/`  
