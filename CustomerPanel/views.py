@@ -146,13 +146,13 @@ def _amount_log_to_dict(obj: CustomerPanelAmountLog):
     }
 
 
-def _entries_summary_sync():
+def _summary_totals_for_scope(entry_qs, log_qs):
     zero = Value(Decimal("0"), output_field=DecimalField())
-    entry_agg = CustomerPanelEntry.objects.aggregate(
+    entry_agg = entry_qs.aggregate(
         entry_count=Count("id"),
         total_amount=Coalesce(Sum("total"), zero),
     )
-    paid_agg = CustomerPanelAmountLog.objects.aggregate(paid=Coalesce(Sum("amount"), zero))
+    paid_agg = log_qs.aggregate(paid=Coalesce(Sum("amount"), zero))
     total_amount = entry_agg["total_amount"] or Decimal("0")
     paid = paid_agg["paid"] or Decimal("0")
     return {
@@ -161,6 +161,27 @@ def _entries_summary_sync():
         "paid": float(paid),
         "remaining": float(total_amount - paid),
     }
+
+
+def _entries_summary_sync():
+    all_entries = CustomerPanelEntry.objects.all()
+    all_logs = CustomerPanelAmountLog.objects.all()
+    summary = _summary_totals_for_scope(all_entries, all_logs)
+    summary["distribution"] = {
+        "farm": _summary_totals_for_scope(
+            all_entries.filter(division=CustomerPanelEntry.DIVISION_FARM),
+            all_logs.filter(entry__division=CustomerPanelEntry.DIVISION_FARM),
+        ),
+        "infra": _summary_totals_for_scope(
+            all_entries.filter(division=CustomerPanelEntry.DIVISION_INFRA),
+            all_logs.filter(entry__division=CustomerPanelEntry.DIVISION_INFRA),
+        ),
+        "others": _summary_totals_for_scope(
+            all_entries.filter(division__isnull=True),
+            all_logs.filter(entry__division__isnull=True),
+        ),
+    }
+    return summary
 
 
 def _list_entries_sync(user):
