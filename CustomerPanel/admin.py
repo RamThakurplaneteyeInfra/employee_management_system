@@ -12,6 +12,7 @@ class CustomerPanelEntryAdmin(admin.ModelAdmin):
         "client_contact",
         "serial_no",
         "product",
+        "division",
         "service",
         "value",
         "tax_percent",
@@ -26,6 +27,7 @@ class CustomerPanelEntryAdmin(admin.ModelAdmin):
         "serial_no",
         "representative_name",
         "product",
+        "division",
         "service",
     )
     ordering = ("-created_at",)

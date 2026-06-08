@@ -8,6 +8,13 @@ class CustomerPanelEntry(models.Model):
     Isolated from existing Clients models to avoid cross-feature side effects.
     """
 
+    DIVISION_FARM = "farm"
+    DIVISION_INFRA = "infra"
+    DIVISION_CHOICES = [
+        (DIVISION_FARM, "Farm"),
+        (DIVISION_INFRA, "Infra"),
+    ]
+
     business_name = models.CharField(max_length=255, db_index=True)
     client_name = models.CharField(max_length=255, blank=True, null=True)
     client_contact = models.CharField(max_length=100, blank=True, null=True)
@@ -16,6 +23,13 @@ class CustomerPanelEntry(models.Model):
     representative_contact_number = models.CharField(max_length=100, blank=True, null=True)
     serial_no = models.CharField(max_length=100, blank=True, null=True, db_index=True)
     product = models.CharField(max_length=255, blank=True, null=True)
+    division = models.CharField(
+        max_length=10,
+        choices=DIVISION_CHOICES,
+        blank=True,
+        null=True,
+        db_index=True,
+    )
     service = models.CharField(max_length=255, blank=True, null=True)
     date = models.DateField(blank=True, null=True)
     value = models.DecimalField(max_digits=14, decimal_places=2, blank=True, null=True)

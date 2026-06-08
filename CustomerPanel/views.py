@@ -5,7 +5,8 @@ from accounts.filters import _get_user_role_sync
 from accounts.models import User
 from accounts.snippet import csrf_exempt, login_required
 from django.db import transaction
-from django.db.models import Prefetch, Q
+from django.db.models import Count, DecimalField, Prefetch, Q, Sum, Value
+from django.db.models.functions import Coalesce
 from ems.RequiredImports import HttpRequest, JsonResponse, status, sync_to_async
 from ems.utils import gmt_to_ist_str, get_user_from_member
 from ems.verify_methods import (
@@ -19,6 +20,10 @@ from ems.verify_methods import (
 
 from .models import CustomerPanelAmountLog, CustomerPanelEntry, CustomerPanelEntryMembers
 
+_VALID_DIVISIONS = frozenset(
+    {CustomerPanelEntry.DIVISION_FARM, CustomerPanelEntry.DIVISION_INFRA}
+)
+
 
 def _is_admin_or_md(user):
     if not user or not user.is_authenticated:
@@ -27,6 +32,14 @@ def _is_admin_or_md(user):
         return True
     role = _get_user_role_sync(user)
     return role in ("Admin", "MD")
+
+
+def _is_md(user):
+    if not user or not user.is_authenticated:
+        return False
+    if getattr(user, "is_superuser", False):
+        return True
+    return _get_user_role_sync(user) == "MD"
 
 
 def _user_can_access_entry(user, entry: CustomerPanelEntry) -> bool:
@@ -71,6 +84,17 @@ def _coerce_decimal(raw, field_name):
     return value
 
 
+def _parse_division(raw, *, required=False):
+    if raw is None or (isinstance(raw, str) and not raw.strip()):
+        if required:
+            raise ValueError("division is required")
+        return None
+    value = str(raw).strip().lower()
+    if value not in _VALID_DIVISIONS:
+        raise ValueError("division must be 'farm' or 'infra'")
+    return value
+
+
 def _calc_total(value, tax_percent):
     if value is None:
         return None
@@ -96,6 +120,7 @@ def _entry_to_dict(obj: CustomerPanelEntry):
         "representative_contact_number": obj.representative_contact_number,
         "serial_no": obj.serial_no,
         "product": obj.product,
+        "division": obj.division,
         "service": obj.service,
         "date": str(obj.date) if obj.date else None,
         "value": float(obj.value) if obj.value is not None else None,
@@ -118,6 +143,23 @@ def _amount_log_to_dict(obj: CustomerPanelAmountLog):
         "notes": obj.notes,
         "created_at": gmt_to_ist_str(obj.created_at, "%d/%m/%Y %H:%M:%S") if obj.created_at else None,
         "updated_at": gmt_to_ist_str(obj.updated_at, "%d/%m/%Y %H:%M:%S") if obj.updated_at else None,
+    }
+
+
+def _entries_summary_sync():
+    zero = Value(Decimal("0"), output_field=DecimalField())
+    entry_agg = CustomerPanelEntry.objects.aggregate(
+        entry_count=Count("id"),
+        total_amount=Coalesce(Sum("total"), zero),
+    )
+    paid_agg = CustomerPanelAmountLog.objects.aggregate(paid=Coalesce(Sum("amount"), zero))
+    total_amount = entry_agg["total_amount"] or Decimal("0")
+    paid = paid_agg["paid"] or Decimal("0")
+    return {
+        "entry_count": entry_agg["entry_count"] or 0,
+        "total_amount": float(total_amount),
+        "paid": float(paid),
+        "remaining": float(total_amount - paid),
     }
 
 
@@ -152,6 +194,7 @@ def _create_entry_sync(user, data):
     value = _coerce_decimal(data.get("value"), "value")
     tax_percent = _coerce_decimal(data.get("tax_percent"), "tax_percent")
     total = _calc_total(value, tax_percent)
+    division = _parse_division(data.get("division"), required=True)
     obj = CustomerPanelEntry.objects.create(
         business_name=business_name,
         client_name=data.get("client_name"),
@@ -161,6 +204,7 @@ def _create_entry_sync(user, data):
         representative_contact_number=data.get("representative_contact_number"),
         serial_no=data.get("serial_no"),
         product=data.get("product"),
+        division=division,
         service=data.get("service"),
         date=data.get("date") or None,
         value=value,
@@ -204,6 +248,8 @@ def _update_entry_sync(entry_id, data):
         if not name:
             raise ValueError("business_name cannot be empty")
         obj.business_name = name
+    if "division" in data:
+        obj.division = _parse_division(data.get("division"), required=True)
     for field in [
         "client_name",
         "client_contact",
@@ -234,6 +280,19 @@ def _update_entry_sync(entry_id, data):
         obj.members.clear()
         _apply_members_to_entry(obj, members)
     return _get_entry_sync(entry_id)
+
+
+@csrf_exempt
+@login_required
+async def entries_summary(request: HttpRequest):
+    if request.method != "GET":
+        return JsonResponse({"error": "Method not allowed"}, status=status.HTTP_405_METHOD_NOT_ALLOWED)
+    if verifyGet(request):
+        return verifyGet(request)
+    if not _is_md(request.user):
+        return JsonResponse({"error": "Only MD can access this endpoint"}, status=status.HTTP_403_FORBIDDEN)
+    data = await sync_to_async(_entries_summary_sync)()
+    return JsonResponse(data, status=status.HTTP_200_OK)
 
 
 @csrf_exempt
