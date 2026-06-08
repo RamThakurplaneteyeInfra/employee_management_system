@@ -87,6 +87,48 @@
 
 ---
 
+### Profile follow-up reminders
+
+**url:** `{{baseurl}}/clientsapi/profiles/reminders/`  
+**method:** GET  
+**query:** `interval_days=5` (optional, default 5)  
+**notes:** Only leads **created by** the logged-in user in stages: Leads, Proforma, Demo, Proposal, Qualified (case-insensitive). Due when never reminded and age ≥ interval, or when days since `last_reminded_at` ≥ interval. Slim payload (no members/notes).
+
+**sample_response:**
+```json
+{
+  "interval_days": 5,
+  "count": 1,
+  "items": [
+    {
+      "id": 12,
+      "company_name": "Acme Corp",
+      "client_name": "John Doe",
+      "status_name": "Leads",
+      "created_at": "01/06/2026 10:30:00",
+      "days_since_created": 7,
+      "is_reminder_due": true
+    }
+  ]
+}
+```
+
+**url:** `{{baseurl}}/clientsapi/profiles/reminders/<id>/ack/`  
+**method:** POST  
+**body:** None  
+**notes:** Creator only. Sets `last_reminded_at`; lead hidden from reminders until next interval.
+
+**sample_response:**
+```json
+{
+  "id": 12,
+  "ok": true,
+  "last_reminded_at": "08/06/2026 12:00:00"
+}
+```
+
+---
+
 **url:** `{{baseurl}}/clientsapi/profiles/`  
 **method:** POST  
 **body:**

@@ -10,6 +10,12 @@ urlpatterns = [
     path("employees/", views.employee_list, name="client_employees"),
     path("stages/", views.stage_list, name="client_stages"),
     path("profiles/", views.profile_list_create, name="client_profiles"),
+    path("profiles/reminders/", views.profile_reminders_list, name="client_profile_reminders"),
+    path(
+        "profiles/reminders/<int:profile_id>/ack/",
+        views.profile_reminder_ack,
+        name="client_profile_reminder_ack",
+    ),
     path("profiles/<int:profile_id>/", views.profile_detail_update_delete, name="client_profile_detail"),
     path("profiles/<int:profile_id>/members/", views.profile_members, name="client_profile_members"),
     path("profiles/<int:profile_id>/conversations/", views.conversation_list_create, name="client_conversations"),

@@ -94,6 +94,11 @@ class ClientProfile(models.Model):
         related_name="created_client_profiles",
         db_index=True,
     )
+    last_reminded_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When the creator last acknowledged a follow-up reminder for this lead.",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

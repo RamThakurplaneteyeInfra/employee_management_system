@@ -24,6 +24,8 @@ from task_management.models import TaskStatus
 
 # Keep a high but finite limit to avoid unexpectedly rejecting long lead notes.
 MAX_LEAD_DESCRIPTION_WORDS = 10000
+DEFAULT_REMINDER_INTERVAL_DAYS = 5
+REMINDER_STAGE_NAMES = ("Leads", "Proforma", "Demo", "Proposal", "Qualified")
 
 
 def _branch_pk_from_raw(raw):
@@ -359,6 +361,74 @@ def _profile_to_dict(c, *, include_product_id=True):
     return out
 
 
+def _parse_reminder_interval_days(request):
+    raw = request.GET.get("interval_days", str(DEFAULT_REMINDER_INTERVAL_DAYS))
+    try:
+        days = int(raw)
+    except (TypeError, ValueError):
+        days = DEFAULT_REMINDER_INTERVAL_DAYS
+    if days < 1:
+        days = DEFAULT_REMINDER_INTERVAL_DAYS
+    if days > 90:
+        days = 90
+    return days
+
+
+def _reminder_stage_filter():
+    stage_q = Q()
+    for name in REMINDER_STAGE_NAMES:
+        stage_q |= Q(status__name__iexact=name)
+    return stage_q
+
+
+def _is_profile_reminder_due(profile, today, interval_days):
+    if not profile.created_at:
+        return False
+    created_date = timezone.localtime(profile.created_at).date()
+    if profile.last_reminded_at:
+        anchor_date = timezone.localtime(profile.last_reminded_at).date()
+        return (today - anchor_date).days >= interval_days
+    return (today - created_date).days >= interval_days
+
+
+def _reminder_profile_to_dict(profile, today):
+    created_date = timezone.localtime(profile.created_at).date()
+    return {
+        "id": profile.id,
+        "company_name": profile.company_name,
+        "client_name": profile.client_name,
+        "status_name": profile.status.name if profile.status else None,
+        "created_at": gmt_to_ist_str(profile.created_at, "%d/%m/%Y %H:%M:%S") if profile.created_at else None,
+        "days_since_created": (today - created_date).days,
+        "is_reminder_due": True,
+    }
+
+
+def _list_profile_reminders_sync(user, interval_days):
+    """Leads created by user in reminder stages that are due for follow-up."""
+    today = timezone.localdate()
+    qs = (
+        ClientProfile.objects.filter(created_by=user)
+        .filter(_reminder_stage_filter())
+        .select_related("status")
+        .order_by("-created_at")
+    )
+    return [
+        _reminder_profile_to_dict(profile, today)
+        for profile in qs
+        if _is_profile_reminder_due(profile, today, interval_days)
+    ]
+
+
+def _ack_profile_reminder_sync(user, profile_id):
+    profile = ClientProfile.objects.get(id=profile_id)
+    if profile.created_by_id != user.pk:
+        raise PermissionError("Only the creator can acknowledge reminders for this lead.")
+    profile.last_reminded_at = timezone.now()
+    profile.save(update_fields=["last_reminded_at"])
+    return profile
+
+
 def _list_profiles_sync(user):
     """List only profiles the user is allowed to access (creator or member)."""
     conv_prefetch = Prefetch(
@@ -389,6 +459,48 @@ async def profile_list_create(request: HttpRequest):
         data = await sync_to_async(_list_profiles_sync)(request.user)
         return JsonResponse(data, safe=False)
     return await profile_create(request)
+
+
+@login_required
+async def profile_reminders_list(request: HttpRequest):
+    """GET /clientsapi/profiles/reminders/ - Slim due follow-up list for creator's leads."""
+    if verifyGet(request):
+        return verifyGet(request)
+    interval_days = _parse_reminder_interval_days(request)
+    items = await sync_to_async(_list_profile_reminders_sync)(request.user, interval_days)
+    return JsonResponse(
+        {
+            "interval_days": interval_days,
+            "count": len(items),
+            "items": items,
+        }
+    )
+
+
+@csrf_exempt
+@login_required
+async def profile_reminder_ack(request: HttpRequest, profile_id: int):
+    """POST /clientsapi/profiles/reminders/<id>/ack/ - Mark reminder as seen; next due after interval."""
+    if request.method != "POST":
+        return JsonResponse({"error": "Method not allowed"}, status=status.HTTP_405_METHOD_NOT_ALLOWED)
+    err = verifyPost(request)
+    if err:
+        return err
+    try:
+        profile = await sync_to_async(_ack_profile_reminder_sync)(request.user, profile_id)
+    except ClientProfile.DoesNotExist:
+        return JsonResponse({"error": "Client not found"}, status=status.HTTP_404_NOT_FOUND)
+    except PermissionError as exc:
+        return JsonResponse({"error": str(exc)}, status=status.HTTP_403_FORBIDDEN)
+    return JsonResponse(
+        {
+            "id": profile.id,
+            "ok": True,
+            "last_reminded_at": gmt_to_ist_str(profile.last_reminded_at, "%d/%m/%Y %H:%M:%S")
+            if profile.last_reminded_at
+            else None,
+        }
+    )
 
 
 def _get_profile_sync(profile_id):
