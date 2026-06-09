@@ -23,6 +23,7 @@ from .models import CustomerPanelAmountLog, CustomerPanelEntry, CustomerPanelEnt
 _VALID_DIVISIONS = frozenset(
     {CustomerPanelEntry.DIVISION_FARM, CustomerPanelEntry.DIVISION_INFRA}
 )
+_LEDGER_DIVISION_FILTERS = frozenset({"farm", "infra", "others"})
 
 
 def _is_admin_or_md(user):
@@ -184,18 +185,52 @@ def _entries_summary_sync():
     return summary
 
 
+def _entries_queryset_for_user(user):
+    qs = CustomerPanelEntry.objects.all().order_by("-created_at")
+    if not _is_admin_or_md(user):
+        qs = qs.filter(Q(created_by=user) | Q(members=user)).distinct()
+    return qs
+
+
+def _list_entries_ledger_sync(user, division_filter=None):
+    zero = Value(Decimal("0"), output_field=DecimalField())
+    qs = _entries_queryset_for_user(user).annotate(
+        paid=Coalesce(Sum("amount_logs__amount"), zero),
+    )
+    if division_filter == "farm":
+        qs = qs.filter(division=CustomerPanelEntry.DIVISION_FARM)
+    elif division_filter == "infra":
+        qs = qs.filter(division=CustomerPanelEntry.DIVISION_INFRA)
+    elif division_filter == "others":
+        qs = qs.filter(division__isnull=True)
+
+    rows = []
+    for obj in qs:
+        total = float(obj.total) if obj.total is not None else 0.0
+        paid = float(obj.paid or 0)
+        rows.append(
+            {
+                "id": obj.id,
+                "business_name": obj.business_name,
+                "client_name": obj.client_name,
+                "total": total,
+                "paid": paid,
+                "remaining": total - paid,
+            }
+        )
+    return rows
+
+
 def _list_entries_sync(user):
     members_prefetch = Prefetch(
         "members",
         queryset=User.objects.only("id", "username"),
     )
     qs = (
-        CustomerPanelEntry.objects.select_related("created_by")
+        _entries_queryset_for_user(user)
+        .select_related("created_by")
         .prefetch_related(members_prefetch)
-        .order_by("-created_at")
     )
-    if not _is_admin_or_md(user):
-        qs = qs.filter(Q(created_by=user) | Q(members=user)).distinct()
     return [_entry_to_dict(obj) for obj in qs]
 
 
@@ -301,6 +336,26 @@ def _update_entry_sync(entry_id, data):
         obj.members.clear()
         _apply_members_to_entry(obj, members)
     return _get_entry_sync(entry_id)
+
+
+@csrf_exempt
+@login_required
+async def entries_ledger(request: HttpRequest):
+    if request.method != "GET":
+        return JsonResponse({"error": "Method not allowed"}, status=status.HTTP_405_METHOD_NOT_ALLOWED)
+    if verifyGet(request):
+        return verifyGet(request)
+    division = (request.GET.get("division") or "").strip().lower()
+    if division and division not in _LEDGER_DIVISION_FILTERS:
+        return JsonResponse(
+            {"error": "division must be 'farm', 'infra', or 'others'"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    data = await sync_to_async(_list_entries_ledger_sync)(
+        request.user,
+        division_filter=division or None,
+    )
+    return JsonResponse(data, safe=False, status=status.HTTP_200_OK)
 
 
 @csrf_exempt
