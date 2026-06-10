@@ -44,6 +44,7 @@ from .leave_notifications import (
     notify_md_after_hr_approved,
     notify_applicant_final_approval,
 )
+from .leave_scoring import build_leave_points, parse_leave_points_period, resolve_leave_points_user
 
 INTERN_ROLE_NAME = "Intern"
 _ON_LEAVE_VIEW_ROLES = frozenset({"HR", "Hr", "Admin", "MD", "TeamLead", "Teamlead"})
@@ -1283,6 +1284,40 @@ class LeaveApplicationViewSet(ModelViewSet):
                 "short_leave_monthly_quota": short_leave_monthly_quota(),
             }
         )
+
+    @action(detail=False, methods=["get"], url_path="leave-points")
+    def leave_points(self, request):
+        """
+        Monthly / quarterly / yearly leave event counts and performance points.
+        GET /accounts/leave-applications/leave-points/?year=2026&month=6
+        GET /accounts/leave-applications/leave-points/?year=2026&quarter=2
+        GET /accounts/leave-applications/leave-points/?year=2026
+        Quarters are financial-year (April start): year=April year; Q1 Apr–Jun,
+        Q2 Jul–Sep, Q3 Oct–Dec, Q4 Jan–Mar of the following calendar year.
+        Optional: ?employee=<username> (HR / Admin / MD / TeamLead for team members)
+
+        Points: half_day -0.5, full_day -1, unapproved_absent -1.5,
+        alternate_assigned_accepted +0.25.
+        Unapproved absent = leave applied after start_date (-1.5) plus -1 per
+        extra day on multi-day late leave (3 days → -3.5).
+        """
+        year, month, quarter, period_err = parse_leave_points_period(request)
+        if period_err is not None:
+            return Response(period_err, status=status.HTTP_400_BAD_REQUEST)
+
+        target_user, user_err = resolve_leave_points_user(
+            request, _user_can_view_on_leave, _get_user_role_sync
+        )
+        if user_err is not None:
+            err_status = (
+                status.HTTP_404_NOT_FOUND
+                if "not found" in user_err["detail"].lower()
+                else status.HTTP_403_FORBIDDEN
+            )
+            return Response(user_err, status=err_status)
+
+        data = build_leave_points(target_user, year, month=month, quarter=quarter)
+        return Response(data)
 
     # ---------- GET: view history (my applications) ----------
     @action(detail=False, methods=["get"], url_path="view_history")
