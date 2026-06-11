@@ -5,7 +5,7 @@ from accounts.filters import _get_user_role_sync
 from accounts.models import User
 from accounts.snippet import csrf_exempt, login_required
 from django.db import transaction
-from django.db.models import Count, DecimalField, Prefetch, Q, Sum, Value
+from django.db.models import Count, DecimalField, OuterRef, Prefetch, Q, Subquery, Sum, Value
 from django.db.models.functions import Coalesce
 from ems.RequiredImports import HttpRequest, JsonResponse, status, sync_to_async
 from ems.utils import gmt_to_ist_str, get_user_from_member
@@ -192,10 +192,20 @@ def _entries_queryset_for_user(user):
     return qs
 
 
+def _entry_paid_subquery():
+    """Per-entry payment sum; avoids M2M join inflation when filtering by members."""
+    return (
+        CustomerPanelAmountLog.objects.filter(entry_id=OuterRef("pk"))
+        .values("entry_id")
+        .annotate(total_paid=Sum("amount"))
+        .values("total_paid")
+    )
+
+
 def _list_entries_ledger_sync(user, division_filter=None):
     zero = Value(Decimal("0"), output_field=DecimalField())
     qs = _entries_queryset_for_user(user).annotate(
-        paid=Coalesce(Sum("amount_logs__amount"), zero),
+        paid=Coalesce(Subquery(_entry_paid_subquery()), zero),
     )
     if division_filter == "farm":
         qs = qs.filter(division=CustomerPanelEntry.DIVISION_FARM)
