@@ -1,7 +1,12 @@
+from datetime import date, datetime, time
+
 from django.contrib.auth.models import User
 from django.test import TestCase
+from django.utils import timezone
 from rest_framework.test import APIClient
 
+from accounts.leave_scoring import build_leave_points
+from accounts.performance_scoring import build_performance_score
 from accounts.models import (
     LeaveApplicationData,
     LeaveStatus,
@@ -181,3 +186,185 @@ class LeaveNotificationFlowTests(TestCase):
             Notification.objects.filter(type_of_notification__type_name="Leave_Submitted_Alternative").count(),
             0,
         )
+
+
+class LeaveScoringTests(TestCase):
+    def setUp(self):
+        self.role_employee = Roles.objects.create(role_name="Employee")
+        self.approved = LeaveStatus.objects.create(name="Approved")
+        self.pending = LeaveStatus.objects.create(name="Pending")
+        self.full_day = LeaveTypes.objects.create(name="Full_day")
+        self.half_day = LeaveTypes.objects.create(name="Half_day")
+        self.emp = User.objects.create_user(username="EMP100", password="pass123")
+        Profile.objects.create(
+            Employee_id=self.emp,
+            Role=self.role_employee,
+            Name="Scoring Employee",
+            Email_id="scoring@example.com",
+        )
+
+    def _create_leave(
+        self,
+        *,
+        start_date,
+        leave_type,
+        applied_on=None,
+        md_approved=True,
+    ):
+        applied_on = applied_on or start_date
+        aware_applied = timezone.make_aware(datetime.combine(applied_on, time.min))
+        return LeaveApplicationData.objects.create(
+            applicant=self.emp,
+            start_date=start_date,
+            duration_of_days=1,
+            leave_subject="Test leave",
+            reason="Test reason",
+            leave_type=leave_type,
+            MD_approval=self.approved if md_approved else self.pending,
+            application_date=applied_on,
+            applied_at=aware_applied,
+        )
+
+    def test_allowance_uses_day_units_and_counts_show_totals(self):
+        self._create_leave(start_date=date(2026, 6, 3), leave_type=self.full_day)
+        self._create_leave(start_date=date(2026, 6, 10), leave_type=self.full_day)
+        self._create_leave(start_date=date(2026, 6, 20), leave_type=self.full_day)
+
+        result = build_leave_points(self.emp, 2026, month=6)
+
+        self.assertEqual(result["points"]["full_day"], -3.0)
+        self.assertEqual(result["total_points"], -1.0)
+        self.assertEqual(result["counts"]["waived"], 2)
+        self.assertEqual(result["counts"]["waived_units"], 2.0)
+        self.assertEqual(result["counts"]["full_day"], 3)
+        self.assertEqual(result["monthly_free_allowance"], 2.0)
+
+    def test_two_half_days_and_one_full_day_use_full_allowance(self):
+        self._create_leave(start_date=date(2026, 6, 3), leave_type=self.half_day)
+        self._create_leave(start_date=date(2026, 6, 4), leave_type=self.half_day)
+        self._create_leave(start_date=date(2026, 6, 5), leave_type=self.full_day)
+
+        result = build_leave_points(self.emp, 2026, month=6)
+
+        self.assertEqual(result["points"]["half_day"], -1.0)
+        self.assertEqual(result["points"]["full_day"], -1.0)
+        self.assertEqual(result["total_points"], 0.0)
+        self.assertEqual(result["counts"]["half_day"], 2)
+        self.assertEqual(result["counts"]["full_day"], 1)
+        self.assertEqual(result["counts"]["waived"], 3)
+        self.assertEqual(result["counts"]["waived_units"], 2.0)
+
+    def test_mixed_month_pattern_matches_unit_allowance(self):
+        self._create_leave(start_date=date(2026, 6, 1), leave_type=self.full_day)
+        self._create_leave(start_date=date(2026, 6, 4), leave_type=self.half_day)
+        self._create_leave(start_date=date(2026, 6, 5), leave_type=self.full_day)
+        self._create_leave(start_date=date(2026, 6, 8), leave_type=self.half_day)
+
+        result = build_leave_points(self.emp, 2026, month=6)
+
+        self.assertEqual(result["points"]["half_day"], -1.0)
+        self.assertEqual(result["points"]["full_day"], -2.0)
+        self.assertEqual(result["total_points"], -1.0)
+        self.assertEqual(result["counts"]["half_day"], 2)
+        self.assertEqual(result["counts"]["full_day"], 2)
+        self.assertEqual(result["counts"]["waived"], 3)
+        self.assertEqual(result["counts"]["waived_units"], 2.0)
+
+    def test_monthly_allowance_resets_each_calendar_month(self):
+        self._create_leave(start_date=date(2026, 6, 28), leave_type=self.full_day)
+        self._create_leave(start_date=date(2026, 6, 29), leave_type=self.full_day)
+        self._create_leave(start_date=date(2026, 7, 1), leave_type=self.full_day)
+
+        result = build_leave_points(self.emp, 2026)
+
+        # Leaves only in June and July; other 10 months earn +2 bonus each.
+        self.assertEqual(result["total_points"], 20.0)
+        self.assertEqual(result["counts"]["waived"], 3)
+        self.assertEqual(result["counts"]["full_day"], 3)
+        self.assertEqual(result["counts"]["no_leave_months"], 10)
+
+    def test_no_leave_month_earns_bonus(self):
+        result = build_leave_points(self.emp, 2026, month=6)
+
+        self.assertEqual(result["total_points"], 2.0)
+        self.assertEqual(result["points"]["no_leave_bonus"], 2.0)
+        self.assertEqual(result["counts"]["no_leave_months"], 1)
+        self.assertEqual(result["no_leave_monthly_bonus"], 2.0)
+        self.assertEqual(len(result["events"]), 1)
+        self.assertEqual(result["events"][0]["event_type"], "no_leave_bonus")
+
+    def test_month_with_leaves_does_not_get_no_leave_bonus(self):
+        self._create_leave(start_date=date(2026, 6, 5), leave_type=self.full_day)
+        result = build_leave_points(self.emp, 2026, month=6)
+
+        self.assertEqual(result["points"]["no_leave_bonus"], 0.0)
+        self.assertEqual(result["counts"]["no_leave_months"], 0)
+
+    def test_late_leave_uses_normal_allowance_while_unapproved_scoring_disabled(self):
+        self._create_leave(start_date=date(2026, 6, 5), leave_type=self.full_day)
+        self._create_leave(
+            start_date=date(2026, 6, 12),
+            leave_type=self.full_day,
+            applied_on=date(2026, 6, 13),
+        )
+
+        result = build_leave_points(self.emp, 2026, month=6)
+
+        self.assertEqual(result["total_points"], 0.0)
+        self.assertEqual(result["counts"]["waived"], 2)
+        self.assertEqual(result["counts"]["full_day"], 2)
+        self.assertEqual(result["counts"]["unapproved_absent"], 0)
+
+
+class PerformanceScoringTests(TestCase):
+    def setUp(self):
+        from events.models import BookSlot, BookingStatus, Room, SlotMembers
+
+        self.BookSlot = BookSlot
+        self.SlotMembers = SlotMembers
+        self.role_employee = Roles.objects.create(role_name="Employee")
+        self.approved = LeaveStatus.objects.create(name="Approved")
+        self.confirmed = BookingStatus.objects.create(status_name="Confirmed")
+        self.full_day = LeaveTypes.objects.create(name="Full_day")
+        self.indoor_room = Room.objects.create(name="Conference A")
+        self.emp = User.objects.create_user(username="EMP300", password="pass123")
+        Profile.objects.create(
+            Employee_id=self.emp,
+            Role=self.role_employee,
+            Name="Performance Employee",
+            Email_id="perf@example.com",
+        )
+
+    def test_combined_score_merges_leave_and_meeting(self):
+        aware_applied = timezone.make_aware(datetime.combine(date(2026, 6, 1), time.min))
+        LeaveApplicationData.objects.create(
+            applicant=self.emp,
+            start_date=date(2026, 6, 5),
+            duration_of_days=1,
+            leave_subject="Leave",
+            reason="Reason",
+            leave_type=self.full_day,
+            MD_approval=self.approved,
+            application_date=date(2026, 6, 1),
+            applied_at=aware_applied,
+        )
+        slot = self.BookSlot.objects.create(
+            meeting_title="Standup",
+            date=date(2026, 6, 10),
+            start_time=time(10, 0),
+            end_time=time(11, 0),
+            room=self.indoor_room,
+            meeting_type="group",
+            status=self.confirmed,
+            created_by=self.emp,
+        )
+        self.SlotMembers.objects.create(slot=slot, member=self.emp)
+
+        result = build_performance_score(self.emp, 2026, month=6)
+
+        self.assertEqual(result["leave"]["total_points"], 0.0)
+        self.assertEqual(result["meeting"]["total_points"], 0.25)
+        self.assertEqual(result["combined_total_points"], 0.25)
+        self.assertIn("leave", result)
+        self.assertIn("meeting", result)
+        self.assertEqual(result["employee_id"], "EMP300")

@@ -45,6 +45,7 @@ from .leave_notifications import (
     notify_applicant_final_approval,
 )
 from .leave_scoring import build_leave_points, parse_leave_points_period, resolve_leave_points_user
+from .performance_scoring import build_performance_score
 
 INTERN_ROLE_NAME = "Intern"
 _ON_LEAVE_VIEW_ROLES = frozenset({"HR", "Hr", "Admin", "MD", "TeamLead", "Teamlead"})
@@ -1296,10 +1297,10 @@ class LeaveApplicationViewSet(ModelViewSet):
         Q2 Jul–Sep, Q3 Oct–Dec, Q4 Jan–Mar of the following calendar year.
         Optional: ?employee=<username> (HR / Admin / MD / TeamLead for team members)
 
-        Points: half_day -0.5, full_day -1, unapproved_absent -1.5,
-        alternate_assigned_accepted +0.25.
-        Unapproved absent = leave applied after start_date (-1.5) plus -1 per
-        extra day on multi-day late leave (3 days → -3.5).
+        Monthly free allowance of 2.0 day-units (half day = 0.5, full day = 1.0);
+        +2.0 bonus per calendar month with no MD-approved half/full leave.
+        points show gross deductions plus no_leave_bonus; total_points is net
+        after allowance and includes the no-leave bonus. Unapproved-absent is off.
         """
         year, month, quarter, period_err = parse_leave_points_period(request)
         if period_err is not None:
@@ -1317,6 +1318,36 @@ class LeaveApplicationViewSet(ModelViewSet):
             return Response(user_err, status=err_status)
 
         data = build_leave_points(target_user, year, month=month, quarter=quarter)
+        return Response(data)
+
+    @action(detail=False, methods=["get"], url_path="performance-score")
+    def performance_score(self, request):
+        """
+        Combined leave + meeting performance score for one employee.
+        GET /accounts/leave-applications/performance-score/?year=2026&month=6
+        GET /accounts/leave-applications/performance-score/?year=2026&quarter=2
+        GET /accounts/leave-applications/performance-score/?year=2026
+        Optional: ?employee=<username> (HR / Admin / MD / TeamLead for team members)
+
+        Response includes nested `leave` and `meeting` payloads plus
+        `combined_total_points` (leave.total_points + meeting.total_points).
+        """
+        year, month, quarter, period_err = parse_leave_points_period(request)
+        if period_err is not None:
+            return Response(period_err, status=status.HTTP_400_BAD_REQUEST)
+
+        target_user, user_err = resolve_leave_points_user(
+            request, _user_can_view_on_leave, _get_user_role_sync
+        )
+        if user_err is not None:
+            err_status = (
+                status.HTTP_404_NOT_FOUND
+                if "not found" in user_err["detail"].lower()
+                else status.HTTP_403_FORBIDDEN
+            )
+            return Response(user_err, status=err_status)
+
+        data = build_performance_score(target_user, year, month=month, quarter=quarter)
         return Response(data)
 
     # ---------- GET: view history (my applications) ----------

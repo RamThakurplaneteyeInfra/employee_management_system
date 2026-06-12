@@ -1,6 +1,6 @@
 """
 Events API views. Base path: {{baseurl}}/eventsapi/
-- BookSlotViewSet: /bookslots/ (CRUD + today)
+- BookSlotViewSet: /bookslots/ (CRUD + today + meeting-points)
 - RoomViewSet: /rooms/
 - BookingStatusViewset: /status/
 - TourViewSet: /tours/
@@ -35,6 +35,12 @@ from .models import (
     Meeting,
 )
 from .serializers import *
+from accounts.leave_views import _get_user_role_sync, _user_can_view_on_leave
+from .meeting_scoring import (
+    build_meeting_points,
+    parse_leave_points_period,
+    resolve_leave_points_user,
+)
 
 # Note: DRF ViewSets do not support async methods - they don't await coroutines.
 # Sync views work under ASGI; Django runs them in a thread pool automatically.
@@ -84,7 +90,15 @@ class BookSlotViewSet(ModelViewSet):
         Instantiates and returns the list of permissions that this view requires.
         """
         # 1. Open to everyone for GET requests (list and retrieve)
-        if self.action in ['list', 'retrieve','create', 'update', 'partial_update', 'destroy']:
+        if self.action in [
+            "list",
+            "retrieve",
+            "create",
+            "update",
+            "partial_update",
+            "destroy",
+            "meeting_points",
+        ]:
             permission_classes = [IsAuthenticated]
         
         else:
@@ -104,6 +118,32 @@ class BookSlotViewSet(ModelViewSet):
         qs = self.queryset.filter(date=today)
         serializer = BookSlotSerializer(qs, many=True, context={"request": request})
         return Response(serializer.data)
+
+    @action(detail=False, methods=["get"], url_path="meeting-points")
+    def meeting_points(self, request):
+        """
+        Meeting counts and performance points for an employee.
+        GET /eventsapi/bookslots/meeting-points/?year=2026&month=6
+        Indoor +0.25 (max 3.5/mo), Outdoor +0.5 (max 3.5/mo), total max 7.0/mo.
+        Optional: ?employee=<username>
+        """
+        year, month, quarter, period_err = parse_leave_points_period(request)
+        if period_err is not None:
+            return Response(period_err, status=status.HTTP_400_BAD_REQUEST)
+
+        target_user, user_err = resolve_leave_points_user(
+            request, _user_can_view_on_leave, _get_user_role_sync
+        )
+        if user_err is not None:
+            err_status = (
+                status.HTTP_404_NOT_FOUND
+                if "not found" in user_err["detail"].lower()
+                else status.HTTP_403_FORBIDDEN
+            )
+            return Response(user_err, status=err_status)
+
+        data = build_meeting_points(target_user, year, month=month, quarter=quarter)
+        return Response(data)
 
 # ==================== RoomViewSet ====================
 # URL: {{baseurl}}/eventsapi/rooms/  | List, Create, Retrieve, Update, Delete
