@@ -364,7 +364,9 @@ class PerformanceScoringTests(TestCase):
 
         self.assertEqual(result["leave"]["total_points"], 0.0)
         self.assertEqual(result["meeting"]["total_points"], 0.25)
+        self.assertEqual(result["checklist"]["total_points"], 0.0)
         self.assertEqual(result["combined_total_points"], 0.25)
         self.assertIn("leave", result)
         self.assertIn("meeting", result)
+        self.assertIn("checklist", result)
         self.assertEqual(result["employee_id"], "EMP300")

@@ -20,6 +20,12 @@ from .permissions import (
     is_global_privileged_deadline_user,
     resolve_deadline_employee_id,
 )
+from accounts.leave_views import _get_user_role_sync, _user_can_view_on_leave
+from .checklist_scoring import (
+    build_checklist_points,
+    parse_leave_points_period,
+    resolve_leave_points_user,
+)
 from .serializers import (
     ProjectInputSerializer,
     ProjectOutputSerializer,
@@ -288,3 +294,35 @@ class ProjectDetailView(No403APIView):
         project.archived = True
         project.save(update_fields=["archived", "updated_at"])
         return Response({"success": True, "data": {"id": project.pk}})
+
+
+# ---------------------------------------------------------------------------
+# Checklist points — GET /deadline/projects/checklist-points/
+# ---------------------------------------------------------------------------
+
+class ChecklistPointsView(No403APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        """
+        Checklist performance points from project phase checklists.
+        GET /deadline/projects/checklist-points/?year=2026&month=4
+        Optional: ?employee=<username>
+        """
+        year, month, quarter, period_err = parse_leave_points_period(request)
+        if period_err is not None:
+            return Response(period_err, status=status.HTTP_400_BAD_REQUEST)
+
+        target_user, user_err = resolve_leave_points_user(
+            request, _user_can_view_on_leave, _get_user_role_sync
+        )
+        if user_err is not None:
+            err_status = (
+                status.HTTP_404_NOT_FOUND
+                if "not found" in user_err["detail"].lower()
+                else status.HTTP_403_FORBIDDEN
+            )
+            return Response(user_err, status=err_status)
+
+        data = build_checklist_points(target_user, year, month=month, quarter=quarter)
+        return Response(data)

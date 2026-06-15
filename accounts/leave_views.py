@@ -1329,8 +1329,8 @@ class LeaveApplicationViewSet(ModelViewSet):
         GET /accounts/leave-applications/performance-score/?year=2026
         Optional: ?employee=<username> (HR / Admin / MD / TeamLead for team members)
 
-        Response includes nested `leave` and `meeting` payloads plus
-        `combined_total_points` (leave.total_points + meeting.total_points).
+        Response includes nested `leave`, `meeting`, and `checklist` payloads plus
+        `combined_total_points` (sum of all three total_points).
         """
         year, month, quarter, period_err = parse_leave_points_period(request)
         if period_err is not None:
