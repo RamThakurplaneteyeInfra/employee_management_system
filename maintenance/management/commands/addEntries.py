@@ -15,7 +15,7 @@ class Command(BaseCommand):
         # Branch.objects.create(branch_name="None")
         # Use: python manage.py seed_notification_types
         
-        # for i in ["NPD","MMR","RG","HC","IP"]:
+        # for i in ["NPD", "MMR", "RG", "HC", "IP", "NPC", "P&S"]:
         #     Functions.objects.create(function=i)
         
         # obj=Quaters.create_quater(quater="Q3",starting_month=9,ending_month=12)
