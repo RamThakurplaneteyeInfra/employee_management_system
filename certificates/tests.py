@@ -123,3 +123,84 @@ class CertificateAccessTests(TestCase):
         self.client.force_authenticate(self.other)
         r = self.client.get("/api/certificates/grouped/?id=emp_cert")
         self.assertEqual(r.status_code, 403)
+
+
+class CertificationScoringTests(TestCase):
+    def setUp(self):
+        from django.utils import timezone
+        from datetime import datetime
+
+        self.timezone = timezone
+        self.datetime = datetime
+        self.emp_role, _ = Roles.objects.get_or_create(role_name="Employee")
+        self.owner = User.objects.create_user(username="score_cert", password="pass")
+        Profile.objects.create(
+            Employee_id=self.owner,
+            Role=self.emp_role,
+            Name="Score Cert",
+            Email_id="score_cert@test.com",
+        )
+
+    def _create_cert(self, title, year, month, day=5):
+        cert = EmployeeCertificate.objects.create(
+            employee=self.owner,
+            uploaded_by=self.owner,
+            title=title,
+            s3_key=f"Certificate/{title}.pdf",
+            file_name=f"{title}.pdf",
+        )
+        aware = self.timezone.make_aware(self.datetime(year, month, day, 12, 0, 0))
+        EmployeeCertificate.objects.filter(pk=cert.pk).update(created_at=aware)
+        cert.refresh_from_db()
+        return cert
+
+    def test_one_cert_gives_main_score_only(self):
+        from certificates.certification_scoring import build_certification_points
+
+        self._create_cert("AWS", 2026, 6)
+        result = build_certification_points(self.owner, 2026, month=6)
+
+        self.assertEqual(result["main_score"], 5.0)
+        self.assertEqual(result["monthly_bonus"], 0.0)
+        self.assertEqual(result["total_points"], 5.0)
+        self.assertEqual(result["counts"]["certificates"], 1)
+        self.assertEqual(len(result["events"]), 1)
+        self.assertEqual(result["events"][0]["points_type"], "main")
+
+    def test_multiple_certs_split_main_and_bonus(self):
+        from certificates.certification_scoring import build_certification_points
+
+        self._create_cert("AWS", 2026, 6, day=5)
+        self._create_cert("Azure", 2026, 6, day=10)
+        self._create_cert("GCP", 2026, 6, day=15)
+        result = build_certification_points(self.owner, 2026, month=6)
+
+        self.assertEqual(result["main_score"], 5.0)
+        self.assertEqual(result["monthly_bonus"], 10.0)
+        self.assertEqual(result["total_points"], 15.0)
+        self.assertEqual(result["counts"]["certificates"], 3)
+        self.assertEqual(result["events"][0]["points_type"], "main")
+        self.assertEqual(result["events"][1]["points_type"], "bonus")
+        self.assertEqual(result["events"][2]["points_type"], "bonus")
+
+    def test_inactive_cert_not_counted(self):
+        from certificates.certification_scoring import build_certification_points
+
+        cert = self._create_cert("Old", 2026, 6)
+        cert.is_active = False
+        cert.save(update_fields=["is_active"])
+        result = build_certification_points(self.owner, 2026, month=6)
+
+        self.assertEqual(result["total_points"], 0.0)
+        self.assertEqual(result["counts"]["certificates"], 0)
+
+    def test_certification_points_endpoint(self):
+        self._create_cert("AWS", 2026, 6)
+        self._create_cert("Azure", 2026, 6, day=8)
+        self.client = APIClient()
+        self.client.force_authenticate(self.owner)
+        r = self.client.get("/api/certificates/certification-points/?year=2026&month=6")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.data["main_score"], 5.0)
+        self.assertEqual(r.data["monthly_bonus"], 5.0)
+        self.assertEqual(r.data["total_points"], 10.0)

@@ -365,8 +365,24 @@ class PerformanceScoringTests(TestCase):
         self.assertEqual(result["leave"]["total_points"], 0.0)
         self.assertEqual(result["meeting"]["total_points"], 0.25)
         self.assertEqual(result["checklist"]["total_points"], 0.0)
+        self.assertEqual(result["certification"]["total_points"], 0.0)
         self.assertEqual(result["combined_total_points"], 0.25)
         self.assertIn("leave", result)
         self.assertIn("meeting", result)
         self.assertIn("checklist", result)
+        self.assertIn("certification", result)
         self.assertEqual(result["employee_id"], "EMP300")
+
+
+class CompletedYearsAndDaysTests(TestCase):
+    def test_null_join_date_returns_none(self):
+        from accounts.filters import completed_years_and_days
+
+        self.assertIsNone(completed_years_and_days(None))
+
+    def test_valid_join_date_returns_tenure_string(self):
+        from accounts.filters import completed_years_and_days
+
+        result = completed_years_and_days(date(2020, 1, 15))
+        self.assertIn("years", result)
+        self.assertIn("days", result)

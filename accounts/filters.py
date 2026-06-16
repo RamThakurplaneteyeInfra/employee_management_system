@@ -228,7 +228,9 @@ def get_photo_url(user_profile: Profile):
     return user_profile.Photo_link.url
 
 
-def completed_years_and_days(start_date: date) -> str:
+def completed_years_and_days(start_date: date | None) -> str | None:
+    if not start_date:
+        return None
     end_date = date.today()
     if start_date > end_date:
         return "Null"
