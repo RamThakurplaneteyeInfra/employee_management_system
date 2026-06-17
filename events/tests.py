@@ -53,9 +53,13 @@ class MeetingScoringTests(TestCase):
         self.assertEqual(result["points"]["outdoor_gross"], 0.5)
         self.assertEqual(result["points"]["indoor"], 0.5)
         self.assertEqual(result["points"]["outdoor"], 0.5)
+        self.assertEqual(result["points"]["indoor_bonus"], 0.0)
+        self.assertEqual(result["points"]["outdoor_bonus"], 0.0)
         self.assertEqual(result["points"]["raw_total"], 1.0)
+        self.assertEqual(result["main_score"], 1.0)
+        self.assertEqual(result["monthly_bonus"], 0.0)
         self.assertEqual(result["total_points"], 1.0)
-        self.assertEqual(result["max_points"], 7.0)
+        self.assertEqual(result["max_main_points"], 7.0)
         self.assertEqual(result["max_indoor_points"], 3.5)
 
     def test_indoor_cap_at_three_point_five_per_month(self):
@@ -67,7 +71,10 @@ class MeetingScoringTests(TestCase):
         self.assertEqual(result["counts"]["indoor_meetings"], 28)
         self.assertEqual(result["points"]["indoor_gross"], 7.0)
         self.assertEqual(result["points"]["indoor"], 3.5)
-        self.assertEqual(result["total_points"], 3.5)
+        self.assertEqual(result["points"]["indoor_bonus"], 3.5)
+        self.assertEqual(result["main_score"], 3.5)
+        self.assertEqual(result["monthly_bonus"], 3.5)
+        self.assertEqual(result["total_points"], 7.0)
 
     def test_separate_indoor_and_outdoor_caps(self):
         for day in range(1, 15):
@@ -81,6 +88,10 @@ class MeetingScoringTests(TestCase):
         self.assertEqual(result["points"]["outdoor_gross"], 3.5)
         self.assertEqual(result["points"]["indoor"], 3.5)
         self.assertEqual(result["points"]["outdoor"], 3.5)
+        self.assertEqual(result["points"]["indoor_bonus"], 0.0)
+        self.assertEqual(result["points"]["outdoor_bonus"], 0.0)
+        self.assertEqual(result["main_score"], 7.0)
+        self.assertEqual(result["monthly_bonus"], 0.0)
         self.assertEqual(result["total_points"], 7.0)
 
     def test_cancelled_meetings_excluded(self):
@@ -90,6 +101,8 @@ class MeetingScoringTests(TestCase):
 
         result = build_meeting_points(self.emp, 2026, month=6)
         self.assertEqual(result["counts"]["total_meetings"], 0)
+        self.assertEqual(result["main_score"], 0.0)
+        self.assertEqual(result["monthly_bonus"], 0.0)
         self.assertEqual(result["total_points"], 0.0)
 
     def test_creator_without_member_row_still_counts(self):
@@ -107,4 +120,6 @@ class MeetingScoringTests(TestCase):
 
         result = build_meeting_points(self.emp, 2026, month=6)
         self.assertEqual(result["counts"]["outdoor_meetings"], 1)
+        self.assertEqual(result["main_score"], 0.5)
+        self.assertEqual(result["monthly_bonus"], 0.0)
         self.assertEqual(result["total_points"], 0.5)

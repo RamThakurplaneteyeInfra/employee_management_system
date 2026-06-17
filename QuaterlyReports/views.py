@@ -580,6 +580,41 @@ def share_further(request, id):
 # Single API: GET list, GET/PATCH detail. Co-author approves by PATCH with {"approved_by_coauthor": true}.
 # URL: {{baseurl}}/ActionableEntriesCoAuthor/  |  {{baseurl}}/ActionableEntriesCoAuthor/<id>/
 @api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def co_author_points(request):
+    """
+    Co-author actionable entry performance points for an employee.
+    GET /ActionableEntriesCoAuthor/points/?year=2026&month=6
+    +2 per approved entry (approved_by_coauthor); main capped at 10/month, excess as bonus.
+    Optional: ?employee=<username> (HR / Admin / MD / TeamLead for team members)
+    """
+    from accounts.leave_views import _get_user_role_sync, _user_can_view_on_leave
+    from .actionable_coauthor_scoring import (
+        build_actionable_coauthor_points,
+        parse_leave_points_period,
+        resolve_leave_points_user,
+    )
+
+    year, month, quarter, period_err = parse_leave_points_period(request)
+    if period_err is not None:
+        return Response(period_err, status=status.HTTP_400_BAD_REQUEST)
+
+    target_user, user_err = resolve_leave_points_user(
+        request, _user_can_view_on_leave, _get_user_role_sync
+    )
+    if user_err is not None:
+        err_status = (
+            status.HTTP_404_NOT_FOUND
+            if "not found" in user_err["detail"].lower()
+            else status.HTTP_403_FORBIDDEN
+        )
+        return Response(user_err, status=err_status)
+
+    data = build_actionable_coauthor_points(target_user, year, month=month, quarter=quarter)
+    return Response(data)
+
+
+@api_view(["GET"])
 @permission_classes([IsAuthenticated, EntryPermission])
 def co_author_entries_list(request):
     """List actionable entries where the current user is co_author. Optional ?month= (1-12)."""

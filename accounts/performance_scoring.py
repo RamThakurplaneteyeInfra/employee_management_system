@@ -1,11 +1,12 @@
 """
-Combined employee performance score: leave + meeting + checklist + certification points.
+Combined employee performance score: leave + meeting + checklist + certification + actionable co-author points.
 """
 from __future__ import annotations
 
 from events.meeting_scoring import build_meeting_points
 from projects_deadline.checklist_scoring import build_checklist_points
 from certificates.certification_scoring import build_certification_points
+from QuaterlyReports.actionable_coauthor_scoring import build_actionable_coauthor_points
 
 from .leave_scoring import build_leave_points
 
@@ -15,11 +16,13 @@ def build_performance_score(user, year: int, month: int | None = None, quarter: 
     meeting = build_meeting_points(user, year, month=month, quarter=quarter)
     checklist = build_checklist_points(user, year, month=month, quarter=quarter)
     certification = build_certification_points(user, year, month=month, quarter=quarter)
+    actionable_coauthor = build_actionable_coauthor_points(user, year, month=month, quarter=quarter)
     combined_total = round(
         leave["total_points"]
         + meeting["total_points"]
         + checklist["total_points"]
-        + certification["total_points"],
+        + certification["total_points"]
+        + actionable_coauthor["total_points"],
         2,
     )
 
@@ -39,4 +42,5 @@ def build_performance_score(user, year: int, month: int | None = None, quarter: 
         "meeting": meeting,
         "checklist": checklist,
         "certification": certification,
+        "actionable_coauthor": actionable_coauthor,
     }

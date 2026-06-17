@@ -124,7 +124,8 @@ class BookSlotViewSet(ModelViewSet):
         """
         Meeting counts and performance points for an employee.
         GET /eventsapi/bookslots/meeting-points/?year=2026&month=6
-        Indoor +0.25 (max 3.5/mo), Outdoor +0.5 (max 3.5/mo), total max 7.0/mo.
+        Indoor +0.25 (main max 3.5/mo), Outdoor +0.5 (main max 3.5/mo), total main max 7.0/mo.
+        Points above caps count as monthly_bonus.
         Optional: ?employee=<username>
         """
         year, month, quarter, period_err = parse_leave_points_period(request)

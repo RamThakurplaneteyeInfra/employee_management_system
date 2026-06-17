@@ -2,9 +2,10 @@
 Meeting performance points from BookSlot participation (SlotMembers + creator).
 
 Scoring rules:
-- Indoor meeting: +0.25 per meeting, max 3.5 per calendar month
-- Outdoor room (name "Outdoor", case-insensitive): +0.5 per meeting, max 3.5 per month
-- Total monthly max: 7.0 (3.5 indoor + 3.5 outdoor); quarter/year sums capped months
+- Indoor meeting: +0.25 per meeting, main capped at 3.5 per calendar month
+- Outdoor room (name "Outdoor", case-insensitive): +0.5 per meeting, main capped at 3.5 per month
+- Points above each monthly cap count as monthly_bonus (not lost)
+- Total monthly main cap: 7.0 (3.5 indoor + 3.5 outdoor); quarter/year sums monthly main + bonus
 """
 from __future__ import annotations
 
@@ -82,9 +83,8 @@ def _months_in_period(year: int, month: int | None, quarter: int | None) -> list
     if month is not None:
         return [(year, month)]
     if quarter is not None:
-        months = _FY_QUARTER_MONTHS[quarter]
         cal_year = year + 1 if quarter == 4 else year
-        return [(cal_year, m) for m in months]
+        return [(cal_year, m) for m in _FY_QUARTER_MONTHS[quarter]]
     return [(year, m) for m in range(1, 13)]
 
 
@@ -102,6 +102,12 @@ def _slots_for_user_period(user, year: int, month: int | None, quarter: int | No
     else:
         qs = qs.filter(date__year=year)
     return qs.order_by("date", "id")
+
+
+def _split_main_and_bonus(gross: Decimal, cap: Decimal) -> tuple[Decimal, Decimal]:
+    main = min(gross, cap)
+    bonus = gross - main
+    return main, bonus
 
 
 def build_meeting_points(user, year: int, month: int | None = None, quarter: int | None = None) -> dict:
@@ -123,8 +129,10 @@ def build_meeting_points(user, year: int, month: int | None = None, quarter: int
     outdoor_total = 0
     gross_indoor_points = Decimal("0")
     gross_outdoor_points = Decimal("0")
-    net_indoor_points = Decimal("0")
-    net_outdoor_points = Decimal("0")
+    main_indoor_points = Decimal("0")
+    main_outdoor_points = Decimal("0")
+    bonus_indoor_points = Decimal("0")
+    bonus_outdoor_points = Decimal("0")
 
     for month_key in months_in_period:
         counts = monthly_counts.get(month_key, {"indoor_meetings": 0, "outdoor_meetings": 0})
@@ -136,13 +144,22 @@ def build_meeting_points(user, year: int, month: int | None = None, quarter: int
         month_outdoor_pts = Decimal(outdoor) * POINTS_OUTDOOR_MEETING
         gross_indoor_points += month_indoor_pts
         gross_outdoor_points += month_outdoor_pts
-        net_indoor_points += min(month_indoor_pts, MONTHLY_MAX_INDOOR_POINTS)
-        net_outdoor_points += min(month_outdoor_pts, MONTHLY_MAX_OUTDOOR_POINTS)
+        month_main_indoor, month_bonus_indoor = _split_main_and_bonus(
+            month_indoor_pts, MONTHLY_MAX_INDOOR_POINTS
+        )
+        month_main_outdoor, month_bonus_outdoor = _split_main_and_bonus(
+            month_outdoor_pts, MONTHLY_MAX_OUTDOOR_POINTS
+        )
+        main_indoor_points += month_main_indoor
+        main_outdoor_points += month_main_outdoor
+        bonus_indoor_points += month_bonus_indoor
+        bonus_outdoor_points += month_bonus_outdoor
 
     gross_total = gross_indoor_points + gross_outdoor_points
-    net_total = net_indoor_points + net_outdoor_points
+    main_total = main_indoor_points + main_outdoor_points
+    bonus_total = bonus_indoor_points + bonus_outdoor_points
     months_count = len(months_in_period)
-    max_points = float(MONTHLY_MAX_MEETING_POINTS * months_count)
+    max_main_points = float(MONTHLY_MAX_MEETING_POINTS * months_count)
     max_indoor_points = float(MONTHLY_MAX_INDOOR_POINTS * months_count)
     max_outdoor_points = float(MONTHLY_MAX_OUTDOOR_POINTS * months_count)
 
@@ -163,12 +180,15 @@ def build_meeting_points(user, year: int, month: int | None = None, quarter: int
         "quarter": quarter,
         "points_per_indoor_meeting": float(POINTS_INDOOR_MEETING),
         "points_per_outdoor_meeting": float(POINTS_OUTDOOR_MEETING),
-        "max_points": max_points,
+        "max_main_points": max_main_points,
+        "max_bonus_points": None,
+        "max_points": max_main_points,
         "max_indoor_points": max_indoor_points,
         "max_outdoor_points": max_outdoor_points,
         "monthly_max_points": float(MONTHLY_MAX_MEETING_POINTS),
         "monthly_max_indoor_points": float(MONTHLY_MAX_INDOOR_POINTS),
         "monthly_max_outdoor_points": float(MONTHLY_MAX_OUTDOOR_POINTS),
+        "months_in_period": months_count,
         "counts": {
             "indoor_meetings": indoor_total,
             "outdoor_meetings": outdoor_total,
@@ -177,11 +197,15 @@ def build_meeting_points(user, year: int, month: int | None = None, quarter: int
         "points": {
             "indoor_gross": float(gross_indoor_points),
             "outdoor_gross": float(gross_outdoor_points),
-            "indoor": float(net_indoor_points),
-            "outdoor": float(net_outdoor_points),
+            "indoor": float(main_indoor_points),
+            "outdoor": float(main_outdoor_points),
+            "indoor_bonus": float(bonus_indoor_points),
+            "outdoor_bonus": float(bonus_outdoor_points),
             "raw_total": float(gross_total),
         },
-        "total_points": float(round(net_total, 2)),
+        "main_score": float(round(main_total, 2)),
+        "monthly_bonus": float(round(bonus_total, 2)),
+        "total_points": float(round(main_total + bonus_total, 2)),
     }
 
 

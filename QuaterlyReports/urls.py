@@ -12,6 +12,7 @@ urlpatterns = [
     path("ActionableEntriesByID/<int:id>/", entry_detail_update_delete),
     path("ActionableEntriesByID/<int:id>/share/", share_further),
     # Co-author: list entries and get/update (including approval) where current user is co_author
+    path("ActionableEntriesCoAuthor/points/", co_author_points),
     path("ActionableEntriesCoAuthor/", co_author_entries_list),
     path("ActionableEntriesCoAuthor/<int:id>/", co_author_entry_detail),
     # Shared-with: list and get/update entries where current user is share_with (same fields; only approved entries)
