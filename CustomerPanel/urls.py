@@ -5,6 +5,7 @@ from . import views
 
 urlpatterns = [
     path("entries/", views.list_create_entries, name="customer_panel_list_create"),
+    path("entries/points/", views.entries_points, name="customer_panel_entries_points"),
     path("entries/summary/", views.entries_summary, name="customer_panel_entries_summary"),
     path("entries/ledger/", views.entries_ledger, name="customer_panel_entries_ledger"),
     path("entries/<int:entry_id>/members/", views.entry_members, name="customer_panel_entry_members"),

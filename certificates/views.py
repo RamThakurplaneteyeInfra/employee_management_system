@@ -16,7 +16,7 @@ from .certification_scoring import (
     resolve_leave_points_user,
 )
 from .models import EmployeeCertificate
-from .permissions import CertificatePermission, is_hr
+from .permissions import CertificatePermission, is_hr, is_hr_or_admin
 from .serializers import (
     EmployeeCertificateCreateSerializer,
     EmployeeCertificateReadSerializer,
@@ -64,9 +64,9 @@ class EmployeeCertificateViewSet(viewsets.ModelViewSet):
     """
     Employee certificates (separate app; does not modify accounts/recruitment).
 
-    - Employee/creator: full CRUD on own active certificates.
-    - HR: full CRUD on all certificates; filter ?employee=EMP001
-    - DELETE: soft-deactivate only (is_active=False); DB row and S3 file kept.
+    - Employee/creator: list/create/update own active certificates (no delete).
+    - HR / Admin: full access including permanent delete; filter ?employee=EMP001
+    - DELETE: HR / Admin only — removes the DB row (S3 file retained).
     """
 
     authentication_classes = [CsrfExemptSessionAuthentication]
@@ -75,7 +75,12 @@ class EmployeeCertificateViewSet(viewsets.ModelViewSet):
     http_method_names = ["get", "post", "put", "patch", "delete", "head", "options"]
 
     def get_queryset(self):
-        return _apply_list_filters(_visible_queryset(self.request.user), self.request, self.request.user)
+        user = self.request.user
+        if self.action == "destroy" and is_hr_or_admin(user):
+            qs = _apply_list_filters(_base_queryset(), self.request, user)
+        else:
+            qs = _apply_list_filters(_visible_queryset(user), self.request, user)
+        return qs
 
     def get_serializer_class(self):
         if self.action == "create":
@@ -126,12 +131,18 @@ class EmployeeCertificateViewSet(viewsets.ModelViewSet):
         )
 
     def destroy(self, request, *args, **kwargs):
-        """Soft-delete only: never removes DB rows or S3 objects."""
+        """
+        Permanently delete a certificate (HR / Admin only).
+        DELETE /api/certificates/{id}/
+        Removes the DB row; S3 object is not deleted.
+        """
+        if not is_hr_or_admin(request.user):
+            return Response(
+                {"detail": "Only HR or Admin can delete certificates."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
         instance = self.get_object()
-        if not instance.is_active:
-            return Response(status=status.HTTP_204_NO_CONTENT)
-        instance.is_active = False
-        instance.save(update_fields=["is_active", "updated_at"])
+        instance.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
 
     @action(

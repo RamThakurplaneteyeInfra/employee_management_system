@@ -367,13 +367,86 @@ class PerformanceScoringTests(TestCase):
         self.assertEqual(result["checklist"]["total_points"], 0.0)
         self.assertEqual(result["certification"]["total_points"], 0.0)
         self.assertEqual(result["actionable_coauthor"]["total_points"], 0.0)
+        self.assertEqual(result["actionable_entries"]["total_points"], 0.0)
+        self.assertEqual(result["customer_panel_entries"]["total_points"], 0.0)
         self.assertEqual(result["combined_total_points"], 0.25)
+        self.assertEqual(result["scoring_profile"], "default")
         self.assertIn("leave", result)
         self.assertIn("meeting", result)
         self.assertIn("checklist", result)
         self.assertIn("certification", result)
         self.assertIn("actionable_coauthor", result)
+        self.assertIn("actionable_entries", result)
+        self.assertIn("customer_panel_entries", result)
+        self.assertIn("employee_functions", result)
+        self.assertEqual(result["employee_functions"], [])
         self.assertEqual(result["employee_id"], "EMP300")
+
+
+class MmrRgPerformanceScoreTests(TestCase):
+    def setUp(self):
+        from accounts.models import Functions
+        from CustomerPanel.models import CustomerPanelEntry
+        from datetime import datetime
+        from decimal import Decimal
+
+        self.Functions = Functions
+        self.CustomerPanelEntry = CustomerPanelEntry
+        self.Decimal = Decimal
+        self.datetime = datetime
+
+        self.role_employee = Roles.objects.create(role_name="Employee")
+        self.approved = LeaveStatus.objects.create(name="Approved")
+        self.full_day = LeaveTypes.objects.create(name="Full_day")
+        self.emp = User.objects.create_user(username="MMR400", password="pass123")
+        profile = Profile.objects.create(
+            Employee_id=self.emp,
+            Role=self.role_employee,
+            Name="MMR Performance",
+            Email_id="mmrperf@example.com",
+        )
+        self.mmr = Functions.objects.create(function="MMR")
+        profile.functions.add(self.mmr)
+
+    def test_mmr_combined_score_uses_attendance_cert_coauthor_customer_panel_only(self):
+        from accounts.performance_scoring import build_performance_score
+
+        aware = timezone.make_aware(self.datetime.combine(date(2026, 6, 1), time.min))
+        LeaveApplicationData.objects.create(
+            applicant=self.emp,
+            start_date=date(2026, 6, 5),
+            duration_of_days=1,
+            leave_subject="Leave",
+            reason="Reason",
+            leave_type=self.full_day,
+            MD_approval=self.approved,
+            application_date=date(2026, 6, 1),
+            applied_at=aware,
+        )
+        entry = self.CustomerPanelEntry.objects.create(
+            business_name="Client A",
+            division=self.CustomerPanelEntry.DIVISION_FARM,
+            total=self.Decimal("250000"),
+            created_by=self.emp,
+        )
+        self.CustomerPanelEntry.objects.filter(pk=entry.pk).update(
+            created_at=timezone.make_aware(self.datetime(2026, 6, 10, 10, 0, 0))
+        )
+
+        result = build_performance_score(self.emp, 2026, month=6)
+
+        self.assertEqual(result["scoring_profile"], "mmr_rg")
+        self.assertEqual(result["leave"]["total_points"], 0.0)
+        self.assertEqual(result["meeting"]["total_points"], 0.0)
+        self.assertEqual(result["checklist"]["total_points"], 0.0)
+        self.assertEqual(result["customer_panel_entries"]["total_points"], 20.0)
+        self.assertEqual(
+            result["combined_total_points"],
+            result["leave"]["total_points"]
+            + result["certification"]["total_points"]
+            + result["actionable_coauthor"]["total_points"]
+            + result["customer_panel_entries"]["total_points"],
+        )
 
 
 class CompletedYearsAndDaysTests(TestCase):

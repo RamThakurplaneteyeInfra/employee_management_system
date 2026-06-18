@@ -5,7 +5,9 @@ from django.test import TestCase
 from rest_framework.test import APIClient
 
 from accounts.models import Profile, Roles
+from accounts.models import Functions
 from QuaterlyReports.models import FunctionsEntries
+from task_management.models import TaskStatus
 
 
 class ActionableCoauthorScoringTests(TestCase):
@@ -88,3 +90,75 @@ class ActionableCoauthorScoringTests(TestCase):
         self.assertEqual(r.data["main_score"], 10.0)
         self.assertEqual(r.data["monthly_bonus"], 0.0)
         self.assertEqual(r.data["total_points"], 10.0)
+
+
+class ActionableEntriesCreatorScoringTests(TestCase):
+    def setUp(self):
+        self.role_employee = Roles.objects.create(role_name="Employee")
+        self.creator = User.objects.create_user(username="creator_ae", password="pass")
+        Profile.objects.create(
+            Employee_id=self.creator,
+            Role=self.role_employee,
+            Name="Creator AE",
+            Email_id="creator_ae@test.com",
+        )
+        self.completed = TaskStatus.objects.create(status_name="COMPLETED")
+        self.pending = TaskStatus.objects.create(status_name="PENDING")
+        self.npd = Functions.objects.create(function="NPD")
+
+    def _create_entry(self, day, status):
+        return FunctionsEntries.objects.create(
+            Creator=self.creator,
+            co_author=self.creator,
+            approved_by_coauthor=True,
+            date=date(2026, 6, day),
+            final_Status=status,
+            original_entry=f"Entry {day}",
+        )
+
+    def test_not_eligible_when_no_special_function(self):
+        from QuaterlyReports.actionable_entries_scoring import build_actionable_entries_points
+
+        self._create_entry(5, self.completed)
+        result = build_actionable_entries_points(self.creator, 2026, month=6)
+        self.assertFalse(result["eligible"])
+        self.assertEqual(result["total_points"], 0.0)
+
+    def test_five_completed_hits_main_cap(self):
+        from QuaterlyReports.actionable_entries_scoring import build_actionable_entries_points
+
+        # Make creator eligible (NPD)
+        profile = Profile.objects.get(Employee_id=self.creator)
+        profile.functions.add(self.npd)
+
+        for day in range(1, 6):  # 5 completed * 4 = 20
+            self._create_entry(day, self.completed)
+        result = build_actionable_entries_points(self.creator, 2026, month=6)
+        self.assertTrue(result["eligible"])
+        self.assertEqual(result["main_score"], 20.0)
+        self.assertEqual(result["monthly_bonus"], 0.0)
+        self.assertEqual(result["total_points"], 20.0)
+
+    def test_six_completed_adds_bonus(self):
+        from QuaterlyReports.actionable_entries_scoring import build_actionable_entries_points
+
+        profile = Profile.objects.get(Employee_id=self.creator)
+        profile.functions.add(self.npd)
+
+        for day in range(1, 7):  # 6 * 4 = 24 => 20 main + 4 bonus
+            self._create_entry(day, self.completed)
+        result = build_actionable_entries_points(self.creator, 2026, month=6)
+        self.assertEqual(result["main_score"], 20.0)
+        self.assertEqual(result["monthly_bonus"], 4.0)
+        self.assertEqual(result["total_points"], 24.0)
+
+    def test_points_endpoint(self):
+        profile = Profile.objects.get(Employee_id=self.creator)
+        profile.functions.add(self.npd)
+        self._create_entry(5, self.completed)
+        self.client = APIClient()
+        self.client.force_authenticate(self.creator)
+        r = self.client.get("/ActionableEntries/points/?year=2026&month=6")
+        self.assertEqual(r.status_code, 200)
+        self.assertTrue(r.data["eligible"])
+        self.assertEqual(r.data["total_points"], 4.0)

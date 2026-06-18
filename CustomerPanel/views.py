@@ -185,6 +185,58 @@ def _entries_summary_sync():
     return summary
 
 
+class _QueryParamsAdapter:
+    """Adapt Django HttpRequest for leave_scoring helpers that expect query_params."""
+
+    def __init__(self, request: HttpRequest):
+        self.query_params = request.GET
+        self.user = request.user
+
+
+def _entries_points_sync(request: HttpRequest):
+    from accounts.leave_views import _get_user_role_sync, _user_can_view_on_leave
+    from accounts.leave_scoring import parse_leave_points_period, resolve_leave_points_user
+
+    from .customer_panel_scoring import build_customer_panel_entries_points
+
+    adapted = _QueryParamsAdapter(request)
+    year, month, quarter, period_err = parse_leave_points_period(adapted)
+    if period_err is not None:
+        return {"error": period_err.get("detail", "Invalid period.")}, status.HTTP_400_BAD_REQUEST
+
+    target_user, user_err = resolve_leave_points_user(
+        adapted, _user_can_view_on_leave, _get_user_role_sync
+    )
+    if user_err is not None:
+        err_status = (
+            status.HTTP_404_NOT_FOUND
+            if "not found" in user_err["detail"].lower()
+            else status.HTTP_403_FORBIDDEN
+        )
+        return {"error": user_err["detail"]}, err_status
+
+    return build_customer_panel_entries_points(target_user, year, month=month, quarter=quarter), status.HTTP_200_OK
+
+
+@csrf_exempt
+@login_required
+async def entries_points(request: HttpRequest):
+    """
+    Customer panel entry performance points (MMR/RG only).
+    GET /customerpanelapi/entries/points/?year=2026&month=6
+    ₹5,00,000 entered in a month = 40 main points (₹12,500 per point); excess as bonus.
+    Optional: ?employee=<username> (HR / Admin / MD / TeamLead for team members)
+    """
+    if request.method != "GET":
+        return JsonResponse({"error": "Method not allowed"}, status=status.HTTP_405_METHOD_NOT_ALLOWED)
+    if verifyGet(request):
+        return verifyGet(request)
+    data, code = await sync_to_async(_entries_points_sync)(request)
+    if code != status.HTTP_200_OK:
+        return JsonResponse(data, status=code)
+    return JsonResponse(data, status=code)
+
+
 def _entries_queryset_for_user(user):
     qs = CustomerPanelEntry.objects.all().order_by("-created_at")
     if not _is_admin_or_md(user):

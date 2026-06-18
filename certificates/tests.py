@@ -68,13 +68,39 @@ class CertificateAccessTests(TestCase):
         self.assertEqual(r.status_code, 200)
         self.assertEqual(len(r.data), 1)
 
-    def test_soft_delete_keeps_row(self):
+    def test_employee_cannot_delete_certificate(self):
         self.client.force_authenticate(self.owner)
         r = self.client.delete(f"/api/certificates/{self.cert.pk}/")
-        self.assertEqual(r.status_code, 204)
+        self.assertEqual(r.status_code, 403)
         self.assertTrue(EmployeeCertificate.objects.filter(pk=self.cert.pk).exists())
-        self.cert.refresh_from_db()
-        self.assertFalse(self.cert.is_active)
+
+    def test_hr_hard_delete_removes_row(self):
+        self.client.force_authenticate(self.hr_user)
+        r = self.client.delete(f"/api/certificates/{self.cert.pk}/")
+        self.assertEqual(r.status_code, 204)
+        self.assertFalse(EmployeeCertificate.objects.filter(pk=self.cert.pk).exists())
+
+    def test_hr_can_delete_inactive_certificate(self):
+        self.cert.is_active = False
+        self.cert.save(update_fields=["is_active"])
+        self.client.force_authenticate(self.hr_user)
+        r = self.client.delete(f"/api/certificates/{self.cert.pk}/")
+        self.assertEqual(r.status_code, 204)
+        self.assertFalse(EmployeeCertificate.objects.filter(pk=self.cert.pk).exists())
+
+    def test_admin_can_hard_delete(self):
+        admin_role, _ = Roles.objects.get_or_create(role_name="Admin")
+        admin_user = User.objects.create_user(username="admin_cert", password="pass")
+        Profile.objects.create(
+            Employee_id=admin_user,
+            Role=admin_role,
+            Name="Admin Cert",
+            Email_id="admin_cert@test.com",
+        )
+        self.client.force_authenticate(admin_user)
+        r = self.client.delete(f"/api/certificates/{self.cert.pk}/")
+        self.assertEqual(r.status_code, 204)
+        self.assertFalse(EmployeeCertificate.objects.filter(pk=self.cert.pk).exists())
 
     @patch("certificates.services.upload_certificate_file", return_value="Certificate/mock.pdf")
     def test_batch_upload_multiple(self, _mock_upload):

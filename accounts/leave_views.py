@@ -1323,14 +1323,18 @@ class LeaveApplicationViewSet(ModelViewSet):
     @action(detail=False, methods=["get"], url_path="performance-score")
     def performance_score(self, request):
         """
-        Combined leave + meeting + checklist + certification + actionable co-author performance score for one employee.
+        Combined leave + meeting + checklist + certification + actionable co-author + actionable entries
+        performance score for one employee. MMR/RG employees use scoring_profile=mmr_rg:
+        leave (attendance) + certification + actionable co-author + customer panel entries only.
+
         GET /accounts/leave-applications/performance-score/?year=2026&month=6
         GET /accounts/leave-applications/performance-score/?year=2026&quarter=2
         GET /accounts/leave-applications/performance-score/?year=2026
         Optional: ?employee=<username> (HR / Admin / MD / TeamLead for team members)
 
-        Response includes nested `leave`, `meeting`, `checklist`, `certification`, and
-        `actionable_coauthor` payloads plus `combined_total_points` (sum of all five total_points).
+        Response includes `employee_functions`, `scoring_profile`, plus nested `leave`, `meeting`,
+        `checklist`, `certification`, `actionable_coauthor`, `actionable_entries`, and
+        `customer_panel_entries` payloads plus `combined_total_points`.
         """
         year, month, quarter, period_err = parse_leave_points_period(request)
         if period_err is not None:

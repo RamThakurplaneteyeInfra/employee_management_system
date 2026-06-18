@@ -3,6 +3,7 @@ from rest_framework.permissions import BasePermission
 from accounts.filters import _get_user_role_sync
 
 HR_ROLES = frozenset({"HR", "Hr"})
+ADMIN_ROLES = frozenset({"Admin"})
 
 
 def get_role_name(user):
@@ -19,6 +20,16 @@ def is_hr(user):
     if user.is_superuser:
         return True
     return get_role_name(user) in HR_ROLES
+
+
+def is_hr_or_admin(user):
+    """Superuser, Profile role Admin, or HR — may permanently delete certificates."""
+    if not user or not user.is_authenticated:
+        return False
+    if user.is_superuser:
+        return True
+    role = get_role_name(user)
+    return role in HR_ROLES or role in ADMIN_ROLES
 
 
 def is_certificate_owner(user, certificate):

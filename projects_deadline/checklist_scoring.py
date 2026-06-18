@@ -8,7 +8,12 @@ Team Lead:
 - 10 points per completed checklist on phases where phase.team_lead_id matches the TL;
   each calendar month capped at 70 (7 items). Completer (employeeIds) does not matter.
 
-Quarter / year totals sum monthly capped scores (quarter max 210, year max 840).
+Special functions (Profile.functions contains any of: NPD, HC, IP):
+- Employee / Intern: 12.5 points per completed checklist; monthly cap 50 (4 items).
+- Team Lead: 7.5 points per completed checklist; monthly cap 50 (7 items).
+
+Quarter / year totals sum monthly capped scores (quarter max 210, year max 840 for default;
+150 per quarter / 600 per year for NPD/HC/IP).
 """
 from __future__ import annotations
 
@@ -33,6 +38,11 @@ TEAMLEAD_POINTS_PER_CHECKLIST = Decimal("10")
 TEAMLEAD_FULL_SCORE_CHECKLISTS = 7
 
 MONTHLY_MAX_POINTS = Decimal("70")
+
+SPECIAL_FUNCTIONS = frozenset({"NPD", "HC", "IP"})
+SPECIAL_EMPLOYEE_POINTS_PER_CHECKLIST = Decimal("12.5")
+SPECIAL_TEAMLEAD_POINTS_PER_CHECKLIST = Decimal("7.5")
+SPECIAL_MONTHLY_MAX_POINTS = Decimal("50")
 MONTHS_PER_QUARTER = 3
 MONTHS_PER_YEAR = 12
 
@@ -238,18 +248,23 @@ def _completed_breakdown_for_phase_team_lead(
     }
 
 
-def _monthly_capped_score(completed: int, points_per_checklist: Decimal) -> Decimal:
+def _monthly_capped_score(
+    completed: int,
+    points_per_checklist: Decimal,
+    monthly_cap: Decimal,
+) -> Decimal:
     raw = Decimal(completed) * points_per_checklist
-    return min(MONTHLY_MAX_POINTS, raw)
+    return min(monthly_cap, raw)
 
 
 def _score_from_monthly_caps(
     monthly_counts: list[int],
     points_per_checklist: Decimal,
+    monthly_cap: Decimal,
 ) -> Decimal:
     total = Decimal("0")
     for count in monthly_counts:
-        total += _monthly_capped_score(count, points_per_checklist)
+        total += _monthly_capped_score(count, points_per_checklist, monthly_cap)
     return total
 
 
@@ -282,12 +297,42 @@ def _team_lead_monthly_counts(
 def build_checklist_points(user, year: int, month: int | None = None, quarter: int | None = None) -> dict:
     employee_id = resolve_deadline_employee_id(user)
     role = _role_name(user)
-    profile = Profile.objects.filter(Employee_id=user).select_related("Role").first()
+    profile = (
+        Profile.objects.filter(Employee_id=user)
+        .select_related("Role")
+        .prefetch_related("functions")
+        .first()
+    )
     display_name = (getattr(profile, "Name", None) or user.username) if profile else user.username
     role_name = getattr(getattr(profile, "Role", None), "role_name", None) or role
 
-    period_max = _max_points_for_period(year, month, quarter)
     months_count = len(_months_in_period(year, month, quarter))
+
+    function_names = set()
+    if profile is not None:
+        try:
+            function_names = {
+                (f.function or "").strip().upper() for f in profile.functions.all() if f is not None
+            }
+        except Exception:
+            function_names = set()
+    is_special_function = bool(function_names & SPECIAL_FUNCTIONS)
+
+    monthly_cap = SPECIAL_MONTHLY_MAX_POINTS if is_special_function else MONTHLY_MAX_POINTS
+    period_max = float(monthly_cap * months_count)
+
+    if _is_team_lead_role(role):
+        points_per_checklist = (
+            SPECIAL_TEAMLEAD_POINTS_PER_CHECKLIST
+            if is_special_function
+            else TEAMLEAD_POINTS_PER_CHECKLIST
+        )
+    else:
+        points_per_checklist = (
+            SPECIAL_EMPLOYEE_POINTS_PER_CHECKLIST
+            if is_special_function
+            else EMPLOYEE_POINTS_PER_CHECKLIST
+        )
 
     base = {
         "employee_id": user.username,
@@ -300,7 +345,7 @@ def build_checklist_points(user, year: int, month: int | None = None, quarter: i
         "year": year,
         "month": month,
         "quarter": quarter,
-        "monthly_max_points": float(MONTHLY_MAX_POINTS),
+        "monthly_max_points": float(monthly_cap),
         "max_points": period_max,
         "months_in_period": months_count,
     }
@@ -309,11 +354,11 @@ def build_checklist_points(user, year: int, month: int | None = None, quarter: i
         tl_id = employee_id
         breakdown = _completed_breakdown_for_phase_team_lead(tl_id, year, month, quarter)
         monthly_counts = _team_lead_monthly_counts(tl_id, year, month, quarter)
-        total = _score_from_monthly_caps(monthly_counts, TEAMLEAD_POINTS_PER_CHECKLIST)
+        total = _score_from_monthly_caps(monthly_counts, points_per_checklist, monthly_cap)
         return {
             **base,
             "role_type": "team_lead",
-            "points_per_checklist": float(TEAMLEAD_POINTS_PER_CHECKLIST),
+            "points_per_checklist": float(points_per_checklist),
             "full_score_at_checklists": TEAMLEAD_FULL_SCORE_CHECKLISTS,
             "phase_stats": {
                 "phases_as_team_lead": _phases_as_team_lead(tl_id),
@@ -333,11 +378,11 @@ def build_checklist_points(user, year: int, month: int | None = None, quarter: i
     completed = _completed_for_ids(id_set, year, month, quarter)
     assigned = _assigned_for_employee(employee_id) if employee_id is not None else 0
     monthly_counts = _employee_monthly_counts(id_set, year, month, quarter)
-    total = _score_from_monthly_caps(monthly_counts, EMPLOYEE_POINTS_PER_CHECKLIST)
+    total = _score_from_monthly_caps(monthly_counts, points_per_checklist, monthly_cap)
     return {
         **base,
         "role_type": role_type,
-        "points_per_checklist": float(EMPLOYEE_POINTS_PER_CHECKLIST),
+        "points_per_checklist": float(points_per_checklist),
         "full_score_at_checklists": EMPLOYEE_FULL_SCORE_CHECKLISTS,
         "counts": {
             "completed_checklists": completed,
