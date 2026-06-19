@@ -864,3 +864,55 @@ async def conversation_update_delete(request: HttpRequest, profile_id: int, note
     return JsonResponse({"error": "Method not allowed"}, status=status.HTTP_405_METHOD_NOT_ALLOWED)
 
 
+class _QueryParamsAdapter:
+    """Adapt Django HttpRequest.GET for leave_scoring period helpers."""
+
+    def __init__(self, request: HttpRequest):
+        self.query_params = request.GET
+        self.user = request.user
+
+
+def _profiles_points_sync(request: HttpRequest):
+    from accounts.leave_views import _get_user_role_sync, _user_can_view_on_leave
+    from accounts.leave_scoring import parse_leave_points_period, resolve_leave_points_user
+
+    from .client_profile_scoring import build_client_profile_points
+
+    adapted = _QueryParamsAdapter(request)
+    year, month, quarter, period_err = parse_leave_points_period(adapted)
+    if period_err is not None:
+        return {"error": period_err.get("detail", "Invalid period.")}, status.HTTP_400_BAD_REQUEST
+
+    target_user, user_err = resolve_leave_points_user(
+        adapted, _user_can_view_on_leave, _get_user_role_sync
+    )
+    if user_err is not None:
+        err_status = (
+            status.HTTP_404_NOT_FOUND
+            if "not found" in user_err["detail"].lower()
+            else status.HTTP_403_FORBIDDEN
+        )
+        return {"error": user_err["detail"]}, err_status
+
+    return build_client_profile_points(target_user, year, month=month, quarter=quarter), status.HTTP_200_OK
+
+
+@csrf_exempt
+@login_required
+async def profiles_points(request: HttpRequest):
+    """
+    Client profile performance points (MMR/RG only).
+    GET /clientsapi/profiles/points/?year=2026&month=6
+    30 points/month: Proposal ₹50L (10) + 5 profiles (10) + Proforma ₹11L (10); excess as bonus.
+    Optional: ?employee=<username> (HR / Admin / MD / TeamLead for team members)
+    """
+    if request.method != "GET":
+        return JsonResponse({"error": "Method not allowed"}, status=status.HTTP_405_METHOD_NOT_ALLOWED)
+    if verifyGet(request):
+        return verifyGet(request)
+    data, code = await sync_to_async(_profiles_points_sync)(request)
+    if code != status.HTTP_200_OK:
+        return JsonResponse(data, status=code)
+    return JsonResponse(data, status=code)
+
+

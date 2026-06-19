@@ -45,7 +45,11 @@ from .leave_notifications import (
     notify_applicant_final_approval,
 )
 from .leave_scoring import build_leave_points, parse_leave_points_period, resolve_leave_points_user
-from .performance_scoring import build_performance_score
+from .performance_scoring import (
+    build_performance_score,
+    build_performance_scores_list,
+    parse_scoring_group,
+)
 
 INTERN_ROLE_NAME = "Intern"
 _ON_LEAVE_VIEW_ROLES = frozenset({"HR", "Hr", "Admin", "MD", "TeamLead", "Teamlead"})
@@ -1297,10 +1301,10 @@ class LeaveApplicationViewSet(ModelViewSet):
         Q2 Jul–Sep, Q3 Oct–Dec, Q4 Jan–Mar of the following calendar year.
         Optional: ?employee=<username> (HR / Admin / MD / TeamLead for team members)
 
-        Monthly free allowance of 2.0 day-units (half day = 0.5, full day = 1.0);
-        +2.0 bonus per calendar month with no MD-approved half/full leave.
-        points show gross deductions plus no_leave_bonus; total_points is net
-        after allowance and includes the no-leave bonus. Unapproved-absent is off.
+        Monthly free allowance of 2.0 day-units (half day = 0.5, full day = 1.0).
+        Each calendar month starts at 8 points; deductions apply after allowance is used.
+        total_points is the sum of monthly remaining scores (max 8 per month).
+        Unapproved-absent scoring is off.
         """
         year, month, quarter, period_err = parse_leave_points_period(request)
         if period_err is not None:
@@ -1325,16 +1329,17 @@ class LeaveApplicationViewSet(ModelViewSet):
         """
         Combined leave + meeting + checklist + certification + actionable co-author + actionable entries
         performance score for one employee. MMR/RG employees use scoring_profile=mmr_rg:
-        leave (attendance) + certification + actionable co-author + customer panel entries only.
+        leave + meeting + certification + actionable co-author + client profiles + customer panel entries.
 
         GET /accounts/leave-applications/performance-score/?year=2026&month=6
         GET /accounts/leave-applications/performance-score/?year=2026&quarter=2
         GET /accounts/leave-applications/performance-score/?year=2026
         Optional: ?employee=<username> (HR / Admin / MD / TeamLead for team members)
 
-        Response includes `employee_functions`, `scoring_profile`, plus nested `leave`, `meeting`,
-        `checklist`, `certification`, `actionable_coauthor`, `actionable_entries`, and
-        `customer_panel_entries` payloads plus `combined_total_points`.
+        Response includes `combined_total_points` (main scores only), `combined_total_bonus`,
+        and `bonus_by_category` at the root, plus nested category payloads (`leave`, `meeting`,
+        `client_profiles`, etc.) without duplicated employee/period fields.
+        Individual category endpoints (e.g. leave-points, clientsapi/profiles/points/) still return full metadata.
         """
         year, month, quarter, period_err = parse_leave_points_period(request)
         if period_err is not None:
@@ -1353,6 +1358,69 @@ class LeaveApplicationViewSet(ModelViewSet):
 
         data = build_performance_score(target_user, year, month=month, quarter=quarter)
         return Response(data)
+
+    def _performance_scores_response(self, request, group: str):
+        year, month, quarter, period_err = parse_leave_points_period(request)
+        if period_err is not None:
+            return Response(period_err, status=status.HTTP_400_BAD_REQUEST)
+
+        branch = (request.query_params.get("branch") or "").strip() or None
+        data = build_performance_scores_list(
+            group,
+            request.user,
+            _get_user_role_sync,
+            year,
+            month=month,
+            quarter=quarter,
+            branch=branch,
+        )
+        if data is None:
+            return Response(
+                {"detail": "You do not have permission to view performance scores."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        return Response(data)
+
+    @action(detail=False, methods=["get"], url_path="performance-scores")
+    def performance_scores(self, request):
+        """
+        List employees in a scoring group with summary performance scores.
+
+        GET /accounts/leave-applications/performance-scores/?group=mmr_rg&year=2026&month=6
+        GET /accounts/leave-applications/performance-scores/?group=npd_hc_ip&year=2026&quarter=2
+        GET /accounts/leave-applications/performance-scores/?group=other&year=2026
+
+        Groups (mutually exclusive): mmr_rg (MMR/RG), npd_hc_ip (NPD/HC/IP, not MMR/RG), other.
+        Optional: ?branch=<branch_name>
+        MD and HR only.
+        """
+        group = parse_scoring_group(request.query_params.get("group"))
+        if group is None:
+            return Response(
+                {
+                    "detail": (
+                        "Query parameter 'group' is required. "
+                        "Use mmr_rg, npd_hc_ip, or other."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return self._performance_scores_response(request, group)
+
+    @action(detail=False, methods=["get"], url_path="performance-scores/mmr-rg")
+    def performance_scores_mmr_rg(self, request):
+        """GET /accounts/leave-applications/performance-scores/mmr-rg/?year=2026&month=6"""
+        return self._performance_scores_response(request, "mmr_rg")
+
+    @action(detail=False, methods=["get"], url_path="performance-scores/npd-hc-ip")
+    def performance_scores_npd_hc_ip(self, request):
+        """GET /accounts/leave-applications/performance-scores/npd-hc-ip/?year=2026&month=6"""
+        return self._performance_scores_response(request, "npd_hc_ip")
+
+    @action(detail=False, methods=["get"], url_path="performance-scores/other")
+    def performance_scores_other(self, request):
+        """GET /accounts/leave-applications/performance-scores/other/?year=2026&month=6"""
+        return self._performance_scores_response(request, "other")
 
     # ---------- GET: view history (my applications) ----------
     @action(detail=False, methods=["get"], url_path="view_history")

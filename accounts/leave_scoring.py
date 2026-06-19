@@ -2,11 +2,13 @@
 Monthly leave event counts and performance points from LeaveApplicationData.
 
 Scoring rules:
-- Monthly free allowance of 2.0 day-units per calendar month (half day = 0.5, full day = 1.0).
+- Each calendar month starts at 8.0 points (monthly_max_points; scaled from a 10-point scale).
+- Monthly free allowance of 2.0 day-units (half day = 0.5, full day = 1.0).
   Example: 2 half days + 1 full day uses the full allowance (0.5 + 0.5 + 1.0 = 2.0).
-- Half day (MD-approved, after allowance exhausted): -0.5
-- Full day (MD-approved, after allowance exhausted): -1.0
-- No MD-approved half/full leave in a calendar month: +2.0 bonus (mirrors monthly allowance).
+- Leave within allowance: no deduction from the monthly 8.
+- Half day (MD-approved, after allowance exhausted): -0.4 from monthly 8.
+- Full day (MD-approved, after allowance exhausted): -0.8 from monthly 8.
+- Monthly score is floored at 0. Quarter / year totals sum monthly remaining scores.
 - Unapproved absent scoring is temporarily disabled (see ENABLE_UNAPPROVED_ABSENT_SCORING).
 """
 from __future__ import annotations
@@ -23,12 +25,12 @@ from .models import LeaveApplicationData, Profile
 
 User = get_user_model()
 
-POINTS_HALF_DAY = Decimal("-0.5")
-POINTS_FULL_DAY = Decimal("-1")
-POINTS_UNAPPROVED_ABSENT = Decimal("-1.5")
+POINTS_HALF_DAY = Decimal("-0.4")
+POINTS_FULL_DAY = Decimal("-0.8")
+POINTS_UNAPPROVED_ABSENT = Decimal("-1.2")
 ENABLE_UNAPPROVED_ABSENT_SCORING = False
 MONTHLY_FREE_LEAVE_ALLOWANCE = Decimal("2")
-NO_LEAVE_MONTHLY_BONUS = Decimal("2")
+MONTHLY_MAX_POINTS = Decimal("8")
 HALF_DAY_UNITS = Decimal("0.5")
 FULL_DAY_UNITS = Decimal("1")
 
@@ -91,6 +93,7 @@ def _apply_on_time_approved_leave_scoring(
     event_type: str,
     points_value: Decimal,
     monthly_allowance_used: dict[tuple[int, int], Decimal],
+    monthly_deductions: dict[tuple[int, int], Decimal],
 ):
     count_key = "half_day" if event_type == "half_day" else "full_day"
     counts[count_key] += 1
@@ -115,11 +118,13 @@ def _apply_on_time_approved_leave_scoring(
         return
 
     penalized[count_key] += 1
+    deduction = abs(points_value)
+    monthly_deductions[key] = monthly_deductions.get(key, Decimal("0")) + deduction
     events.append(
         {
             **base_event,
             "event_type": event_type,
-            "points": float(points_value),
+            "points": float(-deduction),
             "waived": False,
             "allowance_units": float(units),
             "allowance_used_after": float(used),
@@ -133,17 +138,20 @@ def _apply_late_leave_scoring(
     counts: dict,
     penalized: dict,
     events: list,
+    monthly_deductions: dict[tuple[int, int], Decimal],
 ):
     """
-  Late / unapproved: 1× unapproved (-1.5) plus (duration - 1) full-day units (-1 each).
-  Example: 3-day late leave → full_day=2, unapproved_absent=1 → -3.5 total.
+    Late / unapproved: 1× unapproved (-1.5) plus (duration - 1) full-day units (-1 each).
+    Example: 3-day late leave → full_day=2, unapproved_absent=1 → -3.5 total.
     """
     whole_days = _duration_whole_days(application)
     extra_full_days = max(0, whole_days - 1)
     if extra_full_days:
         penalized["full_day"] += extra_full_days
     counts["unapproved_absent"] += 1
-    total = float(extra_full_days * POINTS_FULL_DAY + POINTS_UNAPPROVED_ABSENT)
+    total = extra_full_days * abs(POINTS_FULL_DAY) + abs(POINTS_UNAPPROVED_ABSENT)
+    key = _month_key(application.start_date)
+    monthly_deductions[key] = monthly_deductions.get(key, Decimal("0")) + total
     events.append(
         {
             **base_event,
@@ -151,7 +159,7 @@ def _apply_late_leave_scoring(
             "duration_days": whole_days,
             "full_day_units": extra_full_days,
             "unapproved_units": 1,
-            "points": total,
+            "points": float(-total),
         }
     )
 
@@ -209,27 +217,43 @@ def _months_in_period(year: int, month: int | None, quarter: int | None) -> list
     return [(year, m) for m in range(1, 13)]
 
 
-def _apply_no_leave_month_bonuses(
+def _compute_period_leave_score(
     months_in_period: list[tuple[int, int]],
-    months_with_half_full: set[tuple[int, int]],
+    monthly_deductions: dict[tuple[int, int], Decimal],
     events: list,
-) -> tuple[float, int]:
-    bonus_total = Decimal("0")
-    bonus_month_count = 0
+) -> tuple[float, float, float, int]:
+    """Returns total_points, base_points, total_deductions_applied, full_score_months."""
+    base_total = Decimal("0")
+    remaining_total = Decimal("0")
+    deductions_applied = Decimal("0")
+    full_score_months = 0
+
     for month_key in months_in_period:
-        if month_key in months_with_half_full:
-            continue
-        bonus_total += NO_LEAVE_MONTHLY_BONUS
-        bonus_month_count += 1
         y, m = month_key
+        month_ded = monthly_deductions.get(month_key, Decimal("0"))
+        base_total += MONTHLY_MAX_POINTS
+        remaining = max(Decimal("0"), MONTHLY_MAX_POINTS - month_ded)
+        applied = MONTHLY_MAX_POINTS - remaining
+        remaining_total += remaining
+        deductions_applied += applied
+        if month_ded == 0:
+            full_score_months += 1
         events.append(
             {
-                "event_type": "no_leave_bonus",
+                "event_type": "monthly_score",
                 "month": f"{y}-{m:02d}",
-                "points": float(NO_LEAVE_MONTHLY_BONUS),
+                "base_points": float(MONTHLY_MAX_POINTS),
+                "deductions": float(round(applied, 2)),
+                "remaining_points": float(round(remaining, 2)),
             }
         )
-    return float(bonus_total), bonus_month_count
+
+    return (
+        float(round(remaining_total, 2)),
+        float(round(base_total, 2)),
+        float(round(deductions_applied, 2)),
+        full_score_months,
+    )
 
 
 def build_leave_points(user, year: int, month: int | None = None, quarter: int | None = None) -> dict:
@@ -239,7 +263,7 @@ def build_leave_points(user, year: int, month: int | None = None, quarter: int |
         "unapproved_absent": 0,
         "waived": 0,
         "waived_units": 0.0,
-        "no_leave_months": 0,
+        "full_score_months": 0,
     }
     penalized = {
         "half_day": 0,
@@ -247,7 +271,7 @@ def build_leave_points(user, year: int, month: int | None = None, quarter: int |
     }
     events = []
     monthly_allowance_used: dict[tuple[int, int], Decimal] = {}
-    months_with_half_full: set[tuple[int, int]] = set()
+    monthly_deductions: dict[tuple[int, int], Decimal] = {}
 
     for application in _applications_for_period(user, year, month, quarter):
         lt_name = _leave_type_name(application)
@@ -260,9 +284,10 @@ def build_leave_points(user, year: int, month: int | None = None, quarter: int |
         }
 
         if ENABLE_UNAPPROVED_ABSENT_SCORING and _is_late_application(application):
-            _apply_late_leave_scoring(application, base_event, counts, penalized, events)
+            _apply_late_leave_scoring(
+                application, base_event, counts, penalized, events, monthly_deductions
+            )
         elif md_approved and lt_name == "Half_day":
-            months_with_half_full.add(_month_key(application.start_date))
             _apply_on_time_approved_leave_scoring(
                 application,
                 base_event,
@@ -272,9 +297,9 @@ def build_leave_points(user, year: int, month: int | None = None, quarter: int |
                 event_type="half_day",
                 points_value=POINTS_HALF_DAY,
                 monthly_allowance_used=monthly_allowance_used,
+                monthly_deductions=monthly_deductions,
             )
         elif md_approved and lt_name == "Full_day":
-            months_with_half_full.add(_month_key(application.start_date))
             _apply_on_time_approved_leave_scoring(
                 application,
                 base_event,
@@ -284,30 +309,22 @@ def build_leave_points(user, year: int, month: int | None = None, quarter: int |
                 event_type="full_day",
                 points_value=POINTS_FULL_DAY,
                 monthly_allowance_used=monthly_allowance_used,
+                monthly_deductions=monthly_deductions,
             )
 
-    no_leave_bonus, no_leave_month_count = _apply_no_leave_month_bonuses(
-        _months_in_period(year, month, quarter),
-        months_with_half_full,
+    months_in_period = _months_in_period(year, month, quarter)
+    months_count = len(months_in_period)
+    total_points, base_points, total_deductions, full_score_months = _compute_period_leave_score(
+        months_in_period,
+        monthly_deductions,
         events,
     )
-    counts["no_leave_months"] = no_leave_month_count
-
-    # Gross monthly leave points (all half/full leaves, before free allowance).
-    points = {
-        "half_day": float(counts["half_day"] * POINTS_HALF_DAY),
-        "full_day": float(counts["full_day"] * POINTS_FULL_DAY),
-        "unapproved_absent": float(counts["unapproved_absent"] * POINTS_UNAPPROVED_ABSENT),
-        "no_leave_bonus": no_leave_bonus,
-    }
-    net_points = {
-        "half_day": float(penalized["half_day"] * POINTS_HALF_DAY),
-        "full_day": float(penalized["full_day"] * POINTS_FULL_DAY),
-        "unapproved_absent": float(counts["unapproved_absent"] * POINTS_UNAPPROVED_ABSENT),
-        "no_leave_bonus": no_leave_bonus,
-    }
-    total_points = sum(net_points.values())
+    counts["full_score_months"] = full_score_months
     counts["waived_units"] = round(counts["waived_units"], 2)
+
+    half_day_deductions = float(penalized["half_day"] * abs(POINTS_HALF_DAY))
+    full_day_deductions = float(penalized["full_day"] * abs(POINTS_FULL_DAY))
+    unapproved_deductions = float(counts["unapproved_absent"] * abs(POINTS_UNAPPROVED_ABSENT))
 
     profile = Profile.objects.filter(Employee_id=user).select_related("Role").first()
     display_name = (getattr(profile, "Name", None) or user.username) if profile else user.username
@@ -324,11 +341,22 @@ def build_leave_points(user, year: int, month: int | None = None, quarter: int |
         "year": year,
         "month": month,
         "quarter": quarter,
+        "monthly_max_points": float(MONTHLY_MAX_POINTS),
+        "max_points": float(MONTHLY_MAX_POINTS * months_count),
         "monthly_free_allowance": float(MONTHLY_FREE_LEAVE_ALLOWANCE),
-        "no_leave_monthly_bonus": float(NO_LEAVE_MONTHLY_BONUS),
+        "months_in_period": months_count,
         "counts": counts,
-        "points": points,
-        "total_points": round(total_points, 2),
+        "points": {
+            "base": base_points,
+            "half_day_deductions": half_day_deductions,
+            "full_day_deductions": full_day_deductions,
+            "unapproved_absent_deductions": unapproved_deductions,
+            "total_deductions": total_deductions,
+            "half_day": float(counts["half_day"] * POINTS_HALF_DAY),
+            "full_day": float(counts["full_day"] * POINTS_FULL_DAY),
+            "unapproved_absent": float(counts["unapproved_absent"] * POINTS_UNAPPROVED_ABSENT),
+        },
+        "total_points": total_points,
         "events": events,
     }
 

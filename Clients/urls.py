@@ -10,6 +10,7 @@ urlpatterns = [
     path("employees/", views.employee_list, name="client_employees"),
     path("stages/", views.stage_list, name="client_stages"),
     path("profiles/", views.profile_list_create, name="client_profiles"),
+    path("profiles/points/", views.profiles_points, name="client_profiles_points"),
     path("profiles/reminders/", views.profile_reminders_list, name="client_profile_reminders"),
     path(
         "profiles/reminders/<int:profile_id>/ack/",
