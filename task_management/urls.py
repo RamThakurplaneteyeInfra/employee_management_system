@@ -13,6 +13,7 @@ task_management=[path("createTask/",views.create_task,name="Tasks_management"),
     path("updateTask/<int:task_id>/",views.update_task,name="Task_management"),
     path("viewTasks/",views.show_created_tasks,name="Tasks_management"),
     path("viewAssignedTasks/",views.show_assigned_tasks,name="Tasks_management"),
+    path("intern-task-points/", views.intern_task_points, name="intern-task-points"),
     path("deleteTask/<int:task_id>/",views.delete_task,name="Tasks_management"),
     path("Taskcount/<slug:username>/",views.get_task_count_from_username,name="Tasks_management"),]
 

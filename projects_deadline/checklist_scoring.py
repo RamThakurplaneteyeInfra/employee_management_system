@@ -350,6 +350,19 @@ def build_checklist_points(user, year: int, month: int | None = None, quarter: i
         "months_in_period": months_count,
     }
 
+    if role_name == "Intern":
+        return {
+            **base,
+            "eligible": False,
+            "role_type": "intern",
+            "points_per_checklist": 0.0,
+            "full_score_at_checklists": 0,
+            "counts": {"completed_checklists": 0, "assigned_checklists": 0},
+            "main_score": 0.0,
+            "monthly_bonus": 0.0,
+            "total_points": 0.0,
+        }
+
     if _is_team_lead_role(role):
         tl_id = employee_id
         breakdown = _completed_breakdown_for_phase_team_lead(tl_id, year, month, quarter)

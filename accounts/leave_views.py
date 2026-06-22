@@ -1330,6 +1330,8 @@ class LeaveApplicationViewSet(ModelViewSet):
         Combined leave + meeting + checklist + certification + actionable co-author + actionable entries
         performance score for one employee. MMR/RG employees use scoring_profile=mmr_rg:
         leave + meeting + certification + actionable co-author + client profiles + customer panel entries.
+        Interns use scoring_profile=intern: leave + meeting + tasks (21 completed/month = 70 main)
+        + certification + actionable co-author + actionable entries (no checklist).
 
         GET /accounts/leave-applications/performance-score/?year=2026&month=6
         GET /accounts/leave-applications/performance-score/?year=2026&quarter=2
@@ -1389,10 +1391,10 @@ class LeaveApplicationViewSet(ModelViewSet):
         GET /accounts/leave-applications/performance-scores/?group=mmr_rg&year=2026&month=6
         GET /accounts/leave-applications/performance-scores/?group=npd_hc_ip&year=2026&quarter=2
         GET /accounts/leave-applications/performance-scores/?group=npc&year=2026&month=6
+        GET /accounts/leave-applications/performance-scores/?group=interns&year=2026&month=6
         GET /accounts/leave-applications/performance-scores/?group=other&year=2026
 
-        Groups (mutually exclusive): mmr_rg (MMR/RG), npd_hc_ip (NPD/HC/IP, not MMR/RG),
-        npc (NPC, not in groups above), other (e.g. P&S, no function).
+        Groups: mmr_rg, npd_hc_ip, npc, interns (Role=Intern), other (non-intern by function).
         Optional: ?branch=<branch_name>
         MD and HR only.
         """
@@ -1402,7 +1404,7 @@ class LeaveApplicationViewSet(ModelViewSet):
                 {
                     "detail": (
                         "Query parameter 'group' is required. "
-                        "Use mmr_rg, npd_hc_ip, npc, or other."
+                        "Use mmr_rg, npd_hc_ip, npc, interns, or other."
                     )
                 },
                 status=status.HTTP_400_BAD_REQUEST,
@@ -1423,6 +1425,11 @@ class LeaveApplicationViewSet(ModelViewSet):
     def performance_scores_npc(self, request):
         """GET /accounts/leave-applications/performance-scores/npc/?year=2026&month=6"""
         return self._performance_scores_response(request, "npc")
+
+    @action(detail=False, methods=["get"], url_path="performance-scores/interns")
+    def performance_scores_interns(self, request):
+        """GET /accounts/leave-applications/performance-scores/interns/?year=2026&month=6"""
+        return self._performance_scores_response(request, "interns")
 
     @action(detail=False, methods=["get"], url_path="performance-scores/other")
     def performance_scores_other(self, request):

@@ -3,6 +3,7 @@ Combined employee performance score.
 
 Default (non-MMR/RG): leave + meeting + checklist + certification + actionable co-author + actionable entries (main_score only; no bonus).
 MMR/RG: leave + meeting + certification + actionable co-author + client profiles + customer panel entries (main_score only; no bonus).
+Intern: leave + meeting + tasks (21 completed/month = 70 main) + certification + actionable co-author + actionable entries (no checklist).
 """
 from __future__ import annotations
 
@@ -13,6 +14,7 @@ from QuaterlyReports.actionable_coauthor_scoring import build_actionable_coautho
 from QuaterlyReports.actionable_entries_scoring import build_actionable_entries_points
 from CustomerPanel.customer_panel_scoring import MMR_RG_FUNCTIONS, build_customer_panel_entries_points
 from Clients.client_profile_scoring import build_client_profile_points
+from task_management.intern_task_scoring import INTERN_ROLE_NAME, build_intern_task_points
 
 from accounts.models import Profile
 
@@ -30,6 +32,8 @@ SCORING_GROUP_ALIASES = {
     "hc": "npd_hc_ip",
     "ip": "npd_hc_ip",
     "npc": "npc",
+    "interns": "interns",
+    "intern": "interns",
     "other": "other",
     "others": "other",
     "default": "other",
@@ -91,6 +95,14 @@ def _employee_functions(user) -> list[str]:
         return []
 
 
+def _is_intern_user(user) -> bool:
+    profile = Profile.objects.filter(Employee_id=user).select_related("Role").first()
+    if profile is None:
+        return False
+    role_name = getattr(getattr(profile, "Role", None), "role_name", None)
+    return (role_name or "").strip() == INTERN_ROLE_NAME
+
+
 def _is_mmr_rg_user(user) -> bool:
     profile = Profile.objects.filter(Employee_id=user).prefetch_related("functions").first()
     if profile is None:
@@ -117,6 +129,22 @@ def _function_names_upper_from_profile(profile: Profile | None) -> set[str]:
         }
     except Exception:
         return set()
+
+
+def _is_intern_profile(profile: Profile | None) -> bool:
+    if profile is None:
+        return False
+    role_name = getattr(getattr(profile, "Role", None), "role_name", None)
+    return (role_name or "").strip() == INTERN_ROLE_NAME
+
+
+def _profile_matches_scoring_list_group(profile: Profile, group: str) -> bool:
+    if group == "interns":
+        return _is_intern_profile(profile)
+    if _is_intern_profile(profile):
+        return False
+    function_names = _function_names_upper_from_profile(profile)
+    return classify_scoring_group(function_names) == group
 
 
 def classify_scoring_group(function_names_upper: set[str]) -> str:
@@ -189,8 +217,7 @@ def build_performance_scores_list(
     period_sample: dict | None = None
 
     for profile in profiles_qs:
-        function_names = _function_names_upper_from_profile(profile)
-        if classify_scoring_group(function_names) != group:
+        if not _profile_matches_scoring_list_group(profile, group):
             continue
         full_score = build_performance_score(profile.Employee_id, year, month=month, quarter=quarter)
         if period_sample is None:
@@ -229,8 +256,10 @@ def build_performance_score(user, year: int, month: int | None = None, quarter: 
     actionable_entries = build_actionable_entries_points(user, year, month=month, quarter=quarter)
     customer_panel_entries = build_customer_panel_entries_points(user, year, month=month, quarter=quarter)
     client_profiles = build_client_profile_points(user, year, month=month, quarter=quarter)
+    intern_tasks = build_intern_task_points(user, year, month=month, quarter=quarter)
 
     is_mmr_rg = _is_mmr_rg_user(user)
+    is_intern = _is_intern_user(user)
     if is_mmr_rg:
         combined_categories = {
             "meeting": meeting,
@@ -246,6 +275,21 @@ def build_performance_score(user, year: int, month: int | None = None, quarter: 
         )
         combined_total_bonus = _sum_bonus(list(combined_categories.values()))
         scoring_profile = "mmr_rg"
+    elif is_intern:
+        combined_categories = {
+            "meeting": meeting,
+            "tasks": intern_tasks,
+            "certification": certification,
+            "actionable_coauthor": actionable_coauthor,
+            "actionable_entries": actionable_entries,
+        }
+        combined_total = round(
+            _points_for_combined(leave)
+            + sum(_points_for_combined(c) for c in combined_categories.values()),
+            2,
+        )
+        combined_total_bonus = _sum_bonus(list(combined_categories.values()))
+        scoring_profile = "intern"
     else:
         combined_categories = {
             "meeting": meeting,
@@ -282,6 +326,7 @@ def build_performance_score(user, year: int, month: int | None = None, quarter: 
         "leave": _slim_category_payload(leave),
         "meeting": _slim_category_payload(meeting),
         "checklist": _slim_category_payload(checklist),
+        "tasks": _slim_category_payload(intern_tasks),
         "certification": _slim_category_payload(certification),
         "actionable_coauthor": _slim_category_payload(actionable_coauthor),
         "actionable_entries": _slim_category_payload(actionable_entries),

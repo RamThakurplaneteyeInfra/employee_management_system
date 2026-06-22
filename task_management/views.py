@@ -393,3 +393,41 @@ async def remove_task_assignees(request: HttpRequest):
         return JsonResponse({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+
+from accounts.leave_views import _get_user_role_sync, _user_can_view_on_leave
+from .intern_task_scoring import (
+    build_intern_task_points,
+    parse_leave_points_period,
+    resolve_leave_points_user,
+)
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def intern_task_points(request):
+    """
+    Intern task completion points from self-created completed tasks (viewTasks pool).
+    GET /tasks/intern-task-points/?year=2026&month=6
+    Optional: ?employee=<username>
+    """
+    year, month, quarter, period_err = parse_leave_points_period(request)
+    if period_err is not None:
+        return Response(period_err, status=status.HTTP_400_BAD_REQUEST)
+
+    target_user, user_err = resolve_leave_points_user(
+        request, _user_can_view_on_leave, _get_user_role_sync
+    )
+    if user_err is not None:
+        err_status = (
+            status.HTTP_404_NOT_FOUND
+            if "not found" in user_err["detail"].lower()
+            else status.HTTP_403_FORBIDDEN
+        )
+        return Response(user_err, status=err_status)
+
+    data = build_intern_task_points(target_user, year, month=month, quarter=quarter)
+    return Response(data)
+

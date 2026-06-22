@@ -580,6 +580,14 @@ class PerformanceScoresListTests(TestCase):
         )
         npc_profile.functions.add(Functions.objects.create(function="NPC"))
 
+        self.intern_emp = User.objects.create_user(username="INT900", password="pass123")
+        Profile.objects.create(
+            Employee_id=self.intern_emp,
+            Role=Roles.objects.create(role_name="Intern"),
+            Name="Intern List",
+            Email_id="intlist@example.com",
+        )
+
         self.other_emp = User.objects.create_user(username="OTH900", password="pass123")
         Profile.objects.create(
             Employee_id=self.other_emp,
@@ -604,6 +612,8 @@ class PerformanceScoresListTests(TestCase):
         self.assertEqual(parse_scoring_group("mmr-rg"), "mmr_rg")
         self.assertEqual(parse_scoring_group("npd_hc_ip"), "npd_hc_ip")
         self.assertEqual(parse_scoring_group("npc"), "npc")
+        self.assertEqual(parse_scoring_group("interns"), "interns")
+        self.assertEqual(parse_scoring_group("intern"), "interns")
         self.assertEqual(parse_scoring_group("default"), "other")
         self.assertIsNone(parse_scoring_group(""))
 
@@ -651,6 +661,17 @@ class PerformanceScoresListTests(TestCase):
         self.assertEqual(other_result["count"], 1)
         self.assertEqual(other_result["employees"][0]["employee_id"], "OTH900")
 
+        interns_result = build_performance_scores_list(
+            "interns",
+            self.hr,
+            lambda u: "HR",
+            2026,
+            month=6,
+        )
+        self.assertEqual(interns_result["count"], 1)
+        self.assertEqual(interns_result["employees"][0]["employee_id"], "INT900")
+        self.assertEqual(interns_result["employees"][0]["scoring_profile"], "intern")
+
     def test_performance_scores_api_requires_group(self):
         self.client.force_authenticate(user=self.hr)
         response = self.client.get(
@@ -682,6 +703,18 @@ class PerformanceScoresListTests(TestCase):
         self.assertEqual(response.data["count"], 1)
         self.assertEqual(response.data["employees"][0]["employee_id"], "NPC900")
 
+    def test_performance_scores_api_interns_shortcut(self):
+        self.client.force_authenticate(user=self.hr)
+        response = self.client.get(
+            "/accounts/leave-applications/performance-scores/interns/",
+            {"year": 2026, "month": 6},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["group"], "interns")
+        self.assertEqual(response.data["count"], 1)
+        self.assertEqual(response.data["employees"][0]["employee_id"], "INT900")
+        self.assertEqual(response.data["employees"][0]["scoring_profile"], "intern")
+
     def test_performance_scores_api_allowed_for_md(self):
         self.client.force_authenticate(user=self.md)
         response = self.client.get(
@@ -706,6 +739,120 @@ class PerformanceScoresListTests(TestCase):
             {"year": 2026, "month": 6},
         )
         self.assertEqual(response.status_code, 403)
+
+
+class InternTaskScoringTests(TestCase):
+    def setUp(self):
+        from decimal import Decimal
+
+        from task_management.models import Task, TaskStatus, TaskStatusChangeLogs, TaskTypes
+
+        self.Decimal = Decimal
+        self.Task = Task
+        self.TaskStatus = TaskStatus
+        self.TaskStatusChangeLogs = TaskStatusChangeLogs
+        self.TaskTypes = TaskTypes
+
+        self.role_intern = Roles.objects.create(role_name="Intern")
+        self.role_employee = Roles.objects.create(role_name="Employee")
+
+        self.intern = User.objects.create_user(username="INT900", password="pass123")
+        Profile.objects.create(
+            Employee_id=self.intern,
+            Role=self.role_intern,
+            Name="Intern Scoring",
+            Email_id="int900@example.com",
+        )
+
+        self.employee = User.objects.create_user(username="EMP900", password="pass123")
+        Profile.objects.create(
+            Employee_id=self.employee,
+            Role=self.role_employee,
+            Name="Employee Scoring",
+            Email_id="emp900@example.com",
+        )
+
+        self.completed_status, _ = TaskStatus.objects.get_or_create(status_name="COMPLETED")
+        self.task_type, _ = TaskTypes.objects.get_or_create(type_name="1 Day")
+
+    def _create_completed_task(self, creator, *, completed_at):
+        task = self.Task.objects.create(
+            title=f"Task {creator.username}-{completed_at}",
+            created_by=creator,
+            due_date=date(2026, 6, 30),
+            type=self.task_type,
+            status=self.completed_status,
+        )
+        log = self.TaskStatusChangeLogs.objects.create(
+            task=task,
+            status_change_to=self.completed_status,
+        )
+        self.TaskStatusChangeLogs.objects.filter(pk=log.pk).update(last_edit=completed_at)
+        return task
+
+    def test_intern_21_tasks_full_main_score(self):
+        from task_management.intern_task_scoring import build_intern_task_points
+
+        completed_at = timezone.make_aware(datetime(2026, 6, 15, 10, 0, 0))
+        for _ in range(21):
+            self._create_completed_task(self.intern, completed_at=completed_at)
+
+        result = build_intern_task_points(self.intern, 2026, month=6)
+        self.assertTrue(result["eligible"])
+        self.assertEqual(result["counts"]["completed_tasks"], 21)
+        self.assertEqual(result["main_score"], 70.0)
+        self.assertEqual(result["monthly_bonus"], 0.0)
+
+    def test_intern_extra_tasks_add_bonus(self):
+        from task_management.intern_task_scoring import (
+            MONTHLY_MAX_MAIN_POINTS,
+            MONTHLY_TARGET_TASKS,
+            build_intern_task_points,
+        )
+
+        completed_at = timezone.make_aware(datetime(2026, 6, 20, 10, 0, 0))
+        for _ in range(25):
+            self._create_completed_task(self.intern, completed_at=completed_at)
+
+        result = build_intern_task_points(self.intern, 2026, month=6)
+        expected_bonus = float(
+            (self.Decimal(25) - self.Decimal(MONTHLY_TARGET_TASKS))
+            * (MONTHLY_MAX_MAIN_POINTS / self.Decimal(MONTHLY_TARGET_TASKS))
+        )
+        self.assertEqual(result["main_score"], 70.0)
+        self.assertAlmostEqual(result["monthly_bonus"], round(expected_bonus, 2))
+
+    def test_non_intern_not_eligible(self):
+        from task_management.intern_task_scoring import build_intern_task_points
+
+        result = build_intern_task_points(self.employee, 2026, month=6)
+        self.assertFalse(result["eligible"])
+        self.assertEqual(result["main_score"], 0.0)
+
+    def test_intern_performance_score_uses_tasks_not_checklist(self):
+        from task_management.intern_task_scoring import build_intern_task_points
+
+        completed_at = timezone.make_aware(datetime(2026, 6, 10, 10, 0, 0))
+        for _ in range(21):
+            self._create_completed_task(self.intern, completed_at=completed_at)
+
+        tasks_only = build_intern_task_points(self.intern, 2026, month=6)
+        result = build_performance_score(self.intern, 2026, month=6)
+
+        self.assertEqual(result["scoring_profile"], "intern")
+        self.assertFalse(result["checklist"]["eligible"])
+        self.assertEqual(result["checklist"]["main_score"], 0.0)
+        self.assertEqual(result["tasks"]["main_score"], tasks_only["main_score"])
+        expected_combined = round(
+            result["leave"]["total_points"]
+            + result["meeting"]["main_score"]
+            + result["tasks"]["main_score"]
+            + result["certification"]["main_score"]
+            + result["actionable_coauthor"]["main_score"]
+            + result["actionable_entries"]["main_score"],
+            2,
+        )
+        self.assertEqual(result["combined_total_points"], expected_combined)
 
 
 class MmrRgScoringTargetTests(TestCase):
