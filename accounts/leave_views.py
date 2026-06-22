@@ -1388,9 +1388,11 @@ class LeaveApplicationViewSet(ModelViewSet):
 
         GET /accounts/leave-applications/performance-scores/?group=mmr_rg&year=2026&month=6
         GET /accounts/leave-applications/performance-scores/?group=npd_hc_ip&year=2026&quarter=2
+        GET /accounts/leave-applications/performance-scores/?group=npc&year=2026&month=6
         GET /accounts/leave-applications/performance-scores/?group=other&year=2026
 
-        Groups (mutually exclusive): mmr_rg (MMR/RG), npd_hc_ip (NPD/HC/IP, not MMR/RG), other.
+        Groups (mutually exclusive): mmr_rg (MMR/RG), npd_hc_ip (NPD/HC/IP, not MMR/RG),
+        npc (NPC, not in groups above), other (e.g. P&S, no function).
         Optional: ?branch=<branch_name>
         MD and HR only.
         """
@@ -1400,7 +1402,7 @@ class LeaveApplicationViewSet(ModelViewSet):
                 {
                     "detail": (
                         "Query parameter 'group' is required. "
-                        "Use mmr_rg, npd_hc_ip, or other."
+                        "Use mmr_rg, npd_hc_ip, npc, or other."
                     )
                 },
                 status=status.HTTP_400_BAD_REQUEST,
@@ -1416,6 +1418,11 @@ class LeaveApplicationViewSet(ModelViewSet):
     def performance_scores_npd_hc_ip(self, request):
         """GET /accounts/leave-applications/performance-scores/npd-hc-ip/?year=2026&month=6"""
         return self._performance_scores_response(request, "npd_hc_ip")
+
+    @action(detail=False, methods=["get"], url_path="performance-scores/npc")
+    def performance_scores_npc(self, request):
+        """GET /accounts/leave-applications/performance-scores/npc/?year=2026&month=6"""
+        return self._performance_scores_response(request, "npc")
 
     @action(detail=False, methods=["get"], url_path="performance-scores/other")
     def performance_scores_other(self, request):

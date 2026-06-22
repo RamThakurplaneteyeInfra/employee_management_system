@@ -571,6 +571,15 @@ class PerformanceScoresListTests(TestCase):
         )
         npd_profile.functions.add(Functions.objects.create(function="NPD"))
 
+        self.npc_emp = User.objects.create_user(username="NPC900", password="pass123")
+        npc_profile = Profile.objects.create(
+            Employee_id=self.npc_emp,
+            Role=self.role_employee,
+            Name="NPC Employee",
+            Email_id="npc900@example.com",
+        )
+        npc_profile.functions.add(Functions.objects.create(function="NPC"))
+
         self.other_emp = User.objects.create_user(username="OTH900", password="pass123")
         Profile.objects.create(
             Employee_id=self.other_emp,
@@ -585,12 +594,16 @@ class PerformanceScoresListTests(TestCase):
         self.assertEqual(classify_scoring_group({"NPD", "MMR"}), "mmr_rg")
         self.assertEqual(classify_scoring_group({"NPD"}), "npd_hc_ip")
         self.assertEqual(classify_scoring_group({"HC", "IP"}), "npd_hc_ip")
+        self.assertEqual(classify_scoring_group({"NPC"}), "npc")
+        self.assertEqual(classify_scoring_group({"NPC", "P&S"}), "npc")
+        self.assertEqual(classify_scoring_group({"NPD", "NPC"}), "npd_hc_ip")
         self.assertEqual(classify_scoring_group(set()), "other")
         self.assertEqual(classify_scoring_group({"P&S"}), "other")
 
     def test_parse_scoring_group_aliases(self):
         self.assertEqual(parse_scoring_group("mmr-rg"), "mmr_rg")
         self.assertEqual(parse_scoring_group("npd_hc_ip"), "npd_hc_ip")
+        self.assertEqual(parse_scoring_group("npc"), "npc")
         self.assertEqual(parse_scoring_group("default"), "other")
         self.assertIsNone(parse_scoring_group(""))
 
@@ -616,6 +629,17 @@ class PerformanceScoresListTests(TestCase):
         )
         self.assertEqual(npd_result["count"], 1)
         self.assertEqual(npd_result["employees"][0]["employee_id"], "NPD900")
+
+        npc_result = build_performance_scores_list(
+            "npc",
+            self.hr,
+            lambda u: "HR",
+            2026,
+            month=6,
+        )
+        self.assertEqual(npc_result["count"], 1)
+        self.assertEqual(npc_result["employees"][0]["employee_id"], "NPC900")
+        self.assertEqual(npc_result["employees"][0]["scoring_group"], "npc")
 
         other_result = build_performance_scores_list(
             "other",
@@ -646,6 +670,17 @@ class PerformanceScoresListTests(TestCase):
         self.assertEqual(response.data["count"], 1)
         self.assertEqual(response.data["employees"][0]["employee_id"], "MMR900")
         self.assertIn("combined_total_points", response.data["employees"][0])
+
+    def test_performance_scores_api_npc_shortcut(self):
+        self.client.force_authenticate(user=self.hr)
+        response = self.client.get(
+            "/accounts/leave-applications/performance-scores/npc/",
+            {"year": 2026, "month": 6},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["group"], "npc")
+        self.assertEqual(response.data["count"], 1)
+        self.assertEqual(response.data["employees"][0]["employee_id"], "NPC900")
 
     def test_performance_scores_api_allowed_for_md(self):
         self.client.force_authenticate(user=self.md)

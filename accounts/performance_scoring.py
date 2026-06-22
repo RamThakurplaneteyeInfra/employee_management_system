@@ -19,6 +19,7 @@ from accounts.models import Profile
 from .leave_scoring import build_leave_points
 
 NPD_HC_IP_FUNCTIONS = frozenset({"NPD", "HC", "IP"})
+NPC_FUNCTIONS = frozenset({"NPC"})
 PERFORMANCE_SCORES_VIEW_ROLES = frozenset({"HR", "Hr", "MD"})
 SCORING_GROUP_ALIASES = {
     "mmr_rg": "mmr_rg",
@@ -28,6 +29,7 @@ SCORING_GROUP_ALIASES = {
     "npd": "npd_hc_ip",
     "hc": "npd_hc_ip",
     "ip": "npd_hc_ip",
+    "npc": "npc",
     "other": "other",
     "others": "other",
     "default": "other",
@@ -122,6 +124,8 @@ def classify_scoring_group(function_names_upper: set[str]) -> str:
         return "mmr_rg"
     if function_names_upper & NPD_HC_IP_FUNCTIONS:
         return "npd_hc_ip"
+    if function_names_upper & NPC_FUNCTIONS:
+        return "npc"
     return "other"
 
 
