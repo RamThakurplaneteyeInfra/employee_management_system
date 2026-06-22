@@ -2,6 +2,11 @@ from rest_framework.routers import DefaultRouter
 from ems.urlImports import *
 from . import views
 from .leave_views import LeaveApplicationViewSet
+from .mmr_rg_target_views import (
+    list_mmr_rg_scoring_targets,
+    mmr_rg_scoring_target_detail,
+    reset_mmr_rg_scoring_target,
+)
 
 leave_router = DefaultRouter()
 leave_router.register("leave-applications", LeaveApplicationViewSet, basename="leave-applications")
@@ -30,6 +35,17 @@ admin_urls= [
     path('admin/FetchPhoto/<str:username>/', views.FetchImage, name='users'),
 ]
 urlpatterns = sort_urls + session_urls + employee_urls + admin_urls + [
+    path("mmr-rg-scoring-targets/", list_mmr_rg_scoring_targets, name="mmr-rg-scoring-targets"),
+    path(
+        "mmr-rg-scoring-targets/<str:employee_id>/",
+        mmr_rg_scoring_target_detail,
+        name="mmr-rg-scoring-target-detail",
+    ),
+    path(
+        "mmr-rg-scoring-targets/<str:employee_id>/reset/",
+        reset_mmr_rg_scoring_target,
+        name="mmr-rg-scoring-target-reset",
+    ),
     path("", include(leave_router.urls)),
 ]
 

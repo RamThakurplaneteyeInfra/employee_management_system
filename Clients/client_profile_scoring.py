@@ -21,6 +21,7 @@ from django.db.models import Q
 from django.utils import timezone
 
 from accounts.leave_scoring import parse_leave_points_period, resolve_leave_points_user
+from accounts.mmr_rg_scoring_targets import load_mmr_rg_targets_for_months, resolve_mmr_rg_scoring_targets
 from accounts.models import Profile
 from CustomerPanel.customer_panel_scoring import MMR_RG_FUNCTIONS
 
@@ -154,10 +155,13 @@ def _month_scores_for_amount(amount: Decimal, target_amount: Decimal) -> tuple[D
     return main, bonus, main + bonus
 
 
-def _month_scores_for_count(count: int) -> tuple[Decimal, Decimal, Decimal]:
-    if count <= 0:
+def _month_scores_for_count(
+    count: int, target_count: int | None = None
+) -> tuple[Decimal, Decimal, Decimal]:
+    target = target_count or PROFILE_COUNT_TARGET
+    if count <= 0 or target <= 0:
         return Decimal("0"), Decimal("0"), Decimal("0")
-    raw_points = (Decimal(count) / Decimal(PROFILE_COUNT_TARGET)) * MONTHLY_MAX_COMPONENT_POINTS
+    raw_points = (Decimal(count) / Decimal(target)) * MONTHLY_MAX_COMPONENT_POINTS
     main = min(raw_points, MONTHLY_MAX_COMPONENT_POINTS)
     bonus = raw_points - main
     return main, bonus, main + bonus
@@ -198,6 +202,27 @@ def build_client_profile_points(
     eligible = _is_mmr_rg_user(profile)
     months_in_period = _months_in_period(year, month, quarter)
     months_count = len(months_in_period)
+    target_rows = load_mmr_rg_targets_for_months(profile, months_in_period) if eligible else {}
+
+    display_year, display_month = months_in_period[0] if months_in_period else (year, month or 1)
+    if month is not None:
+        display_year, display_month = year, month
+    resolved_targets = resolve_mmr_rg_scoring_targets(
+        user,
+        year=display_year,
+        month=display_month,
+        profile=profile,
+        custom=target_rows.get((display_year, display_month)),
+    )
+    proposal_target_amount = (
+        resolved_targets["proposal_target_amount"] if eligible else PROPOSAL_TARGET_AMOUNT
+    )
+    proforma_target_amount = (
+        resolved_targets["proforma_target_amount"] if eligible else PROFORMA_TARGET_AMOUNT
+    )
+    profile_count_target = (
+        resolved_targets["profile_count_target"] if eligible else PROFILE_COUNT_TARGET
+    )
 
     base = {
         "employee_id": user.username,
@@ -218,9 +243,21 @@ def build_client_profile_points(
         "max_bonus_points": None,
         "max_points": float(MONTHLY_MAX_TOTAL_POINTS * months_count),
         "months_in_period": months_count,
-        "proposal_target_amount": float(PROPOSAL_TARGET_AMOUNT),
-        "proforma_target_amount": float(PROFORMA_TARGET_AMOUNT),
-        "profile_count_target": PROFILE_COUNT_TARGET,
+        "proposal_target_amount": float(proposal_target_amount),
+        "proforma_target_amount": float(proforma_target_amount),
+        "profile_count_target": profile_count_target,
+        "target_is_customized": bool(eligible and resolved_targets.get("is_customized")),
+        "scoring_targets": {
+            "year": display_year,
+            "month": display_month,
+            "defaults": resolved_targets.get("defaults"),
+            "custom_fields": resolved_targets.get("custom_fields"),
+            "effective": {
+                "proposal_target_amount": float(proposal_target_amount),
+                "proforma_target_amount": float(proforma_target_amount),
+                "profile_count_target": profile_count_target,
+            },
+        },
         "components": {
             "proposal_value": _component_payload(
                 key="proposal_value",
@@ -279,24 +316,41 @@ def build_client_profile_points(
     for month_key in months_in_period:
         profiles = monthly_profiles.get(month_key, [])
         y, m = month_key
+        month_custom = target_rows.get((y, m)) if eligible else None
+        month_targets = resolve_mmr_rg_scoring_targets(
+            user,
+            year=y,
+            month=m,
+            profile=profile,
+            custom=month_custom,
+        )
+        month_proposal_target = (
+            month_targets["proposal_target_amount"] if eligible else PROPOSAL_TARGET_AMOUNT
+        )
+        month_proforma_target = (
+            month_targets["proforma_target_amount"] if eligible else PROFORMA_TARGET_AMOUNT
+        )
+        month_profile_count_target = (
+            month_targets["profile_count_target"] if eligible else PROFILE_COUNT_TARGET
+        )
 
         proposal_amount = _month_amount_for_stage(profiles, PROPOSAL_STAGE_NAME)
         proposal_profiles = sum(1 for p in profiles if _stage_name(p).lower() == PROPOSAL_STAGE_NAME.lower())
-        p_main, p_bonus, _ = _month_scores_for_amount(proposal_amount, PROPOSAL_TARGET_AMOUNT)
+        p_main, p_bonus, _ = _month_scores_for_amount(proposal_amount, month_proposal_target)
         proposal_main += p_main
         proposal_bonus += p_bonus
         proposal_profile_count += proposal_profiles
         proposal_amount_total += proposal_amount
 
         profile_count = len(profiles)
-        c_main, c_bonus, _ = _month_scores_for_count(profile_count)
+        c_main, c_bonus, _ = _month_scores_for_count(profile_count, month_profile_count_target)
         count_main += c_main
         count_bonus += c_bonus
         profiles_added_total += profile_count
 
         proforma_amount = _month_amount_for_stage(profiles, PROFORMA_STAGE_NAME)
         proforma_profiles = sum(1 for p in profiles if _stage_name(p).lower() == PROFORMA_STAGE_NAME.lower())
-        f_main, f_bonus, _ = _month_scores_for_amount(proforma_amount, PROFORMA_TARGET_AMOUNT)
+        f_main, f_bonus, _ = _month_scores_for_amount(proforma_amount, month_proforma_target)
         proforma_main += f_main
         proforma_bonus += f_bonus
         proforma_profile_count += proforma_profiles
@@ -310,17 +364,20 @@ def build_client_profile_points(
                     "proposal_value": {
                         "profiles": proposal_profiles,
                         "total_amount": float(round(proposal_amount, 2)),
+                        "target_amount": float(month_proposal_target),
                         "main_score": float(round(p_main, 2)),
                         "monthly_bonus": float(round(p_bonus, 2)),
                     },
                     "profile_count": {
                         "profiles": profile_count,
+                        "target_count": month_profile_count_target,
                         "main_score": float(round(c_main, 2)),
                         "monthly_bonus": float(round(c_bonus, 2)),
                     },
                     "proforma_value": {
                         "profiles": proforma_profiles,
                         "total_amount": float(round(proforma_amount, 2)),
+                        "target_amount": float(month_proforma_target),
                         "main_score": float(round(f_main, 2)),
                         "monthly_bonus": float(round(f_bonus, 2)),
                     },

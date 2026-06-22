@@ -21,6 +21,7 @@ from django.db.models import Q
 from django.utils import timezone
 
 from accounts.leave_scoring import parse_leave_points_period, resolve_leave_points_user
+from accounts.mmr_rg_scoring_targets import load_mmr_rg_targets_for_months, resolve_mmr_rg_scoring_targets
 from accounts.models import Profile
 
 from .models import CustomerPanelEntry
@@ -132,21 +133,26 @@ def _month_amount(entries) -> Decimal:
     return total
 
 
-def _month_scores_for_amount(amount: Decimal) -> tuple[Decimal, Decimal, Decimal]:
-    if amount <= 0:
+def _month_scores_for_amount(
+    amount: Decimal, target_amount: Decimal | None = None
+) -> tuple[Decimal, Decimal, Decimal]:
+    target = target_amount or MONTHLY_TARGET_AMOUNT
+    if amount <= 0 or target <= 0:
         return Decimal("0"), Decimal("0"), Decimal("0")
-    raw_points = amount / AMOUNT_PER_POINT
+    raw_points = (amount / target) * MONTHLY_MAX_MAIN_POINTS
     main = min(raw_points, MONTHLY_MAX_MAIN_POINTS)
     bonus = raw_points - main
     return main, bonus, main + bonus
 
 
-def _build_events_for_month(entries) -> list[dict]:
+def _build_events_for_month(entries, target_amount: Decimal | None = None) -> list[dict]:
+    target = target_amount or MONTHLY_TARGET_AMOUNT
+    amount_per_main_point = target / MONTHLY_MAX_MAIN_POINTS if MONTHLY_MAX_MAIN_POINTS else Decimal("0")
     events = []
     main_so_far = Decimal("0")
     for entry in entries:
         amount = entry.total or Decimal("0")
-        raw_pts = amount / AMOUNT_PER_POINT if amount > 0 else Decimal("0")
+        raw_pts = amount / amount_per_main_point if amount > 0 and amount_per_main_point > 0 else Decimal("0")
         main_room = max(Decimal("0"), MONTHLY_MAX_MAIN_POINTS - main_so_far)
         entry_main = min(raw_pts, main_room)
         entry_bonus = raw_pts - entry_main
@@ -184,6 +190,23 @@ def build_customer_panel_entries_points(
     eligible = _is_mmr_rg_user(profile)
     months_in_period = _months_in_period(year, month, quarter)
     months_count = len(months_in_period)
+    target_rows = load_mmr_rg_targets_for_months(profile, months_in_period) if eligible else {}
+
+    display_year, display_month = months_in_period[0] if months_in_period else (year, month or 1)
+    if month is not None:
+        display_year, display_month = year, month
+    resolved_targets = resolve_mmr_rg_scoring_targets(
+        user,
+        year=display_year,
+        month=display_month,
+        profile=profile,
+        custom=target_rows.get((display_year, display_month)),
+    )
+    monthly_target_amount = (
+        resolved_targets["customer_panel_target_amount"]
+        if eligible
+        else MONTHLY_TARGET_AMOUNT
+    )
 
     base = {
         "employee_id": user.username,
@@ -198,9 +221,23 @@ def build_customer_panel_entries_points(
         "year": year,
         "month": month,
         "quarter": quarter,
-        "amount_per_point": float(AMOUNT_PER_POINT),
-        "monthly_target_amount": float(MONTHLY_TARGET_AMOUNT),
+        "amount_per_point": float(
+            monthly_target_amount / MONTHLY_MAX_MAIN_POINTS
+            if MONTHLY_MAX_MAIN_POINTS
+            else AMOUNT_PER_POINT
+        ),
+        "monthly_target_amount": float(monthly_target_amount),
         "monthly_max_main_points": float(MONTHLY_MAX_MAIN_POINTS),
+        "target_is_customized": bool(eligible and resolved_targets.get("is_customized")),
+        "scoring_targets": {
+            "year": display_year,
+            "month": display_month,
+            "defaults": resolved_targets.get("defaults"),
+            "custom_fields": resolved_targets.get("custom_fields"),
+            "effective": {
+                "customer_panel_target_amount": float(monthly_target_amount),
+            },
+        },
         "max_main_points": float(MONTHLY_MAX_MAIN_POINTS * months_count),
         "max_bonus_points": None,
         "max_points": float(MONTHLY_MAX_MAIN_POINTS * months_count),
@@ -233,11 +270,25 @@ def build_customer_panel_entries_points(
         entry_count += len(entries)
         month_amount = _month_amount(entries)
         amount_total += month_amount
-        month_main, month_bonus, _ = _month_scores_for_amount(month_amount)
+        y, m = month_key
+        month_custom = target_rows.get((y, m)) if eligible else None
+        month_targets = resolve_mmr_rg_scoring_targets(
+            user,
+            year=y,
+            month=m,
+            profile=profile,
+            custom=month_custom,
+        )
+        month_target_amount = (
+            month_targets["customer_panel_target_amount"]
+            if eligible
+            else MONTHLY_TARGET_AMOUNT
+        )
+        month_main, month_bonus, _ = _month_scores_for_amount(month_amount, month_target_amount)
         main_total += month_main
         bonus_total += month_bonus
         if month is not None or entries:
-            events.extend(_build_events_for_month(entries))
+            events.extend(_build_events_for_month(entries, month_target_amount))
 
     total_points = main_total + bonus_total
     return {

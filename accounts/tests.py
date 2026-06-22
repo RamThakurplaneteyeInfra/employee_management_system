@@ -673,6 +673,161 @@ class PerformanceScoresListTests(TestCase):
         self.assertEqual(response.status_code, 403)
 
 
+class MmrRgScoringTargetTests(TestCase):
+    def setUp(self):
+        from decimal import Decimal
+
+        from accounts.models import Functions, MmrRgScoringTarget
+
+        self.Decimal = Decimal
+        self.MmrRgScoringTarget = MmrRgScoringTarget
+        self.client = APIClient()
+        self.role_employee = Roles.objects.create(role_name="Employee")
+        self.role_md = Roles.objects.create(role_name="MD")
+        self.role_hr = Roles.objects.create(role_name="HR")
+
+        self.md = User.objects.create_user(username="MDTGT", password="pass123")
+        Profile.objects.create(
+            Employee_id=self.md,
+            Role=self.role_md,
+            Name="MD Targets",
+            Email_id="mdtgt@example.com",
+        )
+        self.hr = User.objects.create_user(username="HRTGT", password="pass123")
+        Profile.objects.create(
+            Employee_id=self.hr,
+            Role=self.role_hr,
+            Name="HR Targets",
+            Email_id="hrtgt@example.com",
+        )
+
+        self.mmr_emp = User.objects.create_user(username="MMRTGT", password="pass123")
+        mmr_profile = Profile.objects.create(
+            Employee_id=self.mmr_emp,
+            Role=self.role_employee,
+            Name="MMR Target Employee",
+            Email_id="mmrtgt@example.com",
+        )
+        mmr_profile.functions.add(Functions.objects.create(function="MMR"))
+
+    def test_custom_customer_panel_target_changes_score(self):
+        from CustomerPanel.customer_panel_scoring import build_customer_panel_entries_points
+        from CustomerPanel.models import CustomerPanelEntry
+        from datetime import datetime
+
+        self.MmrRgScoringTarget.objects.create(
+            profile=self.mmr_emp.accounts_profile,
+            year=2026,
+            month=6,
+            customer_panel_target_amount=self.Decimal("700000"),
+            set_by=self.md,
+        )
+        entry = CustomerPanelEntry.objects.create(
+            business_name="Client A",
+            division=CustomerPanelEntry.DIVISION_FARM,
+            total=self.Decimal("350000"),
+            created_by=self.mmr_emp,
+        )
+        CustomerPanelEntry.objects.filter(pk=entry.pk).update(
+            created_at=timezone.make_aware(datetime(2026, 6, 10, 10, 0, 0))
+        )
+
+        result = build_customer_panel_entries_points(self.mmr_emp, 2026, month=6)
+        self.assertTrue(result["target_is_customized"])
+        self.assertEqual(result["monthly_target_amount"], 700000.0)
+        self.assertEqual(result["main_score"], 20.0)
+
+    def test_yearly_scoring_uses_month_specific_targets(self):
+        from CustomerPanel.customer_panel_scoring import build_customer_panel_entries_points
+        from CustomerPanel.models import CustomerPanelEntry
+        from datetime import datetime
+
+        self.MmrRgScoringTarget.objects.create(
+            profile=self.mmr_emp.accounts_profile,
+            year=2026,
+            month=1,
+            customer_panel_target_amount=self.Decimal("500000"),
+            set_by=self.md,
+        )
+        self.MmrRgScoringTarget.objects.create(
+            profile=self.mmr_emp.accounts_profile,
+            year=2026,
+            month=2,
+            customer_panel_target_amount=self.Decimal("700000"),
+            set_by=self.md,
+        )
+        for month, amount in ((1, "500000"), (2, "350000")):
+            entry = CustomerPanelEntry.objects.create(
+                business_name=f"Client {month}",
+                division=CustomerPanelEntry.DIVISION_FARM,
+                total=self.Decimal(amount),
+                created_by=self.mmr_emp,
+            )
+            CustomerPanelEntry.objects.filter(pk=entry.pk).update(
+                created_at=timezone.make_aware(datetime(2026, month, 10, 10, 0, 0))
+            )
+
+        result = build_customer_panel_entries_points(self.mmr_emp, 2026)
+        self.assertEqual(result["main_score"], 60.0)
+
+    def test_md_can_set_targets(self):
+        self.client.force_authenticate(user=self.md)
+        response = self.client.put(
+            "/accounts/mmr-rg-scoring-targets/MMRTGT/?year=2026&month=6",
+            {
+                "customer_panel_target_amount": 700000,
+                "proposal_target_amount": 6000000,
+                "profile_count_target": 6,
+                "proforma_target_amount": 1200000,
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.data["is_customized"])
+        self.assertEqual(response.data["year"], 2026)
+        self.assertEqual(response.data["month"], 6)
+        self.assertEqual(
+            response.data["effective_targets"]["customer_panel_target_amount"],
+            700000.0,
+        )
+
+    def test_hr_can_list_but_not_set_targets(self):
+        self.client.force_authenticate(user=self.hr)
+        list_response = self.client.get("/accounts/mmr-rg-scoring-targets/?year=2026&month=6")
+        self.assertEqual(list_response.status_code, 200)
+        self.assertEqual(list_response.data["count"], 1)
+
+        write_response = self.client.patch(
+            "/accounts/mmr-rg-scoring-targets/MMRTGT/?year=2026&month=6",
+            {"customer_panel_target_amount": 700000},
+            format="json",
+        )
+        self.assertEqual(write_response.status_code, 403)
+
+    def test_reset_restores_defaults(self):
+        self.MmrRgScoringTarget.objects.create(
+            profile=self.mmr_emp.accounts_profile,
+            year=2026,
+            month=6,
+            customer_panel_target_amount=self.Decimal("700000"),
+            set_by=self.md,
+        )
+        self.client.force_authenticate(user=self.md)
+        response = self.client.delete("/accounts/mmr-rg-scoring-targets/MMRTGT/reset/?year=2026&month=6")
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.data["is_customized"])
+        self.assertEqual(
+            response.data["effective_targets"]["customer_panel_target_amount"],
+            500000.0,
+        )
+
+
+    def test_list_requires_year_and_month(self):
+        self.client.force_authenticate(user=self.hr)
+        response = self.client.get("/accounts/mmr-rg-scoring-targets/")
+        self.assertEqual(response.status_code, 400)
+
+
 class CompletedYearsAndDaysTests(TestCase):
     def test_null_join_date_returns_none(self):
         from accounts.filters import completed_years_and_days

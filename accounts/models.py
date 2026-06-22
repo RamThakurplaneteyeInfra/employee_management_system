@@ -368,4 +368,66 @@ class LeaveApplicationData(models.Model):
         return f"leave {self.id}"
 
 
+class MmrRgScoringTarget(models.Model):
+    """
+    Per-employee, per-month MMR/RG business scoring targets set by MD.
+    Null field values fall back to system defaults at scoring time for that month.
+    """
+
+    id = models.AutoField(primary_key=True)
+    profile = models.ForeignKey(
+        Profile,
+        on_delete=models.CASCADE,
+        related_name="mmr_rg_scoring_targets",
+        db_column="employee_id",
+        to_field="Employee_id",
+    )
+    year = models.PositiveSmallIntegerField()
+    month = models.PositiveSmallIntegerField()
+    customer_panel_target_amount = models.DecimalField(
+        max_digits=14,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(Decimal("0.01"))],
+    )
+    proposal_target_amount = models.DecimalField(
+        max_digits=14,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(Decimal("0.01"))],
+    )
+    profile_count_target = models.PositiveSmallIntegerField(null=True, blank=True)
+    proforma_target_amount = models.DecimalField(
+        max_digits=14,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(Decimal("0.01"))],
+    )
+    set_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="mmr_rg_targets_set",
+        db_column="set_by",
+        to_field="username",
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'login_details"."mmr_rg_scoring_targets'
+        verbose_name = "MMR/RG scoring target"
+        verbose_name_plural = "MMR/RG scoring targets"
+        unique_together = ("profile", "year", "month")
+        indexes = [
+            models.Index(fields=["profile", "year", "month"]),
+        ]
+
+    def __str__(self):
+        return f"MMR/RG targets for {self.profile_id} ({self.year}-{self.month:02d})"
+
+
 
