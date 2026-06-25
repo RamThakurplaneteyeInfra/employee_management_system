@@ -46,6 +46,8 @@ from .leave_notifications import (
 )
 from .leave_scoring import build_leave_points, parse_leave_points_period, resolve_leave_points_user
 from .performance_scoring import (
+    PERFORMANCE_SCORES_VIEW_ROLES,
+    build_org_average_performance_score,
     build_performance_score,
     build_performance_scores_list,
     parse_scoring_group,
@@ -1337,6 +1339,10 @@ class LeaveApplicationViewSet(ModelViewSet):
         GET /accounts/leave-applications/performance-score/?year=2026&quarter=2
         GET /accounts/leave-applications/performance-score/?year=2026
         Optional: ?employee=<username> (HR / Admin / MD / TeamLead for team members)
+        Optional: ?branch=<branch_name> (HR org-average only; filters the employee pool)
+
+        HR employees: combined_total_points is the average of all active employees
+        (excluding HR, MD, Admin). scoring_profile=hr_org_average.
 
         Response includes `combined_total_points` (main scores only), `combined_total_bonus`,
         and `bonus_by_category` at the root, plus nested category payloads (`leave`, `meeting`,
@@ -1358,7 +1364,36 @@ class LeaveApplicationViewSet(ModelViewSet):
             )
             return Response(user_err, status=err_status)
 
-        data = build_performance_score(target_user, year, month=month, quarter=quarter)
+        branch = (request.query_params.get("branch") or "").strip() or None
+        data = build_performance_score(
+            target_user, year, month=month, quarter=quarter, branch=branch
+        )
+        return Response(data)
+
+    @action(detail=False, methods=["get"], url_path="performance-score/hr-average")
+    def performance_score_hr_average(self, request):
+        """
+        Org-wide average performance score (same pool HR individual score uses).
+
+        GET /accounts/leave-applications/performance-score/hr-average/?year=2026&month=6
+        Optional: ?branch=<branch_name>
+        MD and HR only.
+        """
+        role = (_get_user_role_sync(request.user) or "").strip()
+        if role not in PERFORMANCE_SCORES_VIEW_ROLES:
+            return Response(
+                {"detail": "You do not have permission to view org average performance."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        year, month, quarter, period_err = parse_leave_points_period(request)
+        if period_err is not None:
+            return Response(period_err, status=status.HTTP_400_BAD_REQUEST)
+
+        branch = (request.query_params.get("branch") or "").strip() or None
+        data = build_org_average_performance_score(
+            year, month=month, quarter=quarter, branch=branch
+        )
         return Response(data)
 
     def _performance_scores_response(self, request, group: str):

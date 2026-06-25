@@ -4,6 +4,7 @@ Combined employee performance score.
 Default (non-MMR/RG): leave + meeting + checklist + certification + actionable co-author + actionable entries (main_score only; no bonus).
 MMR/RG: leave + meeting + certification + actionable co-author + client profiles + customer panel entries (main_score only; no bonus).
 Intern: leave + meeting + tasks (21 completed/month = 70 main) + certification + actionable co-author + actionable entries (no checklist).
+HR: combined_total_points = average of all active employees (excluding HR, MD, Admin); scoring_profile=hr_org_average.
 """
 from __future__ import annotations
 
@@ -22,6 +23,7 @@ from .leave_scoring import build_leave_points
 
 NPD_HC_IP_FUNCTIONS = frozenset({"NPD", "HC", "IP"})
 NPC_FUNCTIONS = frozenset({"NPC"})
+HR_ORG_AVERAGE_EXCLUDE_ROLES = frozenset({"HR", "Hr", "MD", "Admin"})
 PERFORMANCE_SCORES_VIEW_ROLES = frozenset({"HR", "Hr", "MD"})
 SCORING_GROUP_ALIASES = {
     "mmr_rg": "mmr_rg",
@@ -103,6 +105,14 @@ def _is_intern_user(user) -> bool:
     return (role_name or "").strip() == INTERN_ROLE_NAME
 
 
+def _is_hr_user(user) -> bool:
+    profile = Profile.objects.filter(Employee_id=user).select_related("Role").first()
+    if profile is None:
+        return False
+    role_name = getattr(getattr(profile, "Role", None), "role_name", None)
+    return (role_name or "").strip() in ("HR", "Hr")
+
+
 def _is_mmr_rg_user(user) -> bool:
     profile = Profile.objects.filter(Employee_id=user).prefetch_related("functions").first()
     if profile is None:
@@ -180,6 +190,140 @@ def summarize_performance_score(full_score: dict) -> dict:
     }
 
 
+def profiles_queryset_for_org_average(*, branch: str | None = None):
+    """Active employees included in the HR org-average pool (excludes HR, MD, Admin)."""
+    qs = (
+        Profile.objects.filter(Employee_id__is_active=True)
+        .exclude(Role__role_name__in=HR_ORG_AVERAGE_EXCLUDE_ROLES)
+        .select_related("Role", "Employee_id", "Branch")
+        .prefetch_related("functions")
+    )
+    branch_name = (branch or "").strip()
+    if branch_name:
+        qs = qs.filter(Branch__branch_name__iexact=branch_name)
+    return qs
+
+
+def build_org_average_performance_score(
+    year: int,
+    month: int | None = None,
+    quarter: int | None = None,
+    *,
+    branch: str | None = None,
+) -> dict:
+    """
+    Average combined_total_points (and bonus) across active employees,
+    excluding HR, MD, and Admin roles.
+    """
+    totals: list[float] = []
+    bonuses: list[float] = []
+    period_sample: dict | None = None
+
+    for profile in profiles_queryset_for_org_average(branch=branch):
+        score = _compute_individual_performance_score(
+            profile.Employee_id, year, month=month, quarter=quarter
+        )
+        totals.append(score["combined_total_points"])
+        bonuses.append(score["combined_total_bonus"])
+        if period_sample is None:
+            period_sample = score
+
+    count = len(totals)
+    if period_sample is None:
+        fallback_user = (
+            Profile.objects.filter(Employee_id__is_active=True)
+            .select_related("Employee_id")
+            .first()
+        )
+        if fallback_user is not None:
+            period_sample = build_leave_points(
+                fallback_user.Employee_id,
+                year,
+                month=month,
+                quarter=quarter,
+            )
+        else:
+            period_sample = {
+                "period_type": "month" if month is not None else ("quarter" if quarter else "year"),
+                "period": str(year),
+                "period_range": None,
+                "financial_year_start": year if quarter is not None else None,
+                "year": year,
+                "month": month,
+                "quarter": quarter,
+                "months_in_period": 1 if month is not None else (3 if quarter else 12),
+            }
+
+    avg_total = round(sum(totals) / count, 2) if count else 0.0
+    avg_bonus = round(sum(bonuses) / count, 2) if count else 0.0
+    branch_name = (branch or "").strip() or None
+
+    return {
+        "scoring_profile": "hr_org_average",
+        "period_type": period_sample["period_type"],
+        "period": period_sample["period"],
+        "period_range": period_sample["period_range"],
+        "financial_year_start": period_sample["financial_year_start"],
+        "year": period_sample["year"],
+        "month": period_sample["month"],
+        "quarter": period_sample["quarter"],
+        "months_in_period": period_sample["months_in_period"],
+        "average_combined_total_points": avg_total,
+        "average_combined_total_bonus": avg_bonus,
+        "employee_count": count,
+        "excluded_roles": sorted(HR_ORG_AVERAGE_EXCLUDE_ROLES),
+        "branch": branch_name,
+    }
+
+
+def build_hr_performance_score(
+    hr_user,
+    year: int,
+    month: int | None = None,
+    quarter: int | None = None,
+    *,
+    branch: str | None = None,
+) -> dict:
+    """HR employee score = org average of combined_total_points (main scores only in combined)."""
+    org_avg = build_org_average_performance_score(year, month, quarter, branch=branch)
+    profile = Profile.objects.filter(Employee_id=hr_user).select_related("Role").first()
+    display_name = (getattr(profile, "Name", None) or hr_user.username) if profile else hr_user.username
+    role_name = getattr(getattr(profile, "Role", None), "role_name", None)
+
+    empty_category = {"main_score": 0.0, "monthly_bonus": 0.0, "total_points": 0.0}
+
+    return {
+        "employee_id": hr_user.username,
+        "name": display_name,
+        "role": role_name,
+        "employee_functions": _employee_functions(hr_user),
+        "scoring_profile": "hr_org_average",
+        "derived_from_employee_count": org_avg["employee_count"],
+        "excluded_roles": org_avg["excluded_roles"],
+        "branch": org_avg["branch"],
+        "period_type": org_avg["period_type"],
+        "period": org_avg["period"],
+        "period_range": org_avg["period_range"],
+        "financial_year_start": org_avg["financial_year_start"],
+        "year": org_avg["year"],
+        "month": org_avg["month"],
+        "quarter": org_avg["quarter"],
+        "months_in_period": org_avg["months_in_period"],
+        "combined_total_points": org_avg["average_combined_total_points"],
+        "combined_total_bonus": org_avg["average_combined_total_bonus"],
+        "bonus_by_category": {},
+        "leave": empty_category,
+        "meeting": empty_category,
+        "checklist": empty_category,
+        "tasks": empty_category,
+        "certification": empty_category,
+        "actionable_coauthor": empty_category,
+        "actionable_entries": empty_category,
+        "customer_panel_entries": empty_category,
+        "client_profiles": empty_category,
+    }
+
+
 def profiles_queryset_for_scoring_list(viewer, get_user_role, *, branch: str | None = None):
     if not viewer or not viewer.is_authenticated:
         return None
@@ -247,7 +391,26 @@ def build_performance_scores_list(
     }
 
 
-def build_performance_score(user, year: int, month: int | None = None, quarter: int | None = None) -> dict:
+def build_performance_score(
+    user,
+    year: int,
+    month: int | None = None,
+    quarter: int | None = None,
+    *,
+    branch: str | None = None,
+) -> dict:
+    if _is_hr_user(user):
+        return build_hr_performance_score(
+            user, year, month=month, quarter=quarter, branch=branch
+        )
+    return _compute_individual_performance_score(
+        user, year, month=month, quarter=quarter
+    )
+
+
+def _compute_individual_performance_score(
+    user, year: int, month: int | None = None, quarter: int | None = None
+) -> dict:
     leave = build_leave_points(user, year, month=month, quarter=quarter)
     meeting = build_meeting_points(user, year, month=month, quarter=quarter)
     checklist = build_checklist_points(user, year, month=month, quarter=quarter)

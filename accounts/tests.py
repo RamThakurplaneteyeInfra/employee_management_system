@@ -7,6 +7,7 @@ from rest_framework.test import APIClient
 
 from accounts.leave_scoring import build_leave_points
 from accounts.performance_scoring import (
+    build_org_average_performance_score,
     build_performance_score,
     build_performance_scores_list,
     classify_scoring_group,
@@ -736,6 +737,99 @@ class PerformanceScoresListTests(TestCase):
         self.client.force_authenticate(user=self.other_emp)
         response = self.client.get(
             "/accounts/leave-applications/performance-scores/other/",
+            {"year": 2026, "month": 6},
+        )
+        self.assertEqual(response.status_code, 403)
+
+
+class HrOrgAveragePerformanceTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.role_employee = Roles.objects.create(role_name="Employee")
+        self.role_hr = Roles.objects.create(role_name="HR")
+        self.role_md = Roles.objects.create(role_name="MD")
+        self.role_teamlead = Roles.objects.create(role_name="TeamLead")
+
+        self.hr = User.objects.create_user(username="HRAVG", password="pass123")
+        Profile.objects.create(
+            Employee_id=self.hr,
+            Role=self.role_hr,
+            Name="HR Average",
+            Email_id="hravg@example.com",
+        )
+        self.md = User.objects.create_user(username="MDAVG", password="pass123")
+        Profile.objects.create(
+            Employee_id=self.md,
+            Role=self.role_md,
+            Name="MD Average",
+            Email_id="mdavg@example.com",
+        )
+
+        self.emp_a = User.objects.create_user(username="EMPAVG1", password="pass123")
+        Profile.objects.create(
+            Employee_id=self.emp_a,
+            Role=self.role_employee,
+            Name="Employee A",
+            Email_id="empa@example.com",
+        )
+        self.emp_b = User.objects.create_user(username="EMPAVG2", password="pass123")
+        Profile.objects.create(
+            Employee_id=self.emp_b,
+            Role=self.role_employee,
+            Name="Employee B",
+            Email_id="empb@example.com",
+        )
+
+    def _pool_combined_average(self, year=2026, month=6):
+        pool_users = [self.emp_a, self.emp_b]
+        totals = [
+            build_performance_score(user, year, month=month)["combined_total_points"]
+            for user in pool_users
+        ]
+        return round(sum(totals) / len(totals), 2), len(totals)
+
+    def test_hr_score_is_org_average_excluding_hr_and_md(self):
+        expected_avg, expected_count = self._pool_combined_average()
+        result = build_performance_score(self.hr, 2026, month=6)
+
+        self.assertEqual(result["scoring_profile"], "hr_org_average")
+        self.assertEqual(result["combined_total_points"], expected_avg)
+        self.assertEqual(result["derived_from_employee_count"], expected_count)
+        self.assertIn("HR", result["excluded_roles"])
+
+    def test_build_org_average_performance_score(self):
+        expected_avg, expected_count = self._pool_combined_average()
+        org = build_org_average_performance_score(2026, month=6)
+
+        self.assertEqual(org["scoring_profile"], "hr_org_average")
+        self.assertEqual(org["average_combined_total_points"], expected_avg)
+        self.assertEqual(org["employee_count"], expected_count)
+
+    def test_hr_performance_score_api(self):
+        expected_avg, _ = self._pool_combined_average()
+        self.client.force_authenticate(user=self.hr)
+        response = self.client.get(
+            "/accounts/leave-applications/performance-score/",
+            {"year": 2026, "month": 6, "employee": "HRAVG"},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["scoring_profile"], "hr_org_average")
+        self.assertEqual(response.data["combined_total_points"], expected_avg)
+
+    def test_hr_average_endpoint_for_hr_and_md(self):
+        self.client.force_authenticate(user=self.hr)
+        response = self.client.get(
+            "/accounts/leave-applications/performance-score/hr-average/",
+            {"year": 2026, "month": 6},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["scoring_profile"], "hr_org_average")
+        self.assertIn("average_combined_total_points", response.data)
+
+    def test_hr_average_endpoint_forbidden_for_employee(self):
+        self.client.force_authenticate(user=self.emp_a)
+        response = self.client.get(
+            "/accounts/leave-applications/performance-score/hr-average/",
             {"year": 2026, "month": 6},
         )
         self.assertEqual(response.status_code, 403)
