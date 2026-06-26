@@ -12,6 +12,8 @@ from accounts.performance_scoring import (
     build_performance_scores_list,
     classify_scoring_group,
     parse_scoring_group,
+    _compute_individual_performance_score,
+    _org_pool_work_points_from_performance_score,
 )
 from accounts.models import (
     LeaveApplicationData,
@@ -91,6 +93,56 @@ class LeaveNotificationFlowTests(TestCase):
         application_id = response.data["id"]
         return LeaveApplicationData.objects.get(pk=application_id)
 
+    def _approve_alternative(self, app):
+        self.client.force_authenticate(user=self.alt)
+        return self.client.patch(
+            f"/accounts/leave-applications/{app.id}/",
+            {"alternative_approval": "Approved"},
+            format="json",
+        )
+
+    def _approve_team_lead(self, app):
+        self.client.force_authenticate(user=self.tl)
+        return self.client.patch(
+            f"/accounts/leave-applications/{app.id}/",
+            {"team_lead_approval": "Approved"},
+            format="json",
+        )
+
+    def _approve_hr(self, app):
+        self.client.force_authenticate(user=self.hr)
+        return self.client.patch(
+            f"/accounts/leave-applications/{app.id}/",
+            {"HR_approval": "Approved"},
+            format="json",
+        )
+
+    def _approve_md(self, app):
+        self.client.force_authenticate(user=self.md)
+        return self.client.patch(
+            f"/accounts/leave-applications/{app.id}/",
+            {"MD_approval": "Approved"},
+            format="json",
+        )
+
+    def test_sequential_create_with_alternative_only_alt_pending(self):
+        app = self._create_regular_leave_with_alternative()
+        app.refresh_from_db()
+        self.assertEqual(app.alternative_approval.name, "Pending")
+        self.assertIsNone(app.team_lead_approval_id)
+        self.assertIsNone(app.HR_approval_id)
+        self.assertIsNone(app.MD_approval_id)
+
+    def test_hr_blocked_until_alternative_and_team_lead_approve(self):
+        app = self._create_regular_leave_with_alternative()
+        blocked = self._approve_hr(app)
+        self.assertEqual(blocked.status_code, 400, blocked.data)
+        self._approve_alternative(app)
+        still_blocked = self._approve_hr(app)
+        self.assertEqual(still_blocked.status_code, 400, still_blocked.data)
+        ok = self._approve_team_lead(app)
+        self.assertEqual(ok.status_code, 200, ok.data)
+
     def test_submission_notifies_alternative_once(self):
         self._create_regular_leave_with_alternative()
         qs = Notification.objects.filter(receipient=self.alt)
@@ -112,36 +164,27 @@ class LeaveNotificationFlowTests(TestCase):
 
     def test_team_lead_approval_notifies_hr(self):
         app = self._create_regular_leave_with_alternative()
-        self.client.force_authenticate(user=self.tl)
-        response = self.client.patch(
-            f"/accounts/leave-applications/{app.id}/",
-            {"team_lead_approval": "Approved"},
-            format="json",
-        )
+        self._approve_alternative(app)
+        response = self._approve_team_lead(app)
         self.assertEqual(response.status_code, 200, response.data)
         qs = Notification.objects.filter(receipient=self.hr, type_of_notification__type_name="Leave_TeamLead_Approved")
         self.assertEqual(qs.count(), 1)
 
     def test_hr_approval_notifies_md(self):
         app = self._create_regular_leave_with_alternative()
-        self.client.force_authenticate(user=self.hr)
-        response = self.client.patch(
-            f"/accounts/leave-applications/{app.id}/",
-            {"HR_approval": "Approved"},
-            format="json",
-        )
+        self._approve_alternative(app)
+        self._approve_team_lead(app)
+        response = self._approve_hr(app)
         self.assertEqual(response.status_code, 200, response.data)
         qs = Notification.objects.filter(receipient=self.md, type_of_notification__type_name="Leave_HR_Approved")
         self.assertEqual(qs.count(), 1)
 
     def test_md_approval_notifies_applicant(self):
         app = self._create_regular_leave_with_alternative()
-        self.client.force_authenticate(user=self.md)
-        response = self.client.patch(
-            f"/accounts/leave-applications/{app.id}/",
-            {"MD_approval": "Approved"},
-            format="json",
-        )
+        self._approve_alternative(app)
+        self._approve_team_lead(app)
+        self._approve_hr(app)
+        response = self._approve_md(app)
         self.assertEqual(response.status_code, 200, response.data)
         qs = Notification.objects.filter(receipient=self.emp, type_of_notification__type_name="Leave_Final_Approved")
         self.assertEqual(qs.count(), 1)
@@ -780,33 +823,52 @@ class HrOrgAveragePerformanceTests(TestCase):
             Email_id="empb@example.com",
         )
 
-    def _pool_combined_average(self, year=2026, month=6):
+    def _pool_work_average(self, year=2026, month=6):
         pool_users = [self.emp_a, self.emp_b]
-        totals = [
-            build_performance_score(user, year, month=month)["combined_total_points"]
+        work_scores = [
+            _org_pool_work_points_from_performance_score(
+                _compute_individual_performance_score(user, year, month=month)
+            )
             for user in pool_users
         ]
-        return round(sum(totals) / len(totals), 2), len(totals)
+        return round(sum(work_scores) / len(work_scores), 2), len(work_scores)
 
-    def test_hr_score_is_org_average_excluding_hr_and_md(self):
-        expected_avg, expected_count = self._pool_combined_average()
+    def _expected_hr_combined(self, year=2026, month=6):
+        hr_score = _compute_individual_performance_score(self.hr, year, month=month)
+        hr_core = (
+            hr_score["leave"]["total_points"]
+            + hr_score["meeting"]["main_score"]
+            + hr_score["certification"]["main_score"]
+        )
+        coauthor_main = hr_score["actionable_coauthor"]["main_score"]
+        avg_work, _ = self._pool_work_average(year, month)
+        return round(hr_core + coauthor_main + min(avg_work, 70.0), 2)
+
+    def test_hr_score_is_individual_plus_org_work_average(self):
+        expected = self._expected_hr_combined()
         result = build_performance_score(self.hr, 2026, month=6)
 
         self.assertEqual(result["scoring_profile"], "hr_org_average")
-        self.assertEqual(result["combined_total_points"], expected_avg)
-        self.assertEqual(result["derived_from_employee_count"], expected_count)
+        self.assertEqual(result["combined_total_points"], expected)
+        self.assertEqual(result["leave"]["total_points"], 8.0)
+        self.assertEqual(result["derived_from_employee_count"], 2)
         self.assertIn("HR", result["excluded_roles"])
+        self.assertEqual(result["monthly_component_caps"]["org_work_bucket"], 80.0)
+        self.assertEqual(result["monthly_component_caps"]["actionable_coauthor"], 10.0)
+        self.assertEqual(result["monthly_component_caps"]["org_work_average"], 70.0)
 
-    def test_build_org_average_performance_score(self):
-        expected_avg, expected_count = self._pool_combined_average()
+    def test_build_org_average_performance_score_returns_work_average(self):
+        avg_work, expected_count = self._pool_work_average()
         org = build_org_average_performance_score(2026, month=6)
 
         self.assertEqual(org["scoring_profile"], "hr_org_average")
-        self.assertEqual(org["average_combined_total_points"], expected_avg)
+        self.assertEqual(org["average_org_work_points"], avg_work)
+        self.assertEqual(org["org_work_points_applied"], min(avg_work, 70.0))
+        self.assertEqual(org["org_work_cap"], 70.0)
         self.assertEqual(org["employee_count"], expected_count)
 
     def test_hr_performance_score_api(self):
-        expected_avg, _ = self._pool_combined_average()
+        expected = self._expected_hr_combined()
         self.client.force_authenticate(user=self.hr)
         response = self.client.get(
             "/accounts/leave-applications/performance-score/",
@@ -814,7 +876,8 @@ class HrOrgAveragePerformanceTests(TestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["scoring_profile"], "hr_org_average")
-        self.assertEqual(response.data["combined_total_points"], expected_avg)
+        self.assertEqual(response.data["combined_total_points"], expected)
+        self.assertEqual(response.data["leave"]["total_points"], 8.0)
 
     def test_hr_average_endpoint_for_hr_and_md(self):
         self.client.force_authenticate(user=self.hr)
@@ -824,7 +887,10 @@ class HrOrgAveragePerformanceTests(TestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["scoring_profile"], "hr_org_average")
-        self.assertIn("average_combined_total_points", response.data)
+        self.assertIn("average_org_work_points", response.data)
+        self.assertIn("org_work_points_applied", response.data)
+        self.assertEqual(response.data["monthly_component_caps"]["meeting"], 7.0)
+        self.assertEqual(response.data["monthly_component_caps"]["actionable_coauthor"], 10.0)
 
     def test_hr_average_endpoint_forbidden_for_employee(self):
         self.client.force_authenticate(user=self.emp_a)

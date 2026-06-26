@@ -293,13 +293,18 @@ async def add_meeting_head_subhead(request: HttpRequest):
 # Method: GET
 def _get_functions_goals_sync(function_name):
     """Fetch function with goals and actionable goals. Prefetch with select_related(grp) to avoid N+1 on a_goal.grp.grp."""
+    from .npc_goals import NPC_USER_GOALS_MAIN_LABEL
+
     actionables_prefetch = Prefetch(
         "actionablegoals_set",
         queryset=ActionableGoals.objects.select_related("grp"),
     )
+    goals_qs = FunctionsGoals.objects.prefetch_related(actionables_prefetch).exclude(
+        Maingoal=NPC_USER_GOALS_MAIN_LABEL
+    )
     function_obj = (
         Functions.objects
-        .prefetch_related(Prefetch("functionsgoals_set", queryset=FunctionsGoals.objects.prefetch_related(actionables_prefetch)))
+        .prefetch_related(Prefetch("functionsgoals_set", queryset=goals_qs))
         .get(function__iexact=function_name)
     )
     functional_goals_list = []
@@ -357,7 +362,7 @@ def _get_entries(request: HttpRequest):
     permissible = username and user.is_superuser
     user_obj = get_object_or_404(User, username=username) if permissible else None
     base_qs = FunctionsEntries.objects.select_related(
-        "Creator__accounts_profile", "co_author__accounts_profile", "product"
+        "Creator__accounts_profile", "co_author__accounts_profile", "product", "goal"
     ).prefetch_related(
         Prefetch(
             "share_chain",
@@ -391,7 +396,7 @@ def _create_entry(request: HttpRequest):
         entry = serializer.save(Creator=request.user)
         entry.refresh_from_db()
         entry = FunctionsEntries.objects.select_related(
-            "Creator__accounts_profile", "co_author__accounts_profile", "product"
+            "Creator__accounts_profile", "co_author__accounts_profile", "product", "goal"
         ).prefetch_related(
             Prefetch(
                 "share_chain",
@@ -424,7 +429,7 @@ def entry_list_create(request: HttpRequest):
 
 def _get_entry_with_share_chain(entry_id):
     return FunctionsEntries.objects.select_related(
-        "Creator__accounts_profile", "co_author__accounts_profile", "product"
+        "Creator__accounts_profile", "co_author__accounts_profile", "product", "goal"
     ).prefetch_related(
         Prefetch(
             "share_chain",
@@ -619,7 +624,7 @@ def co_author_points(request):
 def actionable_entries_points(request):
     """
     Creator actionable entry performance points for an employee.
-    Only applies when employee functions include NPD/HC/IP.
+    Only applies when the employee's Profile.functions contains any of NPD, HC, IP, or NPC.
 
     GET /ActionableEntries/points/?year=2026&month=6
     +4 per completed entry (final_Status == COMPLETED); main capped at 20/month, excess as bonus.
@@ -664,7 +669,7 @@ def co_author_entries_list(request):
     except (TypeError, ValueError):
         month_val = current_month
     entries = FunctionsEntries.objects.select_related(
-        "Creator__accounts_profile", "co_author__accounts_profile", "product"
+        "Creator__accounts_profile", "co_author__accounts_profile", "product", "goal"
     ).prefetch_related(
         Prefetch(
             "share_chain",
@@ -715,7 +720,7 @@ def shared_with_entries_list(request):
     except (TypeError, ValueError):
         month_val = current_month
     entries = FunctionsEntries.objects.select_related(
-        "Creator__accounts_profile", "co_author__accounts_profile", "product"
+        "Creator__accounts_profile", "co_author__accounts_profile", "product", "goal"
     ).filter(
         share_chain__shared_with=request.user, approved_by_coauthor=True, date__month=month_val
     ).prefetch_related(

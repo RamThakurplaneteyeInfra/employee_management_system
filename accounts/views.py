@@ -366,6 +366,15 @@ async def user_logout(request: HttpRequest):
         return JsonResponse({"message": f"{e}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+def _is_blank_optional_value(value):
+    """Treat None, empty, and frontend null sentinels as absent optional fields."""
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return value.strip().lower() in ("", "none", "null")
+    return False
+
+
 # ==================== update_profile ====================
 # Update particular user profile by username (Admin only).
 # URL: {{baseurl}}/accounts/admin/updateProfile/<username>/
@@ -384,17 +393,18 @@ def _update_profile_sync(req, username):
             # Support both JSON (list) and form-data (multiple keys with same name)
             if hasattr(data, "getlist"):
                 raw_list = data.getlist("Functions")
-                function_names = [v for v in raw_list if v]
+                function_names = [v for v in raw_list if v and not _is_blank_optional_value(v)]
             else:
                 raw = data.get("Functions", [])
                 if raw is not None:
-                    function_names = [raw] if not isinstance(raw, list) else [v for v in raw if v]
+                    values = [raw] if not isinstance(raw, list) else raw
+                    function_names = [v for v in values if v and not _is_blank_optional_value(v)]
             continue
         field_value = data.get(i)
+        if i in not_required_fields and _is_blank_optional_value(field_value):
+            continue
         if not field_value and i not in not_required_fields:
             return {"error": JsonResponse({"messege": f"{i} is empty"}, status=status.HTTP_400_BAD_REQUEST)}
-        if not field_value and i in not_required_fields:
-            continue
         if i == 'Email_id':
             setattr(user, 'email', field_value)
             user.save()

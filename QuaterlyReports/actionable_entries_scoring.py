@@ -5,6 +5,7 @@ Applies only when the employee's Profile.functions contains any of:
 - NPD
 - HC
 - IP
+- NPC
 
 Scoring rules (per calendar month):
 - Each actionable entry where the user is Creator and final_Status == COMPLETED: +4 points.
@@ -30,7 +31,7 @@ User = get_user_model()
 POINTS_PER_COMPLETED_ENTRY = Decimal("4")
 MONTHLY_MAX_MAIN_POINTS = Decimal("20")
 
-SPECIAL_FUNCTIONS = frozenset({"NPD", "HC", "IP"})
+SPECIAL_FUNCTIONS = frozenset({"NPD", "HC", "IP", "NPC"})
 
 _FY_QUARTER_MONTHS = {
     1: (4, 5, 6),

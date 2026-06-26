@@ -2,6 +2,11 @@ from ems.RequiredImports import serializers
 from ems.utils import gmt_to_ist_str
 from project.models import Product
 from .models import Functions, FunctionsGoals, ActionableGoals, FunctionsEntries, FunctionsEntriesShare
+from .npc_goals import (
+    create_actionable_goal_from_text,
+    normalize_goal_text,
+    user_has_npc_function,
+)
 from task_management.models import TaskStatus
 
 
@@ -97,16 +102,35 @@ class FunctionsEntriesSerializer(serializers.ModelSerializer):
     share_chain = FunctionsEntriesShareSerializer(many=True, read_only=True)
     share_with = serializers.CharField(write_only=True, required=True, allow_blank=False)
     shared_note = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    goal_text = serializers.SerializerMethodField()
     time = serializers.TimeField(format="%H:%M:%S", read_only=True)
 
     class Meta:
         model = FunctionsEntries
         fields = [
-            "id", "goal", "product", "product_name", "creator_name", "co_author_name", "co_author",
+            "id", "goal", "goal_text", "product", "product_name", "creator_name", "co_author_name", "co_author",
             "share_with", "shared_note", "approved_by_coauthor", "co_author_note", "date", "time",
             "final_Status", "original_entry", "share_chain",
         ]
-        read_only_fields = ["time"]
+        read_only_fields = ["time", "goal_text"]
+        extra_kwargs = {
+            "goal": {"required": False, "allow_null": True},
+        }
+
+    def get_goal_text(self, obj):
+        goal = getattr(obj, "goal", None)
+        if goal is None:
+            return None
+        return getattr(goal, "purpose", None) or None
+
+    def _extract_incoming_goal_text(self) -> str:
+        data = getattr(self, "initial_data", None) or {}
+        if not isinstance(data, dict):
+            return ""
+        raw = data.get("goal_text")
+        if raw is None:
+            raw = data.get("goal_name")
+        return normalize_goal_text(raw)
 
     def get_product_name(self, obj):
         return obj.product.name if obj.product else None
@@ -142,22 +166,50 @@ class FunctionsEntriesSerializer(serializers.ModelSerializer):
 
     def validate(self, attrs):
         if not self.instance:
-            if not attrs.get("goal"):
-                from rest_framework import serializers as s
-                raise s.ValidationError({"goal": "goal (Goal_id) is required when creating an actionable entry."})
+            from rest_framework import serializers as s
+
+            goal_text = self._extract_incoming_goal_text()
+            has_goal = attrs.get("goal") is not None
+            has_goal_text = bool(goal_text)
+            if not has_goal and not has_goal_text:
+                raise s.ValidationError(
+                    {
+                        "goal": [
+                            "goal (Goal_id) or goal_text is required when creating an actionable entry."
+                        ]
+                    }
+                )
+            if has_goal_text and not has_goal:
+                request = self.context.get("request")
+                user = getattr(request, "user", None) if request else None
+                if not user_has_npc_function(user):
+                    raise s.ValidationError(
+                        {
+                            "goal_text": [
+                                "Free-text goals are only allowed for employees with the NPC function. "
+                                "Use goal (catalog Goal_id) instead."
+                            ]
+                        }
+                    )
+                self.context["pending_goal_text"] = goal_text
             if not attrs.get("co_author"):
-                from rest_framework import serializers as s
-                raise s.ValidationError({"co_author": "co_author (username) is required when creating an actionable entry."})
+                raise s.ValidationError(
+                    {"co_author": "co_author (username) is required when creating an actionable entry."}
+                )
             sw = attrs.get("share_with")
             if not sw or (isinstance(sw, str) and not sw.strip()):
-                from rest_framework import serializers as s
-                raise s.ValidationError({"share_with": "share_with (username) is required when creating an actionable entry."})
+                raise s.ValidationError(
+                    {"share_with": "share_with (username) is required when creating an actionable entry."}
+                )
         return attrs
 
     def create(self, validated_data):
         first_share_username = (validated_data.pop("share_with", "") or "").strip() or None
         first_shared_note = (validated_data.pop("shared_note", "") or "").strip() or ""
         validated_data.pop("co_author_note", None)  # Only co_author can set this (on update)
+        pending_goal_text = self.context.pop("pending_goal_text", "")
+        if validated_data.get("goal") is None and pending_goal_text:
+            validated_data["goal"] = create_actionable_goal_from_text(pending_goal_text)
         if not validated_data.get("final_Status"):
             validated_data["final_Status"] = _get_pending_status()
         instance = super().create(validated_data)

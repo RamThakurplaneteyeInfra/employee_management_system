@@ -4,7 +4,9 @@ Combined employee performance score.
 Default (non-MMR/RG): leave + meeting + checklist + certification + actionable co-author + actionable entries (main_score only; no bonus).
 MMR/RG: leave + meeting + certification + actionable co-author + client profiles + customer panel entries (main_score only; no bonus).
 Intern: leave + meeting + tasks (21 completed/month = 70 main) + certification + actionable co-author + actionable entries (no checklist).
-HR: combined_total_points = average of all active employees (excluding HR, MD, Admin); scoring_profile=hr_org_average.
+HR: leave (max 8/mo) + meeting (max 7/mo) + certification (max 5/mo) individually, plus an
+80-point work bucket: co-author (max 10/mo, individual) + org-average work (max 70/mo);
+scoring_profile=hr_org_average.
 """
 from __future__ import annotations
 
@@ -24,6 +26,12 @@ from .leave_scoring import build_leave_points
 NPD_HC_IP_FUNCTIONS = frozenset({"NPD", "HC", "IP"})
 NPC_FUNCTIONS = frozenset({"NPC"})
 HR_ORG_AVERAGE_EXCLUDE_ROLES = frozenset({"HR", "Hr", "MD", "Admin"})
+HR_MONTHLY_LEAVE_CAP = 8.0
+HR_MONTHLY_MEETING_CAP = 7.0
+HR_MONTHLY_CERTIFICATION_CAP = 5.0
+HR_MONTHLY_COAUTHOR_CAP = 10.0
+HR_ORG_WORK_BUCKET_CAP_PER_MONTH = 80.0
+HR_ORG_WORK_AVG_CAP_PER_MONTH = 70.0
 PERFORMANCE_SCORES_VIEW_ROLES = frozenset({"HR", "Hr", "MD"})
 SCORING_GROUP_ALIASES = {
     "mmr_rg": "mmr_rg",
@@ -79,6 +87,65 @@ def _sum_bonus(categories: list[dict]) -> float:
 
 def _bonus_breakdown(categories: dict[str, dict]) -> dict[str, float]:
     return {key: round(_bonus_for_combined(payload), 2) for key, payload in categories.items()}
+
+
+def _org_pool_work_points_from_performance_score(score: dict) -> float:
+    """Org-average pool: combined minus leave, meeting, certification, and co-author main."""
+    leave_pts = float(score.get("leave", {}).get("total_points") or 0)
+    meeting_pts = float(score.get("meeting", {}).get("main_score") or 0)
+    cert_pts = float(score.get("certification", {}).get("main_score") or 0)
+    coauthor_pts = float(score.get("actionable_coauthor", {}).get("main_score") or 0)
+    combined = float(score.get("combined_total_points") or 0)
+    return round(max(0.0, combined - leave_pts - meeting_pts - cert_pts - coauthor_pts), 2)
+
+
+def _work_points_from_performance_score(score: dict) -> float:
+    """Backward-compatible alias for org-pool work scoring."""
+    return _org_pool_work_points_from_performance_score(score)
+
+
+def _org_work_avg_cap_for_period(months_in_period: int) -> float:
+    return round(HR_ORG_WORK_AVG_CAP_PER_MONTH * max(months_in_period, 1), 2)
+
+
+def _org_work_bucket_cap_for_period(months_in_period: int) -> float:
+    return round(HR_ORG_WORK_BUCKET_CAP_PER_MONTH * max(months_in_period, 1), 2)
+
+
+def _hr_monthly_component_caps() -> dict[str, float]:
+    return {
+        "leave": HR_MONTHLY_LEAVE_CAP,
+        "meeting": HR_MONTHLY_MEETING_CAP,
+        "certification": HR_MONTHLY_CERTIFICATION_CAP,
+        "actionable_coauthor": HR_MONTHLY_COAUTHOR_CAP,
+        "org_work_average": HR_ORG_WORK_AVG_CAP_PER_MONTH,
+        "org_work_bucket": HR_ORG_WORK_BUCKET_CAP_PER_MONTH,
+    }
+
+
+def _period_sample_fallback(year: int, month: int | None, quarter: int | None) -> dict:
+    fallback_user = (
+        Profile.objects.filter(Employee_id__is_active=True)
+        .select_related("Employee_id")
+        .first()
+    )
+    if fallback_user is not None:
+        return build_leave_points(
+            fallback_user.Employee_id,
+            year,
+            month=month,
+            quarter=quarter,
+        )
+    return {
+        "period_type": "month" if month is not None else ("quarter" if quarter else "year"),
+        "period": str(year),
+        "period_range": None,
+        "financial_year_start": year if quarter is not None else None,
+        "year": year,
+        "month": month,
+        "quarter": quarter,
+        "months_in_period": 1 if month is not None else (3 if quarter else 12),
+    }
 
 
 def _employee_functions(user) -> list[str]:
@@ -204,7 +271,7 @@ def profiles_queryset_for_org_average(*, branch: str | None = None):
     return qs
 
 
-def build_org_average_performance_score(
+def build_org_average_work_score(
     year: int,
     month: int | None = None,
     quarter: int | None = None,
@@ -212,10 +279,11 @@ def build_org_average_performance_score(
     branch: str | None = None,
 ) -> dict:
     """
-    Average combined_total_points (and bonus) across active employees,
-    excluding HR, MD, and Admin roles.
+    Average work-only main points across active employees (excluding HR, MD, Admin).
+    Work = combined minus leave, meeting, certification, and co-author main.
+    Capped at 70/month (the org-average portion of the 80-point work bucket).
     """
-    totals: list[float] = []
+    work_scores: list[float] = []
     bonuses: list[float] = []
     period_sample: dict | None = None
 
@@ -223,39 +291,21 @@ def build_org_average_performance_score(
         score = _compute_individual_performance_score(
             profile.Employee_id, year, month=month, quarter=quarter
         )
-        totals.append(score["combined_total_points"])
+        work_scores.append(_org_pool_work_points_from_performance_score(score))
         bonuses.append(score["combined_total_bonus"])
         if period_sample is None:
             period_sample = score
 
-    count = len(totals)
+    count = len(work_scores)
     if period_sample is None:
-        fallback_user = (
-            Profile.objects.filter(Employee_id__is_active=True)
-            .select_related("Employee_id")
-            .first()
-        )
-        if fallback_user is not None:
-            period_sample = build_leave_points(
-                fallback_user.Employee_id,
-                year,
-                month=month,
-                quarter=quarter,
-            )
-        else:
-            period_sample = {
-                "period_type": "month" if month is not None else ("quarter" if quarter else "year"),
-                "period": str(year),
-                "period_range": None,
-                "financial_year_start": year if quarter is not None else None,
-                "year": year,
-                "month": month,
-                "quarter": quarter,
-                "months_in_period": 1 if month is not None else (3 if quarter else 12),
-            }
+        period_sample = _period_sample_fallback(year, month, quarter)
 
-    avg_total = round(sum(totals) / count, 2) if count else 0.0
+    months_in_period = int(period_sample.get("months_in_period") or 1)
+    work_avg_cap = _org_work_avg_cap_for_period(months_in_period)
+    work_bucket_cap = _org_work_bucket_cap_for_period(months_in_period)
+    avg_work = round(sum(work_scores) / count, 2) if count else 0.0
     avg_bonus = round(sum(bonuses) / count, 2) if count else 0.0
+    applied_work = round(min(avg_work, work_avg_cap), 2)
     branch_name = (branch or "").strip() or None
 
     return {
@@ -267,13 +317,29 @@ def build_org_average_performance_score(
         "year": period_sample["year"],
         "month": period_sample["month"],
         "quarter": period_sample["quarter"],
-        "months_in_period": period_sample["months_in_period"],
-        "average_combined_total_points": avg_total,
+        "months_in_period": months_in_period,
+        "average_org_work_points": avg_work,
+        "org_work_points_applied": applied_work,
+        "org_work_cap": work_avg_cap,
+        "org_work_bucket_cap": work_bucket_cap,
+        "monthly_component_caps": _hr_monthly_component_caps(),
+        "average_combined_total_points": applied_work,
         "average_combined_total_bonus": avg_bonus,
         "employee_count": count,
         "excluded_roles": sorted(HR_ORG_AVERAGE_EXCLUDE_ROLES),
         "branch": branch_name,
     }
+
+
+def build_org_average_performance_score(
+    year: int,
+    month: int | None = None,
+    quarter: int | None = None,
+    *,
+    branch: str | None = None,
+) -> dict:
+    """Org-average work component used for HR scoring (see build_org_average_work_score)."""
+    return build_org_average_work_score(year, month, quarter, branch=branch)
 
 
 def build_hr_performance_score(
@@ -284,11 +350,38 @@ def build_hr_performance_score(
     *,
     branch: str | None = None,
 ) -> dict:
-    """HR employee score = org average of combined_total_points (main scores only in combined)."""
-    org_avg = build_org_average_performance_score(year, month, quarter, branch=branch)
+    """
+    HR score = own leave + meeting + certification + co-author (main) + capped org-average work.
+    Monthly framework: 8 + 7 + 5 + 10 + 70 = 100 main at full performance.
+    """
+    leave = build_leave_points(hr_user, year, month=month, quarter=quarter)
+    meeting = build_meeting_points(hr_user, year, month=month, quarter=quarter)
+    certification = build_certification_points(hr_user, year, month=month, quarter=quarter)
+    actionable_coauthor = build_actionable_coauthor_points(
+        hr_user, year, month=month, quarter=quarter
+    )
+    org_avg = build_org_average_work_score(year, month, quarter, branch=branch)
+
     profile = Profile.objects.filter(Employee_id=hr_user).select_related("Role").first()
     display_name = (getattr(profile, "Name", None) or hr_user.username) if profile else hr_user.username
     role_name = getattr(getattr(profile, "Role", None), "role_name", None)
+
+    hr_core_individual = round(
+        _points_for_combined(leave)
+        + _points_for_combined(meeting)
+        + _points_for_combined(certification),
+        2,
+    )
+    coauthor_main = round(_points_for_combined(actionable_coauthor), 2)
+    hr_individual = round(hr_core_individual + coauthor_main, 2)
+    combined_total = round(hr_individual + org_avg["org_work_points_applied"], 2)
+
+    bonus_categories = {
+        "meeting": meeting,
+        "certification": certification,
+        "actionable_coauthor": actionable_coauthor,
+    }
+    combined_total_bonus = _sum_bonus(list(bonus_categories.values()))
 
     empty_category = {"main_score": 0.0, "monthly_bonus": 0.0, "total_points": 0.0}
 
@@ -298,6 +391,14 @@ def build_hr_performance_score(
         "role": role_name,
         "employee_functions": _employee_functions(hr_user),
         "scoring_profile": "hr_org_average",
+        "hr_core_individual_points": hr_core_individual,
+        "hr_coauthor_points": coauthor_main,
+        "hr_individual_points": hr_individual,
+        "org_average_work_points": org_avg["average_org_work_points"],
+        "org_work_points_applied": org_avg["org_work_points_applied"],
+        "org_work_cap": org_avg["org_work_cap"],
+        "org_work_bucket_cap": org_avg["org_work_bucket_cap"],
+        "monthly_component_caps": org_avg["monthly_component_caps"],
         "derived_from_employee_count": org_avg["employee_count"],
         "excluded_roles": org_avg["excluded_roles"],
         "branch": org_avg["branch"],
@@ -309,15 +410,15 @@ def build_hr_performance_score(
         "month": org_avg["month"],
         "quarter": org_avg["quarter"],
         "months_in_period": org_avg["months_in_period"],
-        "combined_total_points": org_avg["average_combined_total_points"],
-        "combined_total_bonus": org_avg["average_combined_total_bonus"],
-        "bonus_by_category": {},
-        "leave": empty_category,
-        "meeting": empty_category,
+        "combined_total_points": combined_total,
+        "combined_total_bonus": combined_total_bonus,
+        "bonus_by_category": _bonus_breakdown(bonus_categories),
+        "leave": _slim_category_payload(leave),
+        "meeting": _slim_category_payload(meeting),
+        "certification": _slim_category_payload(certification),
         "checklist": empty_category,
         "tasks": empty_category,
-        "certification": empty_category,
-        "actionable_coauthor": empty_category,
+        "actionable_coauthor": _slim_category_payload(actionable_coauthor),
         "actionable_entries": empty_category,
         "customer_panel_entries": empty_category,
         "client_profiles": empty_category,
