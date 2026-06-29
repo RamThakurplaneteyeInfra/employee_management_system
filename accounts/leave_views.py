@@ -681,6 +681,74 @@ def _regular_leave_md_blocked(instance):
     return False, None
 
 
+def _approval_alt_gate_ok_q():
+    """Q: no cover person, or cover person has approved."""
+    return Q(alternative_id__isnull=True) | Q(alternative_approval__name="Approved")
+
+
+def _approval_not_alt_rejected_q():
+    """Q: cover person has not rejected (or no cover person)."""
+    return Q(alternative_approval__isnull=True) | ~Q(alternative_approval__name="Rejected")
+
+
+def _approval_applicant_skips_team_lead_q():
+    return Q(applicant__accounts_profile__Role__role_name__in=("TeamLead", "Teamlead", "Admin"))
+
+
+def _approval_team_lead_prior_ok_q():
+    """Q: team-lead step not required, or team lead has already approved."""
+    return (
+        _approval_applicant_skips_team_lead_q()
+        | Q(team_lead_id__isnull=True)
+        | Q(team_lead_approval__name="Approved")
+    )
+
+
+def _approval_tab_filter_q(user, role):
+    """
+    Sequential visibility for GET .../approval/.
+    Each role only sees applications that are waiting for their action (Pending on their rail).
+    """
+    q = Q()
+    pending = "Pending"
+    approved = "Approved"
+
+    q |= Q(alternative=user) & (
+        Q(alternative_approval__isnull=True) | Q(alternative_approval__name=pending)
+    )
+
+    if role in ("TeamLead", "Teamlead"):
+        q |= (
+            Q(team_lead=user)
+            & Q(team_lead_approval__name=pending)
+            & _approval_alt_gate_ok_q()
+            & _approval_not_alt_rejected_q()
+        )
+
+    if role == "HR":
+        q |= (
+            Q(HR_approval__name=pending)
+            & _approval_alt_gate_ok_q()
+            & _approval_not_alt_rejected_q()
+            & _approval_team_lead_prior_ok_q()
+        )
+
+    if role == "Admin":
+        q |= Q(admin_approval__name=pending) & Q(HR_approval__name=approved)
+
+    if role == "MD":
+        q |= (
+            Q(MD_approval__name=pending)
+            & _approval_not_alt_rejected_q()
+            & (
+                Q(applicant__accounts_profile__Role__role_name__in=("HR", "Hr"))
+                | Q(HR_approval__name=approved)
+            )
+        )
+
+    return q
+
+
 def _any_regular_approval_granted(instance):
     return any(
         _leave_status_name(getattr(instance, field_name)) == "Approved"
@@ -1759,41 +1827,18 @@ class LeaveApplicationViewSet(ModelViewSet):
     @action(detail=False, methods=["get"], url_path="approval")
     def approval(self, request):
         """
-        Leave applications for the current user's approval tab. Parallel visibility:
-        - Team lead: ALL applications where team_lead = user (any status).
-        - HR: ALL applications where HR is an approver (HR_approval is set), any status.
-        - Admin: ALL applications where Admin is an approver (admin_approval is set), any status.
-        - MD: ALL applications where MD is an approver (MD_approval is set), any status.
-          MD's approval is the final confirmation regardless of other approvers' state.
-        - Cover person (alternative): applications where this user is the designated alternative
-          and they have not yet accepted/rejected (same rules as alternative-requests/).
-        Single endpoint: GET /accounts/leave-applications/approval/
+        Leave applications for the current user's approval tab. Sequential visibility:
+        - Cover person: pending alternative response only.
+        - Team lead: team_lead_approval Pending, after alternative approves (if any).
+        - HR: HR_approval Pending, after alternative (if any) and team lead (if applicable).
+        - Admin: admin_approval Pending after HR approved (legacy short-leave rail).
+        - MD: MD_approval Pending after HR approved (HR applicants: MD Pending only).
+        GET /accounts/leave-applications/approval/
         Optional pagination: ?limit=&offset= (plain array when omitted).
         """
         role = _get_user_role_sync(request.user)
         base = self.get_queryset()
-        q = Q()
-
-        # Team lead: all applications assigned to this user as team_lead (any status)
-        if role in ("TeamLead", "Teamlead"):
-            q |= Q(team_lead=request.user)
-        # HR: parallel visibility — every application where HR is an approver,
-        # regardless of team-lead state (Pending / Approved / Rejected all included).
-        if role == "HR":
-            q |= Q(HR_approval__isnull=False)
-        # Admin: parallel visibility — every application where Admin is an approver.
-        if role == "Admin":
-            q |= Q(admin_approval__isnull=False)
-        # MD: parallel visibility — every application where MD is an approver.
-        # MD's approval is the final confirmation regardless of others' state.
-        if role == "MD":
-            q |= Q(MD_approval__isnull=False)
-
-        # Cover requests: any authenticated user may be designated alternative (often not TL/HR/MD).
-        # Scoped to pending response only — mirrors GET .../alternative-requests/.
-        q |= Q(alternative=request.user) & (
-            Q(alternative_approval__isnull=True) | Q(alternative_approval__name="Pending")
-        )
+        q = _approval_tab_filter_q(request.user, role)
 
         qs = (
             base.filter(q)

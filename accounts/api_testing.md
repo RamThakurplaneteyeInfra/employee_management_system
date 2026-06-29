@@ -420,7 +420,7 @@
 **method:** GET  
 **body:** None  
 **sample_response:** Array of leave applications for current user's approval queue.  
-**notes:** Team lead: entries where team_lead = user. HR: all rows where HR is an approver. Admin: admin approver rows. MD: MD approver rows. Cover person: pending alternative handover.
+**notes:** Sequential visibility — each role only sees applications **waiting for their action** (their rail is `Pending` and prior steps are satisfied). Cover person: pending alternative only. Team lead: after alternative approves (if any). HR: after TL approves (if applicable). MD: after HR approves (HR applicants: MD pending only). Optional pagination below.
 
 **pagination (optional, backward-compatible):** `?limit=20&offset=0` — if neither `limit` nor `offset` is sent, response is a plain array (legacy). If either is sent:
 

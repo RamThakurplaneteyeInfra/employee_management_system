@@ -1,3 +1,7 @@
+from datetime import datetime
+
+from django.utils import timezone
+
 from ems.RequiredImports import (
     sync_to_async,
     HttpRequest,
@@ -221,122 +225,195 @@ def _get_completed_at_map(task_list):
     return {r["task_id"]: r["last_edit"] for r in rows}
 
 
+def _ist_month_datetime_range(year: int, month: int):
+    """Inclusive start and exclusive end for a calendar month in Asia/Kolkata."""
+    tz = timezone.get_current_timezone()
+    start = datetime(year, month, 1, 0, 0, 0)
+    if month == 12:
+        end = datetime(year + 1, 1, 1, 0, 0, 0)
+    else:
+        end = datetime(year, month + 1, 1, 0, 0, 0)
+    if timezone.is_naive(start):
+        start = timezone.make_aware(start, tz)
+    if timezone.is_naive(end):
+        end = timezone.make_aware(end, tz)
+    return start, end
+
+
+def _parse_task_month_year(request: HttpRequest):
+    """
+    Optional ?month= (1-12) and ?year= (defaults to current year).
+    When month is omitted, no created_at filter is applied (backward-compatible).
+    """
+    raw_month = request.GET.get("month")
+    if raw_month is None:
+        return None
+    try:
+        month_val = int(raw_month)
+        if not (1 <= month_val <= 12):
+            return None
+    except (TypeError, ValueError):
+        return None
+    raw_year = request.GET.get("year")
+    try:
+        year_val = int(raw_year) if raw_year is not None else date.today().year
+    except (TypeError, ValueError):
+        year_val = date.today().year
+    return year_val, month_val
+
+
+def _parse_task_pagination_params(request: HttpRequest):
+    """
+    Optional limit/offset pagination (backward-compatible).
+    Enabled when either query param is present.
+    """
+    raw_limit = request.GET.get("limit")
+    raw_offset = request.GET.get("offset")
+    paginate_enabled = raw_limit is not None or raw_offset is not None
+    if not paginate_enabled:
+        return 0, 0, False
+
+    default_limit = 30
+    max_limit = 100
+    try:
+        limit = int(raw_limit) if raw_limit is not None else default_limit
+    except (TypeError, ValueError):
+        limit = default_limit
+    try:
+        offset = int(raw_offset) if raw_offset is not None else 0
+    except (TypeError, ValueError):
+        offset = 0
+    if limit < 1:
+        limit = default_limit
+    if limit > max_limit:
+        limit = max_limit
+    if offset < 0:
+        offset = 0
+    return limit, offset, True
+
+
+def _tasks_paginated_response(items, total: int, limit: int, offset: int):
+    next_offset = offset + limit if (offset + limit) < total else None
+    prev_offset = offset - limit if offset - limit >= 0 else None
+    return {
+        "items": items,
+        "pagination": {
+            "limit": limit,
+            "offset": offset,
+            "total": total,
+            "next_offset": next_offset,
+            "prev_offset": prev_offset,
+            "has_next": next_offset is not None,
+            "has_prev": offset > 0,
+        },
+    }
+
+
+def _apply_created_at_month_filter(qs, month_year):
+    if month_year is None:
+        return qs
+    year_val, month_val = month_year
+    start, end = _ist_month_datetime_range(year_val, month_val)
+    return qs.filter(created_at__gte=start, created_at__lt=end)
+
+
+def _annotate_task_list_queryset(qs):
+    return (
+        qs.select_related("status", "type", "created_by")
+        .annotate(
+            Task_id=F("task_id"),
+            Title=F("title"),
+            Description=F("description"),
+            Status=F("status__status_name"),
+            Created_by=F("created_by__accounts_profile__Name"),
+            Report_to=F("created_by__accounts_profile__Name"),
+            Due_date=F("due_date"),
+            Created_at=F("created_at"),
+            Task_type=F("type__type_name"),
+        )
+        .order_by("-created_at", "due_date")
+        .values(
+            "Task_id",
+            "Title",
+            "Description",
+            "Status",
+            "Created_by",
+            "Report_to",
+            "Due_date",
+            "Created_at",
+            "Task_type",
+        )
+    )
+
+
+def _format_task_list_response(task_list, user, *, limit, offset, paginate_enabled, total=None):
+    task_ids = [t["Task_id"] for t in task_list]
+    assignee_map = _get_assignee_names_and_roles_by_task_id(task_ids)
+    completed_at_map = _get_completed_at_map(task_list)
+    unseen_count_map = _get_unseen_count_map(task_ids, user)
+    items = [
+        _task_item_to_response(
+            item,
+            assigned_to=assignee_map.get(item["Task_id"], []),
+            completed_at_map=completed_at_map,
+            unseen_count=unseen_count_map.get(item["Task_id"], 0),
+        )
+        for item in task_list
+    ]
+    if paginate_enabled:
+        return _tasks_paginated_response(items, total if total is not None else len(items), limit, offset)
+    return items
+
+
 # ==================== get_tasks_by_type ====================
 # endpoint for "Created_Tasks"-{{baseurl}}/tasks/viewTasks/?type=
 # endpoint for "Assigned_Reported"-{{baseurl}}/tasks/viewAssignedTasks/?type=
+# Optional: ?month=1-12&year=YYYY (IST created_at), ?limit=&offset=
 def _get_tasks_by_type_sync(request: HttpRequest, type: str = "all", self_created: bool = True, Date=None):
     if type is None:
         type = "all"
-    if type.lower() == "all" and self_created:
-        tasks = (
-            Task.objects.filter(created_by=request.user)
-            .select_related("status", "type", "created_by")
-            .annotate(
-                Task_id=F("task_id"),
-                Title=F("title"),
-                Description=F("description"),
-                Status=F("status__status_name"),
-                Created_by=F("created_by__accounts_profile__Name"),
-                Report_to=F("created_by__accounts_profile__Name"),
-                Due_date=F("due_date"),
-                Created_at=F("created_at"),
-                Task_type=F("type__type_name"),
-            )
-            .order_by("-created_at", "due_date")
-            .values("Task_id", "Title", "Description", "Status", "Created_by", "Report_to", "Due_date", "Created_at", "Task_type")
-        )
-        task_list = list(tasks)
-        task_ids = [t["Task_id"] for t in task_list]
-        assignee_map = _get_assignee_names_and_roles_by_task_id(task_ids)
-        completed_at_map = _get_completed_at_map(task_list)
-        unseen_count_map = _get_unseen_count_map(task_ids, request.user)
-        return [_task_item_to_response(item, assigned_to=assignee_map.get(item["Task_id"], []), completed_at_map=completed_at_map, unseen_count=unseen_count_map.get(item["Task_id"], 0)) for item in task_list]
 
-    elif type and self_created:
+    month_year = _parse_task_month_year(request)
+    limit, offset, paginate_enabled = _parse_task_pagination_params(request)
+
+    if type.lower() != "all":
         type_obj = _get_taskTypes_object_sync(type_name=type)
         if not type_obj:
             return [{"message": "Invalid task type"}]
-        tasks = (
-            Task.objects.filter(created_by=request.user, type=type_obj)
-            .select_related("status", "type", "created_by")
-            .annotate(
-                Task_id=F("task_id"),
-                Title=F("title"),
-                Description=F("description"),
-                Status=F("status__status_name"),
-                Created_by=F("created_by__accounts_profile__Name"),
-                Report_to=F("created_by__accounts_profile__Name"),
-                Due_date=F("due_date"),
-                Created_at=F("created_at"),
-                Task_type=F("type__type_name"),
-            )
-            .order_by("-created_at", "due_date")
-            .values("Task_id", "Title", "Description", "Status", "Created_by", "Report_to", "Due_date", "Created_at", "Task_type")
-        )
-        task_list = list(tasks)
-        task_ids = [t["Task_id"] for t in task_list]
-        assignee_map = _get_assignee_names_and_roles_by_task_id(task_ids)
-        completed_at_map = _get_completed_at_map(task_list)
-        unseen_count_map = _get_unseen_count_map(task_ids, request.user)
-        return [_task_item_to_response(item, assigned_to=assignee_map.get(item["Task_id"], []), completed_at_map=completed_at_map, unseen_count=unseen_count_map.get(item["Task_id"], 0)) for item in task_list]
-
-    elif type.lower() == "all" and not self_created:
-        tasks = (
-            Task.objects.filter(assignees=request.user)
-            .distinct()
-            .select_related("status", "type", "created_by")
-            .annotate(
-                Task_id=F("task_id"),
-                Title=F("title"),
-                Description=F("description"),
-                Status=F("status__status_name"),
-                Created_by=F("created_by__accounts_profile__Name"),
-                Report_to=F("created_by__accounts_profile__Name"),
-                Due_date=F("due_date"),
-                Created_at=F("created_at"),
-                Task_type=F("type__type_name"),
-            )
-            .order_by("-created_at", "due_date")
-            .values("Task_id", "Title", "Description", "Status", "Created_by", "Report_to", "Due_date", "Created_at", "Task_type")
-        )
-        task_list = list(tasks)
-        task_ids = [t["Task_id"] for t in task_list]
-        assignee_map = _get_assignee_names_and_roles_by_task_id(task_ids)
-        completed_at_map = _get_completed_at_map(task_list)
-        unseen_count_map = _get_unseen_count_map(task_ids, request.user)
-        return [_task_item_to_response(item, assigned_to=assignee_map.get(item["Task_id"], []), completed_at_map=completed_at_map, unseen_count=unseen_count_map.get(item["Task_id"], 0)) for item in task_list]
-
-    elif type and not self_created:
-        type_obj = _get_taskTypes_object_sync(type_name=type)
-        if not type_obj:
-            return [{"message": "Invalid task type"}]
-        tasks = (
-            Task.objects.filter(assignees=request.user, type=type_obj)
-            .distinct()
-            .select_related("status", "type", "created_by")
-            .annotate(
-                Task_id=F("task_id"),
-                Title=F("title"),
-                Description=F("description"),
-                Status=F("status__status_name"),
-                Created_by=F("created_by__accounts_profile__Name"),
-                Report_to=F("created_by__accounts_profile__Name"),
-                Due_date=F("due_date"),
-                Created_at=F("created_at"),
-                Task_type=F("type__type_name"),
-            )
-            .order_by("-created_at", "due_date")
-            .values("Task_id", "Title", "Description", "Status", "Created_by", "Report_to", "Due_date", "Created_at", "Task_type")
-        )
-        task_list = list(tasks)
-        task_ids = [t["Task_id"] for t in task_list]
-        assignee_map = _get_assignee_names_and_roles_by_task_id(task_ids)
-        completed_at_map = _get_completed_at_map(task_list)
-        unseen_count_map = _get_unseen_count_map(task_ids, request.user)
-        return [_task_item_to_response(item, assigned_to=assignee_map.get(item["Task_id"], []), completed_at_map=completed_at_map, unseen_count=unseen_count_map.get(item["Task_id"], 0)) for item in task_list]
-
     else:
-        return [{"message": "Incorrect type for tasks"}]
+        type_obj = None
+
+    if self_created:
+        qs = Task.objects.filter(created_by=request.user)
+    else:
+        qs = Task.objects.filter(assignees=request.user).distinct()
+
+    if type_obj is not None:
+        qs = qs.filter(type=type_obj)
+
+    qs = _apply_created_at_month_filter(qs, month_year)
+    qs = _annotate_task_list_queryset(qs)
+
+    if paginate_enabled:
+        total = qs.count()
+        task_list = list(qs[offset : offset + limit])
+        return _format_task_list_response(
+            task_list,
+            request.user,
+            limit=limit,
+            offset=offset,
+            paginate_enabled=True,
+            total=total,
+        )
+
+    task_list = list(qs)
+    return _format_task_list_response(
+        task_list,
+        request.user,
+        limit=limit,
+        offset=offset,
+        paginate_enabled=False,
+    )
 
 
 async def get_tasks_by_type(request: HttpRequest, type: str = "all", self_created: bool = True, Date=None):

@@ -221,6 +221,38 @@ class LeaveNotificationFlowTests(TestCase):
         )
         self.assertEqual(qs.count(), 1)
 
+    def _approval_ids_for(self, user):
+        self.client.force_authenticate(user=user)
+        response = self.client.get("/accounts/leave-applications/approval/")
+        self.assertEqual(response.status_code, 200, response.data)
+        data = response.data
+        if isinstance(data, dict) and "items" in data:
+            data = data["items"]
+        return {row["id"] for row in data}
+
+    def test_approval_tab_shows_only_when_users_turn(self):
+        app = self._create_regular_leave_with_alternative()
+        app_id = app.id
+
+        self.assertIn(app_id, self._approval_ids_for(self.alt))
+        self.assertNotIn(app_id, self._approval_ids_for(self.tl))
+        self.assertNotIn(app_id, self._approval_ids_for(self.hr))
+        self.assertNotIn(app_id, self._approval_ids_for(self.md))
+
+        self._approve_alternative(app)
+        self.assertIn(app_id, self._approval_ids_for(self.tl))
+        self.assertNotIn(app_id, self._approval_ids_for(self.hr))
+        self.assertNotIn(app_id, self._approval_ids_for(self.md))
+
+        self._approve_team_lead(app)
+        self.assertNotIn(app_id, self._approval_ids_for(self.tl))
+        self.assertIn(app_id, self._approval_ids_for(self.hr))
+        self.assertNotIn(app_id, self._approval_ids_for(self.md))
+
+        self._approve_hr(app)
+        self.assertNotIn(app_id, self._approval_ids_for(self.hr))
+        self.assertIn(app_id, self._approval_ids_for(self.md))
+
     def test_short_leave_does_not_trigger_regular_chain_submission_notification(self):
         self.client.force_authenticate(user=self.emp)
         payload = {

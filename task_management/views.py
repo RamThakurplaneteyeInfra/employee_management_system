@@ -1,7 +1,7 @@
 """
 Task management API views. Base path: {{baseurl}}/tasks/
 - home (GET), createTask (POST), updateTask (PATCH), changeStatus (PATCH), deleteTask (DELETE).
-- viewTasks, viewAssignedTasks (GET; optional ?type=), Taskcount/<username> (GET).
+- viewTasks, viewAssignedTasks (GET; optional ?type=, ?month=, ?year=, ?limit=, ?offset=), Taskcount/<username> (GET).
 - Filters: getNamesfromRoleandDesignation, getTaskTypes, getTaskStatuses (GET).
 - Messaging: sendMessage (POST), getMessage/<task_id> (GET), markTaskMessagesSeen/<task_id> (POST).
 """
@@ -113,7 +113,7 @@ async def update_task(request, task_id: int):
 
 # ==================== show_created_tasks ====================
 # Show self-created tasks.
-# URL: {{baseurl}}/tasks/viewTasks/?type=
+# URL: {{baseurl}}/tasks/viewTasks/?type=&month=&year=&limit=&offset=
 # Method: GET
 @login_required
 async def show_created_tasks(request: HttpRequest):
@@ -130,7 +130,7 @@ async def show_created_tasks(request: HttpRequest):
 
 # ==================== show_assigned_tasks ====================
 # Show assigned tasks by other users.
-# URL: {{baseurl}}/tasks/viewAssignedTasks/?type=
+# URL: {{baseurl}}/tasks/viewAssignedTasks/?type=&month=&year=&limit=&offset=
 # Method: GET
 @login_required
 async def show_assigned_tasks(request: HttpRequest):

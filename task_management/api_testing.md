@@ -140,7 +140,7 @@
 **url:** `{{baseurl}}/tasks/viewTasks/`  
 **method:** GET  
 **body:** None  
-**query params:** Optional `type` — one of `all`, `SOS`, `1 Day`, `10 Day`, `Monthly`, `Quaterly`.  
+**query params:** Optional `type` — one of `all`, `SOS`, `1 Day`, `10 Day`, `Monthly`, `Quaterly`. Optional `month` (1–12) and `year` (defaults to current year) filter by **created_at** in IST. Optional `limit` / `offset` for pagination (when either is present, response is `{ "items": [...], "pagination": {...} }` instead of a bare array).  
 **sample_response:**
 ```json
 [
@@ -163,7 +163,22 @@
   }
 ]
 ```
-**notes:** Returns tasks **created by** the current user. Dates/times in IST. `unseen_count` is task-message unseen count for current user (0 for creator). `completed_At` set when status is COMPLETED (from status change log).
+**paginated sample_response** (`?month=6&year=2026&limit=20&offset=0`):
+```json
+{
+  "items": [ { "Task_id": 1, "Title": "Review report" } ],
+  "pagination": {
+    "limit": 20,
+    "offset": 0,
+    "total": 45,
+    "next_offset": 20,
+    "prev_offset": null,
+    "has_next": true,
+    "has_prev": false
+  }
+}
+```
+**notes:** Returns tasks **created by** the current user. Without `month`, all tasks are returned (backward-compatible). Dates/times in IST. `unseen_count` is task-message unseen count for current user (0 for creator). `completed_At` set when status is COMPLETED (from status change log).
 
 ---
 
@@ -172,8 +187,8 @@
 **url:** `{{baseurl}}/tasks/viewAssignedTasks/`  
 **method:** GET  
 **body:** None  
-**query params:** Optional `type` — same as viewTasks.  
-**sample_response:** Same shape as viewTasks list.  
+**query params:** Optional `type` — same as viewTasks. Optional `month`, `year`, `limit`, `offset` — same as viewTasks.  
+**sample_response:** Same shape as viewTasks list (or paginated object when `limit`/`offset` used).  
 **notes:** Returns tasks **assigned to** the current user (not created by them).
 
 ---
