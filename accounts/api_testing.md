@@ -419,8 +419,8 @@
 **url:** `{{baseurl}}/accounts/leave-applications/approval/`  
 **method:** GET  
 **body:** None  
-**sample_response:** Array of leave applications for current user's approval queue.  
-**notes:** Sequential visibility — each role only sees applications **waiting for their action** (their rail is `Pending` and prior steps are satisfied). Cover person: pending alternative only. Team lead: after alternative approves (if any). HR: after TL approves (if applicable). MD: after HR approves (HR applicants: MD pending only). Optional pagination below.
+**sample_response:** Array of leave applications for current user's approval tab (default: sticky involvement history).
+**notes:** Default `?status=all` — sequential first-show, rows **stay** after approve/reject with status fields (`team_lead_approval_status`, `hr_approval_status`, `md_approval_status`, etc.). Cover person: on submit. Team lead: after alternative responds (if any). HR: once `HR_approval` rail exists. MD: once `MD_approval` rail exists. Use `?status=pending` for action queue only (row drops after you act). Optional pagination below.
 
 **pagination (optional, backward-compatible):** `?limit=20&offset=0` — if neither `limit` nor `offset` is sent, response is a plain array (legacy). If either is sent:
 

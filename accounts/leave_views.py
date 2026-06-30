@@ -10,7 +10,7 @@ from decimal import Decimal
 from django.utils import timezone
 from django.conf import settings
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import Case, IntegerField, Q, Value, When
 from rest_framework import status
 from rest_framework.viewsets import ModelViewSet
 from rest_framework.decorators import action
@@ -704,49 +704,114 @@ def _approval_team_lead_prior_ok_q():
     )
 
 
-def _approval_tab_filter_q(user, role):
+def _parse_approval_status_param(request):
+    """Default sticky history (all); ?status=pending for action queue only."""
+    raw = (request.query_params.get("status") or "all").strip().lower()
+    if raw in ("pending", "action", "queue"):
+        return "pending"
+    return "all"
+
+
+def _approval_tl_sequential_unlock_q():
+    """TL row visible once alternative step is no longer Pending."""
+    return Q(alternative_id__isnull=True) | ~Q(alternative_approval__name="Pending")
+
+
+def _approval_tab_filter_q(user, role, *, status="all"):
     """
     Sequential visibility for GET .../approval/.
-    Each role only sees applications that are waiting for their action (Pending on their rail).
+    status=all (default): sticky involvement history — rows stay after approve/reject.
+    status=pending: only applications waiting for the user's action on their rail.
     """
     q = Q()
     pending = "Pending"
     approved = "Approved"
 
-    q |= Q(alternative=user) & (
-        Q(alternative_approval__isnull=True) | Q(alternative_approval__name=pending)
-    )
+    if status == "pending":
+        q |= Q(alternative=user) & (
+            Q(alternative_approval__isnull=True) | Q(alternative_approval__name=pending)
+        )
+
+        if role in ("TeamLead", "Teamlead"):
+            q |= (
+                Q(team_lead=user)
+                & Q(team_lead_approval__name=pending)
+                & _approval_alt_gate_ok_q()
+                & _approval_not_alt_rejected_q()
+            )
+
+        if role == "HR":
+            q |= (
+                Q(HR_approval__name=pending)
+                & _approval_alt_gate_ok_q()
+                & _approval_not_alt_rejected_q()
+                & _approval_team_lead_prior_ok_q()
+            )
+
+        if role == "Admin":
+            q |= Q(admin_approval__name=pending) & Q(HR_approval__name=approved)
+
+        if role == "MD":
+            q |= (
+                Q(MD_approval__name=pending)
+                & _approval_not_alt_rejected_q()
+                & (
+                    Q(applicant__accounts_profile__Role__role_name__in=("HR", "Hr"))
+                    | Q(HR_approval__name=approved)
+                )
+            )
+
+        return q
+
+    q |= Q(alternative=user)
 
     if role in ("TeamLead", "Teamlead"):
         q |= (
             Q(team_lead=user)
-            & Q(team_lead_approval__name=pending)
-            & _approval_alt_gate_ok_q()
+            & _approval_tl_sequential_unlock_q()
             & _approval_not_alt_rejected_q()
         )
 
     if role == "HR":
-        q |= (
-            Q(HR_approval__name=pending)
-            & _approval_alt_gate_ok_q()
-            & _approval_not_alt_rejected_q()
-            & _approval_team_lead_prior_ok_q()
-        )
+        q |= Q(HR_approval__isnull=False)
 
     if role == "Admin":
-        q |= Q(admin_approval__name=pending) & Q(HR_approval__name=approved)
+        q |= Q(admin_approval__isnull=False)
 
     if role == "MD":
-        q |= (
-            Q(MD_approval__name=pending)
-            & _approval_not_alt_rejected_q()
-            & (
-                Q(applicant__accounts_profile__Role__role_name__in=("HR", "Hr"))
-                | Q(HR_approval__name=approved)
-            )
-        )
+        q |= Q(MD_approval__isnull=False)
 
     return q
+
+
+def _order_approval_queryset(qs, user, role):
+    """Pending actionable rows first, then newest application_date."""
+    pending = "Pending"
+    whens = [
+        When(
+            alternative=user,
+            alternative_approval__name=pending,
+            then=Value(0),
+        )
+    ]
+    if role in ("TeamLead", "Teamlead"):
+        whens.append(
+            When(team_lead=user, team_lead_approval__name=pending, then=Value(0))
+        )
+    elif role == "HR":
+        whens.append(When(HR_approval__name=pending, then=Value(0)))
+    elif role == "Admin":
+        whens.append(When(admin_approval__name=pending, then=Value(0)))
+    elif role == "MD":
+        whens.append(When(MD_approval__name=pending, then=Value(0)))
+
+    return qs.annotate(
+        _approval_sort_priority=Case(
+            *whens,
+            default=Value(1),
+            output_field=IntegerField(),
+        )
+    ).order_by("_approval_sort_priority", "-application_date", "-id")
 
 
 def _any_regular_approval_granted(instance):
@@ -1827,26 +1892,26 @@ class LeaveApplicationViewSet(ModelViewSet):
     @action(detail=False, methods=["get"], url_path="approval")
     def approval(self, request):
         """
-        Leave applications for the current user's approval tab. Sequential visibility:
-        - Cover person: pending alternative response only.
-        - Team lead: team_lead_approval Pending, after alternative approves (if any).
-        - HR: HR_approval Pending, after alternative (if any) and team lead (if applicable).
-        - Admin: admin_approval Pending after HR approved (legacy short-leave rail).
-        - MD: MD_approval Pending after HR approved (HR applicants: MD Pending only).
+        Leave applications for the current user's approval tab.
+        Default (?status=all): sticky involvement history — sequential first-show, rows stay
+        after approve/reject with their status. ?status=pending: action queue only.
         GET /accounts/leave-applications/approval/
         Optional pagination: ?limit=&offset= (plain array when omitted).
         """
         role = _get_user_role_sync(request.user)
+        approval_status = _parse_approval_status_param(request)
         base = self.get_queryset()
-        q = _approval_tab_filter_q(request.user, role)
+        q = _approval_tab_filter_q(request.user, role, status=approval_status)
 
-        qs = (
+        qs = _order_approval_queryset(
             base.filter(q)
             .distinct()
             .select_related(
                 "applicant__leave_summary",
                 "applicant__accounts_profile__Role",
-            )
+            ),
+            request.user,
+            role,
         )
         limit, offset, paginate_enabled = _parse_pagination_params(request)
         if not paginate_enabled:
