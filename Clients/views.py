@@ -425,7 +425,8 @@ def _ack_profile_reminder_sync(user, profile_id):
     if profile.created_by_id != user.pk:
         raise PermissionError("Only the creator can acknowledge reminders for this lead.")
     profile.last_reminded_at = timezone.now()
-    profile.save(update_fields=["last_reminded_at"])
+    profile.follow_up_reminder_last_cycle = (profile.follow_up_reminder_last_cycle or 0) + 1
+    profile.save(update_fields=["last_reminded_at", "follow_up_reminder_last_cycle"])
     return profile
 
 

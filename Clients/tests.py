@@ -95,3 +95,39 @@ class ClientProfileScoringTests(TestCase):
         self.assertEqual(result["components"]["profile_count"]["main_score"], 10.0)
         self.assertEqual(result["components"]["profile_count"]["monthly_bonus"], 2.0)
         self.assertEqual(result["total_points"], 12.0)
+
+
+class ClientProfileReminderCycleTests(TestCase):
+    def setUp(self):
+        self.role_employee = Roles.objects.create(role_name="Employee")
+        self.emp = User.objects.create_user(username="lead_creator", password="pass")
+        Profile.objects.create(
+            Employee_id=self.emp,
+            Role=self.role_employee,
+            Name="Lead Creator",
+            Email_id="lead@test.com",
+        )
+        self.leads, _ = CurrentClientStage.objects.get_or_create(name="Leads")
+
+    def test_create_defaults_reminder_cycle_to_zero(self):
+        profile = ClientProfile.objects.create(
+            company_name="Test Co",
+            client_name="Test Client",
+            status=self.leads,
+            created_by=self.emp,
+        )
+        self.assertEqual(profile.follow_up_reminder_last_cycle, 0)
+
+    def test_ack_increments_reminder_cycle(self):
+        from Clients.views import _ack_profile_reminder_sync
+
+        profile = ClientProfile.objects.create(
+            company_name="Test Co",
+            client_name="Test Client",
+            status=self.leads,
+            created_by=self.emp,
+        )
+        _ack_profile_reminder_sync(self.emp, profile.id)
+        profile.refresh_from_db()
+        self.assertEqual(profile.follow_up_reminder_last_cycle, 1)
+        self.assertIsNotNone(profile.last_reminded_at)

@@ -99,6 +99,10 @@ class ClientProfile(models.Model):
         blank=True,
         help_text="When the creator last acknowledged a follow-up reminder for this lead.",
     )
+    follow_up_reminder_last_cycle = models.PositiveIntegerField(
+        default=0,
+        help_text="Follow-up reminder cycle counter (incremented on ack); 0 until first ack.",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
