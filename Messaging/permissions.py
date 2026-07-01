@@ -5,14 +5,21 @@ from django.contrib.auth import get_user_model
 User = get_user_model()
 
 
-def has_group_create_or_add_member_permission(user: User):
-    if user.is_superuser:
+def can_manage_group_members(user: User, group: GroupChats) -> bool:
+    """MD or the group creator may add/remove members in this group."""
+    if group.created_by_id == user.username:
         return True
-    elif _get_user_role_sync(user=user) == "TeamLead":
+    if _get_user_role_sync(user=user) == "MD":
         return True
     return False
 
+
+def can_create_group(user: User) -> bool:
+    """Who may create a new group (creator check does not apply until after creation)."""
+    return _get_user_role_sync(user=user) == "MD"
+
+
 def can_Delete_group(group: GroupChats, user: User):
-    if group.created_by==user:
+    if group.created_by == user:
         return True
     return False

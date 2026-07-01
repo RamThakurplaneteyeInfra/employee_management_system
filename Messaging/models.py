@@ -45,11 +45,9 @@ class GroupChats(models.Model):
         else:
             return False
         
-    def can_add_user(self,user):
-        if user==self.created_by:
-            return True
-        else:
-            return False
+    def can_add_user(self, user):
+        from .permissions import can_manage_group_members
+        return can_manage_group_members(user, self)
     
 class GroupMembers(models.Model):
     """Membership of a user in a group chat; tracks seen state and unseen message count."""

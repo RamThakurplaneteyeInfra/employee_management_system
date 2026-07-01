@@ -27,7 +27,7 @@ For React integration and WebSocket chat flow, see **`Messaging/REACT_INTEGRATIO
 ```json
 { "Messsage": "Group created successfully" }
 ```
-**notes:** `group_name` and `participants` (at least one username) required. Participants can be array or object with indices. 201 on success; 403/406 on permission or invalid participants.
+**notes:** `group_name` and `participants` (at least one username) required. Participants can be array or object with indices. Only **MD** role may create groups. 201 on success; 403/406 on permission or invalid participants.
 
 ---
 
@@ -60,10 +60,23 @@ For React integration and WebSocket chat flow, see **`Messaging/REACT_INTEGRATIO
 **sample_response:**
 ```json
 [
-  { "participant": "user1", "participant_name": "Full Name 1", "groupchat": true }
+  {
+    "participant": "user1",
+    "participant_name": "Full Name 1",
+    "groupchat": "G21847",
+    "is_group_creator": true,
+    "can_manage_members": true
+  },
+  {
+    "participant": "user2",
+    "participant_name": "Full Name 2",
+    "groupchat": "G21847",
+    "is_group_creator": false,
+    "can_manage_members": false
+  }
 ]
 ```
-**notes:** Replace `<group_id>` with group id (e.g. G-xxx). 403 if not a member.
+**notes:** Replace `<group_id>` with group id (e.g. G21847). `is_group_creator` marks who created the group. `can_manage_members` is true for the group creator and users with **MD** role (they may add/remove members). 403 if not a member.
 
 ---
 
@@ -76,7 +89,7 @@ For React integration and WebSocket chat flow, see **`Messaging/REACT_INTEGRATIO
 { "participant": "username_to_add" }
 ```
 **sample_response:** Group member list or success.  
-**notes:** 302 if user already in group; 403 if not allowed.
+**notes:** Only the **group creator** or **MD** may add members. 409 if user already in group; 403 if not allowed.
 
 ---
 
@@ -86,7 +99,7 @@ For React integration and WebSocket chat flow, see **`Messaging/REACT_INTEGRATIO
 **method:** DELETE  
 **body:** None  
 **sample_response:** 202 with success message.  
-**notes:** `<user_id>` is the username to remove. 403 if not allowed.
+**notes:** `<user_id>` is the username to remove. Only the **group creator** or **MD** may remove members. Cannot remove self, group creator, or MD users. 403 if not allowed.
 
 ---
 

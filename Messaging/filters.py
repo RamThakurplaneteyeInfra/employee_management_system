@@ -69,10 +69,28 @@ def _get_group_members_sync(group_id: str):
     """Sync helper: DB query."""
     try:
         group_obj = get_object_or_404(GroupChats, group_id=group_id)
-        members = GroupMembers.objects.filter(groupchat=group_obj).select_related("participant").annotate(
-            participant_name=F("participant__accounts_profile__Name")
-        ).values("participant", "participant_name", "groupchat")
-        return JsonResponse(list(members), safe=False)
+        creator_username = group_obj.created_by_id
+        members = (
+            GroupMembers.objects.filter(groupchat=group_obj)
+            .select_related("participant__accounts_profile__Role")
+            .annotate(
+                participant_name=F("participant__accounts_profile__Name"),
+                participant_role=F("participant__accounts_profile__Role__role_name"),
+            )
+            .values("participant", "participant_name", "groupchat", "participant_role")
+        )
+        result = []
+        for m in members:
+            is_creator = m["participant"] == creator_username
+            can_manage = is_creator or m.get("participant_role") == "MD"
+            result.append({
+                "participant": m["participant"],
+                "participant_name": m["participant_name"],
+                "groupchat": m["groupchat"],
+                "is_group_creator": is_creator,
+                "can_manage_members": can_manage,
+            })
+        return JsonResponse(result, safe=False)
     except Http404 as e:
         return JsonResponse({"message": f"{e}"}, status=status.HTTP_404_NOT_FOUND)
 

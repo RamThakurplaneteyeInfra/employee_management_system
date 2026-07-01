@@ -70,7 +70,7 @@ async def access_or_create_conversation(request: HttpRequest):
 # Method: POST
 def _create_group_sync(req, data):
     """Sync helper: DB operations for group creation and adding participants."""
-    has_permission = has_group_create_or_add_member_permission(req.user)
+    has_permission = can_create_group(req.user)
     current_user_name = Profile.objects.get(Employee_id=req.user).Name
     if not current_user_name:
         return {"error": JsonResponse({"message": "You cannot create your group, untill you Complete your profile"}, status=status.HTTP_400_BAD_REQUEST)}
@@ -112,7 +112,7 @@ async def create_group(request: HttpRequest):
             return result["error"]
         return JsonResponse({"Messsage": "Group created successfully"}, status=status.HTTP_201_CREATED)
     except PermissionDenied:
-        return JsonResponse({"message": "you cannot create a Group. Kindly contact your TeamLead/Admin"}, status=status.HTTP_403_FORBIDDEN)
+        return JsonResponse({"message": "Only MD can create a group"}, status=status.HTTP_403_FORBIDDEN)
     except Exception as e:
         return JsonResponse({"message": f"{e}"}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -136,7 +136,7 @@ async def api_to_get_group_members(request: HttpRequest, group_id: str):
 def _add_user_sync(req, group_id, participant_username):
     """Sync helper: DB operations to add participant to group."""
     group_obj = get_object_or_404(GroupChats, group_id=group_id)
-    if not has_group_create_or_add_member_permission(req.user):
+    if not can_manage_group_members(req.user, group_obj):
         raise PermissionDenied("Not allowed")
     present_members = _get_group_members_sync(group_id=group_id)
     data = json.loads(present_members.content.decode('utf-8'))
@@ -169,7 +169,7 @@ async def add_user(request: HttpRequest, group_id: str):
             return result["response"]
         return JsonResponse({"Message": "user added Successfully"}, status=status.HTTP_201_CREATED)
     except PermissionDenied:
-        return JsonResponse({"message": "you cannot create a Group. Kindly contact your TeamLead/Admin"}, status=status.HTTP_403_FORBIDDEN)
+        return JsonResponse({"message": "Only the group creator or MD can manage group members"}, status=status.HTTP_403_FORBIDDEN)
     except Exception as e:
         return JsonResponse({"message": f"{e}"}, status=status.HTTP_403_FORBIDDEN)
 
@@ -182,7 +182,7 @@ def _delete_user_sync(req, group_id, user_id):
     """Sync helper: DB operations to remove participant from group."""
     group_obj = get_object_or_404(GroupChats, group_id=group_id)
     user_obj = get_object_or_404(User, username=user_id)
-    if not has_group_create_or_add_member_permission(req.user):
+    if not can_manage_group_members(req.user, group_obj):
         raise PermissionDenied("Not allowed")
     if user_id == req.user.username:
         return {"error": JsonResponse({"Message": "self-deletion is prohibited"}, status=status.HTTP_404_NOT_FOUND)}
@@ -215,7 +215,7 @@ async def delete_user(request: HttpRequest, group_id: str, user_id: str):
     except Http404 as e:
         return JsonResponse({"message": f"{e}"}, status=status.HTTP_404_NOT_FOUND)
     except PermissionDenied:
-        return JsonResponse({"message": "you cannot create a Group. Kindly contact your TeamLead/Admin"}, status=status.HTTP_403_FORBIDDEN)
+        return JsonResponse({"message": "Only the group creator or MD can manage group members"}, status=status.HTTP_403_FORBIDDEN)
     except Exception as e:
         return JsonResponse({"message": f"{e}"}, status=status.HTTP_400_BAD_REQUEST)
 
