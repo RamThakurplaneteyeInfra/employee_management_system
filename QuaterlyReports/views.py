@@ -624,7 +624,7 @@ def co_author_points(request):
 def actionable_entries_points(request):
     """
     Creator actionable entry performance points for an employee.
-    Only applies when the employee's Profile.functions contains any of NPD, HC, IP, or NPC.
+    Only applies when the employee's Profile.functions contains any of NPD, HC, or IP.
 
     GET /ActionableEntries/points/?year=2026&month=6
     +4 per completed entry (final_Status == COMPLETED); main capped at 20/month, excess as bonus.

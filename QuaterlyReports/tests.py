@@ -264,7 +264,7 @@ class NpcActionableEntryCreateTests(TestCase):
         self.assertEqual(response.data["goal"], self.catalog_goal.id)
         self.assertEqual(response.data["goal_text"], "Predefined catalog goal")
 
-    def test_npc_scoring_eligible_after_complete(self):
+    def test_npc_not_eligible_for_creator_actionable_scoring(self):
         from QuaterlyReports.actionable_entries_scoring import build_actionable_entries_points
 
         completed = TaskStatus.objects.create(status_name="COMPLETED")
@@ -277,6 +277,6 @@ class NpcActionableEntryCreateTests(TestCase):
             original_entry="Done",
         )
         result = build_actionable_entries_points(self.npc_user, 2026, month=6)
-        self.assertTrue(result["eligible"])
-        self.assertIn("NPC", result["eligible_functions"])
-        self.assertEqual(result["total_points"], 4.0)
+        self.assertFalse(result["eligible"])
+        self.assertEqual(result["eligible_functions"], [])
+        self.assertEqual(result["total_points"], 0.0)
