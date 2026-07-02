@@ -177,7 +177,8 @@ class BookSlotSerializer(serializers.ModelSerializer):
             raw_names = []
 
         if not is_outdoor:
-            attrs["member_name"] = []
+            if "member_name" not in attrs:
+                attrs["member_name"] = []
         else:
             cleaned: list[str] = []
             for x in raw_names:
