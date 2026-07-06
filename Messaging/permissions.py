@@ -4,6 +4,8 @@ from django.contrib.auth import get_user_model
 
 User = get_user_model()
 
+_GROUP_CREATE_ROLES = frozenset({"MD", "TeamLead", "Teamlead"})
+
 
 def can_manage_group_members(user: User, group: GroupChats) -> bool:
     """MD or the group creator may add/remove members in this group."""
@@ -16,7 +18,7 @@ def can_manage_group_members(user: User, group: GroupChats) -> bool:
 
 def can_create_group(user: User) -> bool:
     """Who may create a new group (creator check does not apply until after creation)."""
-    return _get_user_role_sync(user=user) == "MD"
+    return _get_user_role_sync(user=user) in _GROUP_CREATE_ROLES
 
 
 def can_Delete_group(group: GroupChats, user: User):

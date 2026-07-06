@@ -27,7 +27,7 @@ For React integration and WebSocket chat flow, see **`Messaging/REACT_INTEGRATIO
 ```json
 { "Messsage": "Group created successfully" }
 ```
-**notes:** `group_name` and `participants` (at least one username) required. Participants can be array or object with indices. Only **MD** role may create groups. 201 on success; 403/406 on permission or invalid participants.
+**notes:** `group_name` and `participants` (at least one username) required. Participants can be array or object with indices. Only **MD** or **TeamLead** may create groups. 201 on success; 403/406 on permission or invalid participants.
 
 ---
 

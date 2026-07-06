@@ -112,7 +112,7 @@ async def create_group(request: HttpRequest):
             return result["error"]
         return JsonResponse({"Messsage": "Group created successfully"}, status=status.HTTP_201_CREATED)
     except PermissionDenied:
-        return JsonResponse({"message": "Only MD can create a group"}, status=status.HTTP_403_FORBIDDEN)
+        return JsonResponse({"message": "Only MD or TeamLead can create a group"}, status=status.HTTP_403_FORBIDDEN)
     except Exception as e:
         return JsonResponse({"message": f"{e}"}, status=status.HTTP_400_BAD_REQUEST)
 
