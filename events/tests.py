@@ -123,3 +123,97 @@ class MeetingScoringTests(TestCase):
         self.assertEqual(result["main_score"], 0.5)
         self.assertEqual(result["monthly_bonus"], 0.0)
         self.assertEqual(result["total_points"], 0.5)
+
+
+class BookSlotOutdoorOverlapTests(TestCase):
+    def setUp(self):
+        self.role_employee = Roles.objects.create(role_name="Employee")
+        self.confirmed = BookingStatus.objects.create(status_name="Confirmed")
+        self.indoor_room = Room.objects.create(name="Conference A")
+        self.outdoor_room = Room.objects.create(name="Outdoor")
+        self.emp = User.objects.create_user(username="EMP200", password="pass123")
+        self.other = User.objects.create_user(username="EMP201", password="pass123")
+        Profile.objects.create(
+            Employee_id=self.emp,
+            Role=self.role_employee,
+            Name="Meeting Employee",
+            Email_id="meet@example.com",
+        )
+        Profile.objects.create(
+            Employee_id=self.other,
+            Role=self.role_employee,
+            Name="Other Employee",
+            Email_id="other@example.com",
+        )
+        self.slot_date = date(2026, 7, 1)
+        self.start = time(10, 0)
+        self.end = time(17, 0)
+
+    def _outdoor_payload(self, *, username="EMP201", member_name=None):
+        return {
+            "meeting_title": "Outdoor meeting",
+            "date": self.slot_date.isoformat(),
+            "start_time": self.start.isoformat(),
+            "end_time": self.end.isoformat(),
+            "room": "Outdoor",
+            "meeting_type": "group",
+            "status": "Confirmed",
+            "members": [username],
+            "member_name": member_name or ["Field Team"],
+        }
+
+    def _validate(self, user, data):
+        from rest_framework.test import APIRequestFactory
+
+        from events.serializers import BookSlotSerializer
+
+        request = APIRequestFactory().post("/eventsapi/bookslots/")
+        request.user = user
+        serializer = BookSlotSerializer(data=data, context={"request": request})
+        return serializer
+
+    def test_multiple_outdoor_same_time_allowed_for_different_creators(self):
+        slot = BookSlot.objects.create(
+            meeting_title="Outdoor 1",
+            date=self.slot_date,
+            start_time=self.start,
+            end_time=self.end,
+            room=self.outdoor_room,
+            meeting_type="group",
+            status=self.confirmed,
+            created_by=self.emp,
+            member_name=["Team A"],
+        )
+        SlotMembers.objects.create(slot=slot, member=self.emp)
+
+        serializer = self._validate(self.other, self._outdoor_payload())
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+
+    def test_indoor_double_book_still_blocked(self):
+        slot = BookSlot.objects.create(
+            meeting_title="Indoor 1",
+            date=self.slot_date,
+            start_time=self.start,
+            end_time=self.end,
+            room=self.indoor_room,
+            meeting_type="group",
+            status=self.confirmed,
+            created_by=self.emp,
+        )
+        SlotMembers.objects.create(slot=slot, member=self.emp)
+
+        serializer = self._validate(
+            self.other,
+            {
+                "meeting_title": "Indoor 2",
+                "date": self.slot_date.isoformat(),
+                "start_time": self.start.isoformat(),
+                "end_time": self.end.isoformat(),
+                "room": "Conference A",
+                "meeting_type": "group",
+                "status": "Confirmed",
+                "members": ["EMP201"],
+            },
+        )
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("already booked", str(serializer.errors).lower())

@@ -67,7 +67,7 @@
 }
 ```
 **sample_response:** Created slot object (same shape as list).  
-**notes:** `created_by` set from logged-in user. Validation: end_time > start_time, at least one member, no double-booking of same room in same time range, creator not in overlapping slot. 201 on success.
+**notes:** `created_by` set from logged-in user. Validation: end_time > start_time, at least one member, no double-booking of same **indoor** room in same time range (Outdoor allows multiple concurrent bookings), creator not in overlapping slot. Outdoor requires non-empty `member_name`. 201 on success.
 
 ---
 

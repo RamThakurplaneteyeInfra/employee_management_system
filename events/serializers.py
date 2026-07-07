@@ -5,6 +5,14 @@ from ems.RequiredImports import *
 from ems.utils import gmt_to_ist_str
 from accounts.filters import _get_users_Name_sync
 from project.models import Product
+
+
+def _is_outdoor_room(room) -> bool:
+    return bool(
+        room and str(getattr(room, "name", "") or "").strip().lower() == "outdoor"
+    )
+
+
 class SlotMemberSerializer(serializers.ModelSerializer):
     member=serializers.SlugRelatedField(
         queryset=User.objects.all(),
@@ -126,21 +134,28 @@ class BookSlotSerializer(serializers.ModelSerializer):
             date_val, start_time, end_time, exclude_slot_id=exclude_slot_id
         )
 
-        total_rooms = Room.objects.filter(is_active=True).count()
-        if total_rooms == 0:
-            raise serializers.ValidationError("No rooms are available for booking.")
+        effective_room = room
+        if effective_room is None and self.instance is not None:
+            effective_room = getattr(self.instance, "room", None)
+        is_outdoor = _is_outdoor_room(effective_room)
 
-        rooms_booked_in_period = overlapping.values_list("room_id", flat=True).distinct()
-        rooms_booked_count = len(set(rooms_booked_in_period))
-        if rooms_booked_count >= total_rooms:
-            raise serializers.ValidationError(
-                "No room empty for booking the slot."
-            )
+        if not is_outdoor:
+            active_rooms = list(Room.objects.filter(is_active=True))
+            indoor_room_ids = {r.pk for r in active_rooms if not _is_outdoor_room(r)}
+            booked_indoor_ids = {
+                room_id
+                for room_id in overlapping.values_list("room_id", flat=True).distinct()
+                if room_id in indoor_room_ids
+            }
+            if indoor_room_ids and len(booked_indoor_ids) >= len(indoor_room_ids):
+                raise serializers.ValidationError(
+                    "No room empty for booking the slot."
+                )
 
-        if overlapping.filter(room=room).exists():
-            raise serializers.ValidationError(
-                "This room is already booked for the selected time slot."
-            )
+            if overlapping.filter(room=room).exists():
+                raise serializers.ValidationError(
+                    "This room is already booked for the selected time slot."
+                )
 
         request = self.context.get("request")
         if request and request.user:
@@ -161,14 +176,6 @@ class BookSlotSerializer(serializers.ModelSerializer):
                 )
 
         # Outdoor-only extra field: member_name (array of strings)
-        effective_room = room
-        if effective_room is None and self.instance is not None:
-            effective_room = getattr(self.instance, "room", None)
-
-        is_outdoor = bool(
-            effective_room and str(getattr(effective_room, "name", "") or "").strip().lower() == "outdoor"
-        )
-
         if "member_name" in attrs:
             raw_names = attrs.get("member_name") or []
         elif self.instance is not None:
