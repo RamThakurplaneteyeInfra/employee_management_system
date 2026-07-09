@@ -7,6 +7,15 @@ from .mmr_rg_target_views import (
     mmr_rg_scoring_target_detail,
     reset_mmr_rg_scoring_target,
 )
+from .dm_target_views import (
+    list_dm_scoring_targets,
+    dm_scoring_target_detail,
+)
+from .dm_work_views import (
+    dm_work_entries,
+    dm_work_entry_approve,
+    dm_work_points,
+)
 
 leave_router = DefaultRouter()
 leave_router.register("leave-applications", LeaveApplicationViewSet, basename="leave-applications")
@@ -46,6 +55,19 @@ urlpatterns = sort_urls + session_urls + employee_urls + admin_urls + [
         reset_mmr_rg_scoring_target,
         name="mmr-rg-scoring-target-reset",
     ),
+    path("dm-scoring-targets/", list_dm_scoring_targets, name="dm-scoring-targets"),
+    path(
+        "dm-scoring-targets/<str:employee_id>/",
+        dm_scoring_target_detail,
+        name="dm-scoring-target-detail",
+    ),
+    path("dm-work-entries/", dm_work_entries, name="dm-work-entries"),
+    path(
+        "dm-work-entries/<int:entry_id>/approve/",
+        dm_work_entry_approve,
+        name="dm-work-entry-approve",
+    ),
+    path("dm-work-entries/points/", dm_work_points, name="dm-work-points"),
     path("", include(leave_router.urls)),
 ]
 

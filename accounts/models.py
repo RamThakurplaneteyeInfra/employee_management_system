@@ -430,4 +430,104 @@ class MmrRgScoringTarget(models.Model):
         return f"MMR/RG targets for {self.profile_id} ({self.year}-{self.month:02d})"
 
 
+class DmScoringTarget(models.Model):
+    """
+    Per-employee, per-month DM scoring targets set by MD.
+    Null field values fall back to system defaults at scoring time for that month.
+    """
+
+    id = models.AutoField(primary_key=True)
+    profile = models.ForeignKey(
+        Profile,
+        on_delete=models.CASCADE,
+        related_name="dm_scoring_targets",
+        db_column="employee_id",
+        to_field="Employee_id",
+    )
+    year = models.PositiveSmallIntegerField()
+    month = models.PositiveSmallIntegerField()
+    digital_media_target_count = models.PositiveSmallIntegerField(null=True, blank=True)
+    digital_content_target_count = models.PositiveSmallIntegerField(null=True, blank=True)
+    set_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="dm_targets_set",
+        db_column="set_by",
+        to_field="username",
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'login_details"."dm_scoring_targets'
+        verbose_name = "DM scoring target"
+        verbose_name_plural = "DM scoring targets"
+        unique_together = ("profile", "year", "month")
+        indexes = [
+            models.Index(fields=["profile", "year", "month"]),
+        ]
+
+    def __str__(self):
+        return f"DM targets for {self.profile_id} ({self.year}-{self.month:02d})"
+
+
+class DmWorkEntry(models.Model):
+    """
+    DM work submission with MD approval.
+
+    Only APPROVED entries count toward DM work scoring.
+    """
+
+    class ContentType(models.TextChoices):
+        DIGITAL_MEDIA = "digital_media", "Digital media"
+        DIGITAL_CONTENT = "digital_content", "Digital content"
+
+    class ApprovalStatus(models.TextChoices):
+        PENDING = "pending", "Pending"
+        APPROVED = "approved", "Approved"
+        REJECTED = "rejected", "Rejected"
+
+    id = models.BigAutoField(primary_key=True)
+    created_by = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="dm_work_entries",
+        db_column="created_by",
+        to_field="username",
+    )
+    title = models.CharField(max_length=255)
+    description = models.TextField(blank=True, default="")
+    content_type = models.CharField(max_length=30, choices=ContentType.choices)
+    status = models.CharField(
+        max_length=20, choices=ApprovalStatus.choices, default=ApprovalStatus.PENDING
+    )
+    approved_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="dm_work_entries_approved",
+        db_column="approved_by",
+        to_field="username",
+    )
+    approved_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'login_details"."dm_work_entries'
+        verbose_name = "DM work entry"
+        verbose_name_plural = "DM work entries"
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["created_by", "-created_at"]),
+            models.Index(fields=["status", "-created_at"]),
+            models.Index(fields=["content_type", "-created_at"]),
+        ]
+
+    def __str__(self):
+        return f"DM work #{self.pk} by {self.created_by_id} ({self.content_type})"
+
+
 

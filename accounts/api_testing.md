@@ -144,6 +144,48 @@
 
 ---
 
+## DM targets and work scoring
+
+### DM scoring targets (MD-managed)
+
+**url:** `{{baseurl}}/accounts/dm-scoring-targets/?year=2026&month=7`  
+**method:** GET  
+**notes:** MD/HR can view. Returns DM employees and effective targets for the month (digital_media_target_count, digital_content_target_count).
+
+**url:** `{{baseurl}}/accounts/dm-scoring-targets/<employee_id>/?year=2026&month=7`  
+**method:** GET, PUT, PATCH  
+**notes:** GET: MD/HR view. PUT/PATCH: MD only. Body fields: `digital_media_target_count`, `digital_content_target_count`.
+
+---
+
+### DM work entries (submit + approve)
+
+**url:** `{{baseurl}}/accounts/dm-work-entries/`  
+**method:** GET, POST  
+**POST body:**
+```json
+{ "title": "Post title", "description": "Details...", "content_type": "digital_media" }
+```
+**notes:** Only DM employees can POST (creates `pending`). GET: DM sees own entries; MD can see all (optional `?employee=<username>`). Use `?year=&month=` to filter by created_at.
+
+**url:** `{{baseurl}}/accounts/dm-work-entries/<id>/approve/`  
+**method:** PATCH  
+**body:**
+```json
+{ "status": "approved" }
+```
+**notes:** MD only. Status must be `approved` or `rejected`. Only `approved` entries count for scoring.
+
+---
+
+### DM work points
+
+**url:** `{{baseurl}}/accounts/dm-work-entries/points/?year=2026&month=7`  
+**method:** GET  
+**notes:** Returns DM work scoring breakdown (main_score, monthly_bonus, total_points). Optional `?employee=<username>` for HR/MD.
+
+---
+
 ## 3. Employee (self and list)
 
 ### employee dashboard

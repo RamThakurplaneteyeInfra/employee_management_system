@@ -22,9 +22,11 @@ from task_management.intern_task_scoring import INTERN_ROLE_NAME, build_intern_t
 from accounts.models import Profile
 
 from .leave_scoring import build_leave_points
+from .dm_work_scoring import build_dm_work_points
 
 NPD_HC_IP_FUNCTIONS = frozenset({"NPD", "HC", "IP"})
 NPC_FUNCTIONS = frozenset({"NPC"})
+DM_FUNCTIONS = frozenset({"DM"})
 HR_ORG_AVERAGE_EXCLUDE_ROLES = frozenset({"HR", "Hr", "MD", "Admin"})
 HR_MONTHLY_LEAVE_CAP = 8.0
 HR_MONTHLY_MEETING_CAP = 7.0
@@ -42,6 +44,7 @@ SCORING_GROUP_ALIASES = {
     "hc": "npd_hc_ip",
     "ip": "npd_hc_ip",
     "npc": "npc",
+    "dm": "dm",
     "interns": "interns",
     "intern": "interns",
     "other": "other",
@@ -195,6 +198,21 @@ def _is_mmr_rg_user(user) -> bool:
     return bool(names & MMR_RG_FUNCTIONS)
 
 
+def _is_dm_user(user) -> bool:
+    profile = Profile.objects.filter(Employee_id=user).prefetch_related("functions").first()
+    if profile is None:
+        return False
+    try:
+        names = {
+            (f.function or "").strip().upper()
+            for f in profile.functions.all()
+            if f is not None and getattr(f, "function", None)
+        }
+    except Exception:
+        return False
+    return bool(names & DM_FUNCTIONS)
+
+
 def _function_names_upper_from_profile(profile: Profile | None) -> set[str]:
     if profile is None:
         return set()
@@ -231,6 +249,8 @@ def classify_scoring_group(function_names_upper: set[str]) -> str:
         return "npd_hc_ip"
     if function_names_upper & NPC_FUNCTIONS:
         return "npc"
+    if function_names_upper & DM_FUNCTIONS:
+        return "dm"
     return "other"
 
 
@@ -518,12 +538,14 @@ def _compute_individual_performance_score(
     certification = build_certification_points(user, year, month=month, quarter=quarter)
     actionable_coauthor = build_actionable_coauthor_points(user, year, month=month, quarter=quarter)
     actionable_entries = build_actionable_entries_points(user, year, month=month, quarter=quarter)
+    dm_work = build_dm_work_points(user, year, month=month, quarter=quarter)
     customer_panel_entries = build_customer_panel_entries_points(user, year, month=month, quarter=quarter)
     client_profiles = build_client_profile_points(user, year, month=month, quarter=quarter)
     intern_tasks = build_intern_task_points(user, year, month=month, quarter=quarter)
 
     is_mmr_rg = _is_mmr_rg_user(user)
     is_intern = _is_intern_user(user)
+    is_dm = _is_dm_user(user)
     if is_mmr_rg:
         combined_categories = {
             "meeting": meeting,
@@ -539,6 +561,20 @@ def _compute_individual_performance_score(
         )
         combined_total_bonus = _sum_bonus(list(combined_categories.values()))
         scoring_profile = "mmr_rg"
+    elif is_dm:
+        combined_categories = {
+            "meeting": meeting,
+            "certification": certification,
+            "actionable_coauthor": actionable_coauthor,
+            "dm_work": dm_work,
+        }
+        combined_total = round(
+            _points_for_combined(leave)
+            + sum(_points_for_combined(c) for c in combined_categories.values()),
+            2,
+        )
+        combined_total_bonus = _sum_bonus(list(combined_categories.values()))
+        scoring_profile = "dm"
     elif is_intern:
         combined_categories = {
             "meeting": meeting,
@@ -594,6 +630,7 @@ def _compute_individual_performance_score(
         "certification": _slim_category_payload(certification),
         "actionable_coauthor": _slim_category_payload(actionable_coauthor),
         "actionable_entries": _slim_category_payload(actionable_entries),
+        "dm_work": _slim_category_payload(dm_work),
         "customer_panel_entries": _slim_category_payload(customer_panel_entries),
         "client_profiles": _slim_category_payload(client_profiles),
     }
