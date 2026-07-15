@@ -4,18 +4,21 @@ from ems.RequiredImports import HttpRequest
 
 
 class EntryPermission(permissions.BasePermission):
-    def has_permission(self, request:HttpRequest, view):
-        # 1. Allow all authenticated users to use GET
-        if request.method in permissions.SAFE_METHODS:
-            return request.user.is_authenticated
+    def has_permission(self, request: HttpRequest, view):
+        if not request.user.is_authenticated:
+            return False
 
-        # 2. POST logic: Deny MD, allow Admin and others
-        if request.method in ['POST', "PUT","PATCH","DELETE"]:
-            # Assuming you have a 'role' attribute on your User or Profile
-            # Or checking group membership
-            is_md = _get_user_role_sync(user=request.user) == "MD"
-            if is_md:
-                return False # Denies access with "Permission Denied"
+        # Allow all authenticated users to use GET / HEAD / OPTIONS
+        if request.method in permissions.SAFE_METHODS:
             return True
-        
+
+        # Deny MD from creating actionable entries (POST)
+        if request.method == "POST":
+            return _get_user_role_sync(user=request.user) != "MD"
+
+        # Allow PATCH / PUT / DELETE for authenticated users, including MD,
+        # so MD can complete shared-with entries (view-level checks still apply).
+        if request.method in ["PUT", "PATCH", "DELETE"]:
+            return True
+
         return False
