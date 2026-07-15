@@ -375,6 +375,13 @@ def _is_blank_optional_value(value):
     return False
 
 
+def _request_has_field(data, key: str) -> bool:
+    """True when the client explicitly included this field (form or JSON)."""
+    if hasattr(data, "getlist"):
+        return key in data
+    return isinstance(data, dict) and key in data
+
+
 # ==================== update_profile ====================
 # Update particular user profile by username (Admin only).
 # URL: {{baseurl}}/accounts/admin/updateProfile/<username>/
@@ -384,6 +391,8 @@ def _update_profile_sync(req, username):
     user = get_object_or_404(User, username=username)
     fields = ['Name', 'Role', 'Email_id', 'Designation', 'Date_of_join', 'Date_of_birth', 'Branch', "Department", "Teamlead", "Functions", "gender"]
     not_required_fields = ["Designation", "Branch", "Department", "Teamlead", "Functions", "gender"]
+    # Optional FKs that may be cleared to NULL when the client explicitly sends blank/None.
+    clearable_to_null_fields = frozenset({"Department"})
     profile_values = {}
     data = load_data(req)
     function_names = None
@@ -402,6 +411,10 @@ def _update_profile_sync(req, username):
             continue
         field_value = data.get(i)
         if i in not_required_fields and _is_blank_optional_value(field_value):
+            # Blank usually means "leave unchanged". Department is an exception: when the
+            # client explicitly sends None/null/""/"None", clear the FK to null.
+            if i in clearable_to_null_fields and _request_has_field(data, i):
+                profile_values[i] = None
             continue
         if not field_value and i not in not_required_fields:
             return {"error": JsonResponse({"messege": f"{i} is empty"}, status=status.HTTP_400_BAD_REQUEST)}

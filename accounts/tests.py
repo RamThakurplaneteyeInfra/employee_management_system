@@ -1,7 +1,7 @@
 from datetime import date, datetime, time
 
 from django.contrib.auth.models import User
-from django.test import TestCase
+from django.test import RequestFactory, TestCase
 from django.utils import timezone
 from rest_framework.test import APIClient
 
@@ -16,12 +16,16 @@ from accounts.performance_scoring import (
     _org_pool_work_points_from_performance_score,
 )
 from accounts.models import (
+    Branch,
+    Departments,
+    Designation,
     LeaveApplicationData,
     LeaveStatus,
     LeaveTypes,
     Profile,
     Roles,
 )
+from accounts.views import _update_profile_sync
 from notifications.models import Notification
 
 
@@ -1261,3 +1265,68 @@ class CompletedYearsAndDaysTests(TestCase):
         result = completed_years_and_days(date(2020, 1, 15))
         self.assertIn("years", result)
         self.assertIn("days", result)
+
+
+class UpdateProfileClearDepartmentTests(TestCase):
+    def setUp(self):
+        self.factory = RequestFactory()
+        self.role = Roles.objects.create(role_name="Employee")
+        self.branch = Branch.objects.create(branch_name="Farm Core")
+        self.designation = Designation.objects.create(designation="GIS")
+        self.department = Departments.objects.create(dept_name="Production")
+        self.tl = User.objects.create_user(username="200012", password="pass")
+        Profile.objects.create(
+            Employee_id=self.tl,
+            Role=self.role,
+            Name="Team Lead",
+            Email_id="tl_clear_dept@test.com",
+        )
+        self.emp = User.objects.create_user(username="200029", password="pass")
+        self.profile = Profile.objects.create(
+            Employee_id=self.emp,
+            Role=self.role,
+            Name="Utkarsh Khose",
+            Email_id="utkarshkhose555@gmail.com",
+            Designation=self.designation,
+            Branch=self.branch,
+            Department=self.department,
+            Teamlead=self.tl,
+            Date_of_join=date(2026, 7, 1),
+            Date_of_birth=date(2004, 2, 27),
+            gender="Male",
+        )
+
+    def _base_payload(self, **overrides):
+        payload = {
+            "Name": "Utkarsh Khose",
+            "gender": "Male",
+            "Role": "Employee",
+            "Email_id": "utkarshkhose555@gmail.com",
+            "Date_of_join": "2026-07-01",
+            "Date_of_birth": "2004-02-27",
+            "Designation": "GIS",
+            "Branch": "Farm Core",
+            "Teamlead": "200012",
+        }
+        payload.update(overrides)
+        return payload
+
+    def test_explicit_none_clears_department(self):
+        request = self.factory.post(
+            "/accounts/admin/updateProfile/200029/",
+            self._base_payload(Department="None"),
+        )
+        result = _update_profile_sync(request, "200029")
+        self.assertTrue(result.get("ok"), result)
+        self.profile.refresh_from_db()
+        self.assertIsNone(self.profile.Department_id)
+
+    def test_omitted_department_leaves_existing_value(self):
+        request = self.factory.post(
+            "/accounts/admin/updateProfile/200029/",
+            self._base_payload(),
+        )
+        result = _update_profile_sync(request, "200029")
+        self.assertTrue(result.get("ok"), result)
+        self.profile.refresh_from_db()
+        self.assertEqual(self.profile.Department_id, self.department.pk)
