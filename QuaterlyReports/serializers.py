@@ -5,7 +5,7 @@ from .models import Functions, FunctionsGoals, ActionableGoals, FunctionsEntries
 from .npc_goals import (
     create_actionable_goal_from_text,
     normalize_goal_text,
-    user_has_npc_function,
+    user_can_use_free_text_goal,
 )
 from task_management.models import TaskStatus
 
@@ -182,12 +182,12 @@ class FunctionsEntriesSerializer(serializers.ModelSerializer):
             if has_goal_text and not has_goal:
                 request = self.context.get("request")
                 user = getattr(request, "user", None) if request else None
-                if not user_has_npc_function(user):
+                if not user_can_use_free_text_goal(user):
                     raise s.ValidationError(
                         {
                             "goal_text": [
-                                "Free-text goals are only allowed for employees with the NPC function. "
-                                "Use goal (catalog Goal_id) instead."
+                                "Free-text goals are only allowed for employees with the NPC function "
+                                "or Intern role. Use goal (catalog Goal_id) instead."
                             ]
                         }
                     )

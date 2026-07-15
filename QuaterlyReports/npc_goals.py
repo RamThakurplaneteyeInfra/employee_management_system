@@ -1,5 +1,5 @@
 """
-NPC free-text actionable goals: auto-create ActionableGoals rows for user-typed goals.
+Free-text actionable goals (NPC function + Intern role): auto-create ActionableGoals rows.
 
 Free-text goals are stored under a dedicated FunctionsGoals bucket and are excluded
 from GET /get_functions_and_actionable_goals/ so the catalog API is not polluted.
@@ -11,6 +11,7 @@ from accounts.models import Functions, Profile
 from .models import ActionableGoals, FunctionsGoals
 
 NPC_FUNCTION_LABEL = "NPC"
+INTERN_ROLE_NAME = "Intern"
 NPC_USER_GOALS_MAIN_LABEL = "NPC user goals"
 NPC_GOAL_TEXT_MAX_LENGTH = 255
 
@@ -30,6 +31,25 @@ def user_has_npc_function(user) -> bool:
         if (getattr(fn, "function", None) or "").strip().upper() == NPC_FUNCTION_LABEL:
             return True
     return False
+
+
+def user_has_intern_role(user) -> bool:
+    """True when the user's profile Role is Intern."""
+    if not user or not getattr(user, "is_authenticated", False):
+        return False
+    profile = (
+        Profile.objects.filter(Employee_id=user)
+        .select_related("Role")
+        .first()
+    )
+    if not profile or not profile.Role:
+        return False
+    return (profile.Role.role_name or "").strip() == INTERN_ROLE_NAME
+
+
+def user_can_use_free_text_goal(user) -> bool:
+    """NPC function or Intern role may create entries with goal_text instead of catalog goal."""
+    return user_has_npc_function(user) or user_has_intern_role(user)
 
 
 def get_or_create_npc_function() -> Functions:

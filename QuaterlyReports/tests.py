@@ -166,8 +166,10 @@ class ActionableEntriesCreatorScoringTests(TestCase):
 class NpcActionableEntryCreateTests(TestCase):
     def setUp(self):
         self.role_employee = Roles.objects.create(role_name="Employee")
+        self.role_intern = Roles.objects.create(role_name="Intern")
         self.npc_user = User.objects.create_user(username="npc_emp", password="pass")
         self.npd_user = User.objects.create_user(username="npd_emp", password="pass")
+        self.intern_user = User.objects.create_user(username="intern_emp", password="pass")
         self.co_author = User.objects.create_user(username="co_npc", password="pass")
         self.share_with = User.objects.create_user(username="share_npc", password="pass")
         Profile.objects.create(
@@ -181,6 +183,12 @@ class NpcActionableEntryCreateTests(TestCase):
             Role=self.role_employee,
             Name="NPD Employee",
             Email_id="npd@test.com",
+        )
+        Profile.objects.create(
+            Employee_id=self.intern_user,
+            Role=self.role_intern,
+            Name="Intern Employee",
+            Email_id="intern@test.com",
         )
         Profile.objects.create(
             Employee_id=self.co_author,
@@ -234,6 +242,35 @@ class NpcActionableEntryCreateTests(TestCase):
         response = self.client.post("/ActionableEntries/", payload, format="json")
         self.assertEqual(response.status_code, 201, response.data)
         self.assertEqual(response.data["goal_text"], "Pipeline improvement")
+
+    def test_intern_create_with_goal_text_succeeds(self):
+        self.client = APIClient()
+        self.client.force_authenticate(self.intern_user)
+        payload = {
+            "date": "2026-06-26",
+            "original_entry": "Intern research notes",
+            "goal_text": "Learn dealer outreach process",
+            "co_author": self.co_author.username,
+            "share_with": self.share_with.username,
+        }
+        response = self.client.post("/ActionableEntries/", payload, format="json")
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(response.data["goal_text"], "Learn dealer outreach process")
+        self.assertIsNotNone(response.data["goal"])
+
+    def test_intern_create_accepts_goal_name_alias(self):
+        self.client = APIClient()
+        self.client.force_authenticate(self.intern_user)
+        payload = {
+            "date": "2026-06-26",
+            "original_entry": "Intern work",
+            "goal_name": "Shadow sales visit",
+            "co_author": self.co_author.username,
+            "share_with": self.share_with.username,
+        }
+        response = self.client.post("/ActionableEntries/", payload, format="json")
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(response.data["goal_text"], "Shadow sales visit")
 
     def test_non_npc_cannot_use_goal_text_without_catalog_goal(self):
         self.client = APIClient()
