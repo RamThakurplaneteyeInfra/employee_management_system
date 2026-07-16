@@ -2,15 +2,21 @@
 Project phase checklist performance points from DeadlineProjectPhase.checklist.
 
 Employee / Intern:
-- 17.5 points per completed checklist; each calendar month capped at 70 (4 items).
+- 17.5 points per completed checklist; each calendar month main capped at 70 (4 items).
+- Points above the monthly main cap count as monthly_bonus (not lost).
 
 Team Lead:
-- 10 points per completed checklist on phases where phase.team_lead_id matches the TL;
-  each calendar month capped at 70 (7 items). Completer (employeeIds) does not matter.
+- 10 points per completed checklist when either:
+  1) the phase's team_lead_id matches the TL, or
+  2) the TL is explicitly assigned in checklist.employeeIds.
+  Each calendar month main is capped at 70 (7 items). If both conditions are true for
+  the same TL on the same checklist item, it counts only once for that TL.
+- Points above the monthly main cap count as monthly_bonus (not lost).
 
 Special functions (Profile.functions contains any of: NPD, HC, IP):
-- Employee / Intern: 12.5 points per completed checklist; monthly cap 50 (4 items).
-- Team Lead: 7.5 points per completed checklist; monthly cap 50 (7 items).
+- Employee / Intern: 12.5 points per completed checklist; monthly main cap 50 (4 items).
+- Team Lead: 7.5 points per completed checklist; monthly main cap 50 (7 items).
+- Overflow above the monthly main cap counts as monthly_bonus.
 
 Quarter / year totals sum monthly capped scores (quarter max 210, year max 840 for default;
 150 per quarter / 600 per year for NPD/HC/IP).
@@ -144,13 +150,13 @@ def _normalize_employee_ids(raw) -> list[int]:
 def _iter_phase_checklist_items():
     phases = (
         DeadlineProjectPhase.objects.filter(archived=False, project__archived=False)
-        .only("checklist", "team_lead_id")
+        .only("id", "checklist", "team_lead_id")
         .iterator()
     )
     for phase in phases:
-        for item in phase.checklist or []:
+        for idx, item in enumerate(phase.checklist or []):
             if isinstance(item, dict):
-                yield phase.team_lead_id, item
+                yield phase.id, idx, phase.team_lead_id, item
 
 
 def _role_for_employee_id(emp_id: int) -> str:
@@ -162,7 +168,7 @@ def _role_for_employee_id(emp_id: int) -> str:
 
 def _assigned_for_employee(employee_id: int) -> int:
     assigned = 0
-    for _, item in _iter_phase_checklist_items():
+    for _, _, _, item in _iter_phase_checklist_items():
         if employee_id in _normalize_employee_ids(item.get("employeeIds")):
             assigned += 1
     return assigned
@@ -177,7 +183,7 @@ def _completed_for_ids(
     if not id_set:
         return 0
     completed = 0
-    for _, item in _iter_phase_checklist_items():
+    for _, _, _, item in _iter_phase_checklist_items():
         if not item.get("checked"):
             continue
         ids = _normalize_employee_ids(item.get("employeeIds"))
@@ -200,7 +206,7 @@ def _phases_as_team_lead(team_lead_id: int | None) -> int:
     ).count()
 
 
-def _completed_breakdown_for_phase_team_lead(
+def _completed_breakdown_for_team_lead_credit(
     team_lead_id: int | None,
     year: int,
     month: int | None,
@@ -209,63 +215,76 @@ def _completed_breakdown_for_phase_team_lead(
     if team_lead_id is None:
         return {
             "team_lead": 0,
+            "assigned_team_lead": 0,
             "employees": 0,
             "interns": 0,
             "aggregated_total": 0,
         }
 
     team_lead = 0
+    assigned_team_lead = 0
     employees = 0
     interns = 0
-    aggregated = 0
+    credited_items: set[tuple[int, int]] = set()
 
-    for phase_team_lead_id, item in _iter_phase_checklist_items():
-        if phase_team_lead_id != team_lead_id:
-            continue
+    for phase_id, item_idx, phase_team_lead_id, item in _iter_phase_checklist_items():
         if not item.get("checked"):
             continue
         checked_date = _parse_checked_date(item.get("checkedDate"))
         if not _date_in_period(checked_date, year, month, quarter):
             continue
-        aggregated += 1
         ids = set(_normalize_employee_ids(item.get("employeeIds")))
-        if team_lead_id in ids:
-            team_lead += 1
-        for emp_id in ids:
-            if emp_id == team_lead_id:
-                continue
-            role = _role_for_employee_id(emp_id)
-            if role == "Intern":
-                interns += 1
-            elif role == "Employee":
-                employees += 1
+        item_key = (phase_id, item_idx)
+
+        is_phase_team_lead = phase_team_lead_id == team_lead_id
+        is_assigned_team_lead = team_lead_id in ids
+
+        if is_phase_team_lead:
+            credited_items.add(item_key)
+            if team_lead_id in ids:
+                team_lead += 1
+            for emp_id in ids:
+                if emp_id == team_lead_id:
+                    continue
+                role = _role_for_employee_id(emp_id)
+                if role == "Intern":
+                    interns += 1
+                elif role == "Employee":
+                    employees += 1
+
+        if is_assigned_team_lead:
+            credited_items.add(item_key)
+            if not is_phase_team_lead:
+                assigned_team_lead += 1
 
     return {
         "team_lead": team_lead,
+        "assigned_team_lead": assigned_team_lead,
         "employees": employees,
         "interns": interns,
-        "aggregated_total": aggregated,
+        "aggregated_total": len(credited_items),
     }
 
 
-def _monthly_capped_score(
-    completed: int,
-    points_per_checklist: Decimal,
-    monthly_cap: Decimal,
-) -> Decimal:
-    raw = Decimal(completed) * points_per_checklist
-    return min(monthly_cap, raw)
+def _split_main_and_bonus(gross: Decimal, cap: Decimal) -> tuple[Decimal, Decimal]:
+    main = min(gross, cap)
+    bonus = gross - main
+    return main, bonus
 
 
-def _score_from_monthly_caps(
+def _main_and_bonus_from_monthly_counts(
     monthly_counts: list[int],
     points_per_checklist: Decimal,
     monthly_cap: Decimal,
-) -> Decimal:
-    total = Decimal("0")
+) -> tuple[Decimal, Decimal]:
+    main_total = Decimal("0")
+    bonus_total = Decimal("0")
     for count in monthly_counts:
-        total += _monthly_capped_score(count, points_per_checklist, monthly_cap)
-    return total
+        gross = Decimal(count) * points_per_checklist
+        month_main, month_bonus = _split_main_and_bonus(gross, monthly_cap)
+        main_total += month_main
+        bonus_total += month_bonus
+    return main_total, bonus_total
 
 
 def _employee_monthly_counts(
@@ -289,7 +308,7 @@ def _team_lead_monthly_counts(
     if team_lead_id is None:
         return [0] * len(_months_in_period(year, month, quarter))
     return [
-        _completed_breakdown_for_phase_team_lead(team_lead_id, cal_year, cal_month, None)["aggregated_total"]
+        _completed_breakdown_for_team_lead_credit(team_lead_id, cal_year, cal_month, None)["aggregated_total"]
         for cal_year, cal_month in _months_in_period(year, month, quarter)
     ]
 
@@ -346,6 +365,8 @@ def build_checklist_points(user, year: int, month: int | None = None, quarter: i
         "month": month,
         "quarter": quarter,
         "monthly_max_points": float(monthly_cap),
+        "max_main_points": period_max,
+        "max_bonus_points": None,
         "max_points": period_max,
         "months_in_period": months_count,
     }
@@ -365,9 +386,11 @@ def build_checklist_points(user, year: int, month: int | None = None, quarter: i
 
     if _is_team_lead_role(role):
         tl_id = employee_id
-        breakdown = _completed_breakdown_for_phase_team_lead(tl_id, year, month, quarter)
+        breakdown = _completed_breakdown_for_team_lead_credit(tl_id, year, month, quarter)
         monthly_counts = _team_lead_monthly_counts(tl_id, year, month, quarter)
-        total = _score_from_monthly_caps(monthly_counts, points_per_checklist, monthly_cap)
+        main_total, bonus_total = _main_and_bonus_from_monthly_counts(
+            monthly_counts, points_per_checklist, monthly_cap
+        )
         return {
             **base,
             "role_type": "team_lead",
@@ -381,9 +404,9 @@ def build_checklist_points(user, year: int, month: int | None = None, quarter: i
                 "completed_checklists": breakdown["aggregated_total"],
                 "assigned_checklists": None,
             },
-            "main_score": float(round(total, 2)),
-            "monthly_bonus": 0.0,
-            "total_points": float(round(total, 2)),
+            "main_score": float(round(main_total, 2)),
+            "monthly_bonus": float(round(bonus_total, 2)),
+            "total_points": float(round(main_total + bonus_total, 2)),
         }
 
     role_type = "intern" if role == "Intern" else "employee"
@@ -391,7 +414,9 @@ def build_checklist_points(user, year: int, month: int | None = None, quarter: i
     completed = _completed_for_ids(id_set, year, month, quarter)
     assigned = _assigned_for_employee(employee_id) if employee_id is not None else 0
     monthly_counts = _employee_monthly_counts(id_set, year, month, quarter)
-    total = _score_from_monthly_caps(monthly_counts, points_per_checklist, monthly_cap)
+    main_total, bonus_total = _main_and_bonus_from_monthly_counts(
+        monthly_counts, points_per_checklist, monthly_cap
+    )
     return {
         **base,
         "role_type": role_type,
@@ -401,9 +426,9 @@ def build_checklist_points(user, year: int, month: int | None = None, quarter: i
             "completed_checklists": completed,
             "assigned_checklists": assigned,
         },
-        "main_score": float(round(total, 2)),
-        "monthly_bonus": 0.0,
-        "total_points": float(round(total, 2)),
+        "main_score": float(round(main_total, 2)),
+        "monthly_bonus": float(round(bonus_total, 2)),
+        "total_points": float(round(main_total + bonus_total, 2)),
     }
 
 

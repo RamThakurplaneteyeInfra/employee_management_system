@@ -458,8 +458,8 @@ class ChecklistScoringTests(TestCase):
         self.assertEqual(result["max_points"], 70.0)
         self.assertEqual(result["monthly_max_points"], 70.0)
         self.assertEqual(result["main_score"], 70.0)
-        self.assertEqual(result["monthly_bonus"], 0.0)
-        self.assertEqual(result["total_points"], 70.0)
+        self.assertEqual(result["monthly_bonus"], 35.0)
+        self.assertEqual(result["total_points"], 105.0)
 
     def test_team_lead_phase_score_monthly_cap(self):
         from projects_deadline.checklist_scoring import build_checklist_points
@@ -474,8 +474,8 @@ class ChecklistScoringTests(TestCase):
         self.assertEqual(result["completed_by"]["aggregated_total"], 8)
         self.assertEqual(result["max_points"], 70.0)
         self.assertEqual(result["main_score"], 70.0)
-        self.assertEqual(result["monthly_bonus"], 0.0)
-        self.assertEqual(result["total_points"], 70.0)
+        self.assertEqual(result["monthly_bonus"], 10.0)
+        self.assertEqual(result["total_points"], 80.0)
 
     def test_team_lead_gets_credit_when_member_completes_on_led_phase(self):
         from projects_deadline.checklist_scoring import build_checklist_points
@@ -536,6 +536,80 @@ class ChecklistScoringTests(TestCase):
 
         self.assertEqual(result["completed_by"]["aggregated_total"], 8)
 
+    def test_assigned_team_lead_on_other_team_leads_phase_gets_tl_points(self):
+        from projects_deadline.checklist_scoring import build_checklist_points
+
+        other_tl = User.objects.create_user(username="200024", password="pass")
+        from accounts.models import Profile
+
+        Profile.objects.create(
+            Employee_id=other_tl,
+            Role=self.role_teamlead,
+            Name="Other Team Lead",
+            Email_id="other_tl@example.com",
+        )
+
+        project = DeadlineProject.objects.create(
+            title="Shared TL Credit",
+            status="ACTIVE",
+            created_by=self.tl,
+        )
+        DeadlineProjectPhase.objects.create(
+            project=project,
+            title="Validation",
+            team_lead_id=200024,
+            checklist=[
+                {
+                    "text": "Checklist by another TL",
+                    "checked": True,
+                    "checkedDate": "2026-06-11",
+                    "employeeIds": [200018],
+                    "note": "",
+                },
+            ],
+            sort_order=0,
+        )
+
+        result_phase_tl = build_checklist_points(other_tl, 2026, month=6)
+        result_assigned_tl = build_checklist_points(self.tl, 2026, month=6)
+
+        self.assertEqual(result_phase_tl["completed_by"]["aggregated_total"], 1)
+        self.assertEqual(result_phase_tl["total_points"], 10.0)
+        self.assertEqual(result_assigned_tl["completed_by"]["assigned_team_lead"], 1)
+        self.assertEqual(result_assigned_tl["completed_by"]["aggregated_total"], 1)
+        self.assertEqual(result_assigned_tl["total_points"], 10.0)
+
+    def test_same_team_lead_not_double_counted_when_phase_lead_and_assignee(self):
+        from projects_deadline.checklist_scoring import build_checklist_points
+
+        project = DeadlineProject.objects.create(
+            title="No Double Count",
+            status="ACTIVE",
+            created_by=self.tl,
+        )
+        DeadlineProjectPhase.objects.create(
+            project=project,
+            title="Discovery",
+            team_lead_id=200018,
+            checklist=[
+                {
+                    "text": "TL owns and completes",
+                    "checked": True,
+                    "checkedDate": "2026-06-12",
+                    "employeeIds": [200018],
+                    "note": "",
+                },
+            ],
+            sort_order=0,
+        )
+
+        result = build_checklist_points(self.tl, 2026, month=6)
+
+        self.assertEqual(result["completed_by"]["team_lead"], 1)
+        self.assertEqual(result["completed_by"]["assigned_team_lead"], 0)
+        self.assertEqual(result["completed_by"]["aggregated_total"], 1)
+        self.assertEqual(result["total_points"], 10.0)
+
     def test_employee_yearly_score_sums_monthly_caps(self):
         from projects_deadline.checklist_scoring import build_checklist_points
 
@@ -545,4 +619,37 @@ class ChecklistScoringTests(TestCase):
         self.assertEqual(result["max_points"], 840.0)
         self.assertEqual(result["months_in_period"], 12)
         self.assertEqual(result["counts"]["completed_checklists"], 6)
-        self.assertEqual(result["total_points"], 70.0)
+        self.assertEqual(result["main_score"], 70.0)
+        self.assertEqual(result["monthly_bonus"], 35.0)
+        self.assertEqual(result["total_points"], 105.0)
+
+    def test_team_lead_bonus_only_when_above_monthly_main_cap(self):
+        from projects_deadline.checklist_scoring import build_checklist_points
+
+        project = DeadlineProject.objects.create(
+            title="Bonus Check",
+            status="ACTIVE",
+            created_by=self.tl,
+        )
+        DeadlineProjectPhase.objects.create(
+            project=project,
+            title="Bonus Month",
+            team_lead_id=200018,
+            checklist=[
+                {
+                    "text": "Single checklist",
+                    "checked": True,
+                    "checkedDate": "2026-08-01",
+                    "employeeIds": [200018],
+                    "note": "",
+                },
+            ],
+            sort_order=0,
+        )
+
+        result = build_checklist_points(self.tl, 2026, month=8)
+
+        self.assertEqual(result["completed_by"]["aggregated_total"], 1)
+        self.assertEqual(result["main_score"], 10.0)
+        self.assertEqual(result["monthly_bonus"], 0.0)
+        self.assertEqual(result["total_points"], 10.0)
