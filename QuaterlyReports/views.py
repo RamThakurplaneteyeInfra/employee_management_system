@@ -1,11 +1,12 @@
 """
 Quaterly Reports API views. Base path: {{baseurl}}/ (mounted at root).
 - getMonthlySchedule (GET), addDayEntries (POST), getUserEntries (GET), changeStatus (PATCH), deleteEntry (DELETE).
-- addMeetingHeadSubhead (POST), get_functions_and_actionable_goals (GET).
+- addMeetingHeadSubhead (POST), get_functions_and_actionable_goals (GET), update_functions_and_actionable_goals (PATCH).
 - ActionableEntries (GET/POST), ActionableEntriesByID (GET/PUT/PATCH/DELETE), .../share/ (POST).
 - ActionableEntriesCoAuthor, ActionableEntriesSharedWith (list + detail). EntryPermission applied.
 """
 from django.http import Http404
+from django.db import transaction
 from ems.RequiredImports import (
     sync_to_async,
     Q,
@@ -22,6 +23,7 @@ from ems.RequiredImports import (
 )
 from django.db.models import Prefetch
 from ems.verify_methods import *
+from ems.cache_utils import invalidate_get_cache_for_prefix_all_users
 from accounts.filters import _get_department_obj_sync
 from accounts.models import Departments
 from project.models import Product
@@ -329,6 +331,199 @@ async def get_functions_and_actionable_goals(request: HttpRequest):
         return JsonResponse(response_data, safe=False)
     except Functions.DoesNotExist:
         return JsonResponse({"error": f"Function '{function_name}' not found."}, status=404)
+
+
+# ==================== update_functions_and_actionable_goals ====================
+# Update main_goal / purpose / grp_id for catalog goals. Does not create or delete rows.
+# URL: {{baseurl}}/update_functions_and_actionable_goals/
+# Method: PATCH
+class _GoalsPatchError(Exception):
+    """Validation/lookup error for goals PATCH; carries HTTP status."""
+
+    def __init__(self, message, status_code=400):
+        super().__init__(message)
+        self.status_code = status_code
+
+
+def _patch_functions_goals_sync(data):
+    """
+    Batch-update FunctionsGoals.Maingoal and ActionableGoals.purpose/grp under one function.
+    Uses bulk_update + few queries; never deletes (avoids cascading FunctionsEntries).
+    """
+    from .npc_goals import NPC_USER_GOALS_MAIN_LABEL
+
+    _UNSET = object()
+
+    if not isinstance(data, dict):
+        raise _GoalsPatchError("Request body must be a JSON object.")
+
+    function_name = (data.get("function_name") or "").strip()
+    functional_goals = data.get("functional_goals")
+    if not function_name:
+        raise _GoalsPatchError("function_name is required.")
+    if not isinstance(functional_goals, list) or not functional_goals:
+        raise _GoalsPatchError("functional_goals must be a non-empty list.")
+
+    try:
+        function_obj = Functions.objects.get(function__iexact=function_name)
+    except Functions.DoesNotExist:
+        raise _GoalsPatchError(f"Function '{function_name}' not found.", status_code=404)
+
+    fg_ids = []
+    fg_main_by_id = {}
+    # (actionable_id, functional_id, purpose_or_UNSET, grp_provided, grp_code_or_None)
+    ag_specs = []
+
+    for fg in functional_goals:
+        if not isinstance(fg, dict):
+            raise _GoalsPatchError("Each functional_goals item must be an object.")
+        fid = fg.get("functional_id")
+        if fid is None:
+            raise _GoalsPatchError("functional_id is required for each functional goal.")
+        try:
+            fid = int(fid)
+        except (TypeError, ValueError):
+            raise _GoalsPatchError(f"Invalid functional_id: {fg.get('functional_id')}.")
+        fg_ids.append(fid)
+        if "main_goal" in fg and fg["main_goal"] is not None:
+            main_goal = str(fg["main_goal"]).strip()
+            if not main_goal:
+                raise _GoalsPatchError(f"main_goal cannot be empty for functional_id {fid}.")
+            if len(main_goal) > 100:
+                raise _GoalsPatchError(f"main_goal too long for functional_id {fid} (max 100).")
+            if main_goal == NPC_USER_GOALS_MAIN_LABEL:
+                raise _GoalsPatchError("Cannot set main_goal to the reserved NPC label.")
+            fg_main_by_id[fid] = main_goal
+
+        for ag in fg.get("actionable_goals") or []:
+            if not isinstance(ag, dict):
+                raise _GoalsPatchError("Each actionable_goals item must be an object.")
+            aid = ag.get("actionable_id")
+            if aid is None:
+                raise _GoalsPatchError("actionable_id is required for each actionable goal.")
+            try:
+                aid = int(aid)
+            except (TypeError, ValueError):
+                raise _GoalsPatchError(f"Invalid actionable_id: {ag.get('actionable_id')}.")
+            purpose = _UNSET
+            if "purpose" in ag and ag["purpose"] is not None:
+                purpose = str(ag["purpose"]).strip()
+                if not purpose:
+                    raise _GoalsPatchError(f"purpose cannot be empty for actionable_id {aid}.")
+                if len(purpose) > 255:
+                    raise _GoalsPatchError(f"purpose too long for actionable_id {aid} (max 255).")
+            grp_provided = "grp_id" in ag
+            grp_code = None
+            if grp_provided:
+                raw = ag["grp_id"]
+                grp_code = None if raw is None or str(raw).strip() == "" else str(raw).strip()
+            ag_specs.append((aid, fid, purpose, grp_provided, grp_code))
+
+    if not fg_main_by_id and not ag_specs:
+        raise _GoalsPatchError("Nothing to update. Provide main_goal and/or actionable_goals fields.")
+
+    existing_fgs = {
+        fg.id: fg
+        for fg in FunctionsGoals.objects.filter(Function=function_obj, id__in=fg_ids).exclude(
+            Maingoal=NPC_USER_GOALS_MAIN_LABEL
+        )
+    }
+    missing_fg = sorted(set(fg_ids) - set(existing_fgs.keys()))
+    if missing_fg:
+        raise _GoalsPatchError(
+            f"Functional goal id(s) not found under this function: {missing_fg}.",
+            status_code=404,
+        )
+
+    ag_ids = [aid for aid, _, _, _, _ in ag_specs]
+    existing_ags = {
+        ag.id: ag
+        for ag in ActionableGoals.objects.filter(
+            id__in=ag_ids,
+            FunctionGoal_id__in=existing_fgs.keys(),
+        )
+    }
+    for aid, fid, _, _, _ in ag_specs:
+        ag = existing_ags.get(aid)
+        if ag is None:
+            raise _GoalsPatchError(
+                f"Actionable goal id {aid} not found under this function.",
+                status_code=404,
+            )
+        if ag.FunctionGoal_id != fid:
+            raise _GoalsPatchError(
+                f"Actionable goal id {aid} does not belong to functional_id {fid}.",
+                status_code=400,
+            )
+
+    grp_codes = {code for _, _, _, provided, code in ag_specs if provided and code}
+    grp_map = {}
+    if grp_codes:
+        grp_map = {g.grp: g for g in GRPS.objects.filter(grp__in=grp_codes)}
+        missing_grps = sorted(grp_codes - set(grp_map.keys()))
+        if missing_grps:
+            raise _GoalsPatchError(f"GRP not found: {missing_grps}.", status_code=404)
+
+    fg_to_save = []
+    for fid, main_goal in fg_main_by_id.items():
+        fg = existing_fgs[fid]
+        if fg.Maingoal != main_goal:
+            fg.Maingoal = main_goal
+            fg_to_save.append(fg)
+
+    ag_to_save = []
+    for aid, _, purpose, grp_provided, grp_code in ag_specs:
+        ag = existing_ags[aid]
+        changed = False
+        if purpose is not _UNSET and ag.purpose != purpose:
+            ag.purpose = purpose
+            changed = True
+        if grp_provided:
+            new_grp = grp_map.get(grp_code) if grp_code else None
+            new_grp_pk = new_grp.pk if new_grp else None
+            if ag.grp_id != new_grp_pk:
+                ag.grp = new_grp
+                changed = True
+        if changed:
+            ag_to_save.append(ag)
+
+    with transaction.atomic():
+        if fg_to_save:
+            FunctionsGoals.objects.bulk_update(fg_to_save, ["Maingoal"])
+        if ag_to_save:
+            ActionableGoals.objects.bulk_update(ag_to_save, ["purpose", "grp"])
+
+    if fg_to_save or ag_to_save:
+        invalidate_get_cache_for_prefix_all_users("get_functions_and_actionable_goals")
+        invalidate_get_cache_for_prefix_all_users("get_functions")
+
+    return {
+        "message": "Goals updated successfully",
+        "function": function_obj.function,
+        "updated": {
+            "functional_goals": len(fg_to_save),
+            "actionable_goals": len(ag_to_save),
+        },
+    }
+
+
+@login_required
+@csrf_exempt
+async def update_functions_and_actionable_goals(request: HttpRequest):
+    verify_method = verifyPatch(request)
+    if verify_method:
+        return verify_method
+    try:
+        data = load_data(request)
+    except Exception:
+        return JsonResponse({"error": "Invalid JSON body."}, status=400)
+    try:
+        result = await sync_to_async(_patch_functions_goals_sync)(data)
+        return JsonResponse(result, status=200)
+    except _GoalsPatchError as e:
+        return JsonResponse({"error": str(e)}, status=e.status_code)
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
 
 
 # ==================== entry_list_create ====================

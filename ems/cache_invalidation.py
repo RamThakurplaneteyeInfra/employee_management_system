@@ -282,9 +282,11 @@ AFFECTED_GET_PREFIXES_BY_MODEL = {
     ],
     "QuaterlyReports.FunctionsGoals": [
         "get_functions",
+        "get_functions_and_actionable_goals",
     ],
     "QuaterlyReports.ActionableGoals": [
         "get_functions",
+        "get_functions_and_actionable_goals",
     ],
 }
 

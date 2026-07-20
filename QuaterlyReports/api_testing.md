@@ -151,6 +151,36 @@
 ```
 **notes:** 400 if function_name missing; 404 if function not found.
 
+### update_functions_and_actionable_goals
+
+**url:** `{{baseurl}}/update_functions_and_actionable_goals/`  
+**method:** PATCH  
+**auth:** login required  
+**body:**
+```json
+{
+  "function_name": "Development",
+  "functional_goals": [
+    {
+      "functional_id": 1,
+      "main_goal": "Deliver features on time",
+      "actionable_goals": [
+        { "actionable_id": 1, "purpose": "Sprint delivery and QA", "grp_id": "G1" }
+      ]
+    }
+  ]
+}
+```
+**sample_response:**
+```json
+{
+  "message": "Goals updated successfully",
+  "function": "Development",
+  "updated": { "functional_goals": 1, "actionable_goals": 1 }
+}
+```
+**notes:** Updates only (no create/delete). IDs must belong to `function_name`. NPC catalog bucket is excluded. `grp_id` null/"" clears GRP. 400/404 on validation/not found.
+
 ---
 
 ## 3. Actionable entries (FunctionsEntries)
