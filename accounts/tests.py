@@ -1137,8 +1137,8 @@ class MmrRgScoringTargetTests(TestCase):
 
     def test_custom_customer_panel_target_changes_score(self):
         from CustomerPanel.customer_panel_scoring import build_customer_panel_entries_points
-        from CustomerPanel.models import CustomerPanelEntry
-        from datetime import datetime
+        from CustomerPanel.models import CustomerPanelAmountLog, CustomerPanelEntry
+        from datetime import date
 
         self.MmrRgScoringTarget.objects.create(
             profile=self.mmr_emp.accounts_profile,
@@ -1153,8 +1153,11 @@ class MmrRgScoringTargetTests(TestCase):
             total=self.Decimal("350000"),
             created_by=self.mmr_emp,
         )
-        CustomerPanelEntry.objects.filter(pk=entry.pk).update(
-            created_at=timezone.make_aware(datetime(2026, 6, 10, 10, 0, 0))
+        CustomerPanelAmountLog.objects.create(
+            entry=entry,
+            amount=self.Decimal("350000"),
+            date=date(2026, 6, 10),
+            created_by=self.mmr_emp,
         )
 
         result = build_customer_panel_entries_points(self.mmr_emp, 2026, month=6)
@@ -1164,8 +1167,8 @@ class MmrRgScoringTargetTests(TestCase):
 
     def test_yearly_scoring_uses_month_specific_targets(self):
         from CustomerPanel.customer_panel_scoring import build_customer_panel_entries_points
-        from CustomerPanel.models import CustomerPanelEntry
-        from datetime import datetime
+        from CustomerPanel.models import CustomerPanelAmountLog, CustomerPanelEntry
+        from datetime import date
 
         self.MmrRgScoringTarget.objects.create(
             profile=self.mmr_emp.accounts_profile,
@@ -1188,8 +1191,11 @@ class MmrRgScoringTargetTests(TestCase):
                 total=self.Decimal(amount),
                 created_by=self.mmr_emp,
             )
-            CustomerPanelEntry.objects.filter(pk=entry.pk).update(
-                created_at=timezone.make_aware(datetime(2026, month, 10, 10, 0, 0))
+            CustomerPanelAmountLog.objects.create(
+                entry=entry,
+                amount=self.Decimal(amount),
+                date=date(2026, month, 10),
+                created_by=self.mmr_emp,
             )
 
         result = build_customer_panel_entries_points(self.mmr_emp, 2026)

@@ -136,12 +136,19 @@ def _entry_to_dict(obj: CustomerPanelEntry):
 
 
 def _amount_log_to_dict(obj: CustomerPanelAmountLog):
+    created_by_username = None
+    created_by_name = None
+    if obj.created_by_id is not None and obj.created_by is not None:
+        created_by_username = str(obj.created_by.username)
+        created_by_name = _get_user_display_name(obj.created_by)
     return {
         "id": obj.id,
         "entry_id": obj.entry_id,
         "amount": float(obj.amount),
         "date": str(obj.date),
         "notes": obj.notes,
+        "created_by": created_by_username,
+        "created_by_name": created_by_name,
         "created_at": gmt_to_ist_str(obj.created_at, "%d/%m/%Y %H:%M:%S") if obj.created_at else None,
         "updated_at": gmt_to_ist_str(obj.updated_at, "%d/%m/%Y %H:%M:%S") if obj.updated_at else None,
     }
@@ -222,9 +229,11 @@ def _entries_points_sync(request: HttpRequest):
 @login_required
 async def entries_points(request: HttpRequest):
     """
-    Customer panel entry performance points (MMR/RG only).
+    Customer panel performance points (MMR/RG only), from amount logs.
+    Points go to the user who entered each amount log, in the month of the
+    log's selected date. ₹5,00,000 logged in a month = 40 main points
+    (₹12,500 per point); excess as bonus.
     GET /customerpanelapi/entries/points/?year=2026&month=6
-    ₹5,00,000 entered in a month = 40 main points (₹12,500 per point); excess as bonus.
     Optional: ?employee=<username> (HR / Admin / MD / TeamLead for team members)
     """
     if request.method != "GET":
@@ -516,11 +525,15 @@ async def entry_members(request: HttpRequest, entry_id: int):
 
 
 def _list_amount_logs_sync(entry_id):
-    qs = CustomerPanelAmountLog.objects.filter(entry_id=entry_id).order_by("-date", "-created_at")
+    qs = (
+        CustomerPanelAmountLog.objects.filter(entry_id=entry_id)
+        .select_related("created_by", "created_by__accounts_profile")
+        .order_by("-date", "-created_at")
+    )
     return [_amount_log_to_dict(obj) for obj in qs]
 
 
-def _create_amount_logs_sync(entry_id, items):
+def _create_amount_logs_sync(entry_id, items, user=None):
     if not isinstance(items, list) or not items:
         raise ValueError("items must be a non-empty array")
 
@@ -541,6 +554,7 @@ def _create_amount_logs_sync(entry_id, items):
                 amount=amount,
                 date=date_value,
                 notes=notes,
+                created_by=user if (user is not None and user.is_authenticated) else None,
             )
         )
 
@@ -576,7 +590,7 @@ async def amount_log_list_create(request: HttpRequest, entry_id: int):
 
     items = data.get("items")
     try:
-        created = await sync_to_async(_create_amount_logs_sync)(entry_id, items)
+        created = await sync_to_async(_create_amount_logs_sync)(entry_id, items, request.user)
     except ValueError as e:
         return JsonResponse({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
     except Exception as e:

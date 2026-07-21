@@ -1,12 +1,15 @@
 """
-Customer panel entry performance points from CustomerPanelEntry (created_by).
+Customer panel entry performance points from CustomerPanelAmountLog (created_by).
+
+Points are attributed to the user who entered each amount log, in the month of
+the log's selected date (log.date), not the entry creator / creation month.
 
 Applies only when the employee's Profile.functions contains any of:
 - MMR
 - RG
 
-Scoring rules (per calendar month, entry total amounts):
-- ₹5,00,000 in entered entry value = 40 main_score points (₹12,500 per point).
+Scoring rules (per calendar month, amount-log amounts):
+- ₹5,00,000 in logged amounts = 40 main_score points (₹12,500 per point).
 - Points above 40 main_score in a month count as monthly_bonus.
 - Quarter / year totals sum monthly main_score and monthly_bonus across months in the period.
 """
@@ -18,13 +21,12 @@ from decimal import Decimal
 
 from django.contrib.auth import get_user_model
 from django.db.models import Q
-from django.utils import timezone
 
 from accounts.leave_scoring import parse_leave_points_period, resolve_leave_points_user
 from accounts.mmr_rg_scoring_targets import load_mmr_rg_targets_for_months, resolve_mmr_rg_scoring_targets
 from accounts.models import Profile
 
-from .models import CustomerPanelEntry
+from .models import CustomerPanelAmountLog
 
 User = get_user_model()
 
@@ -45,8 +47,8 @@ _FY_QUARTER_MONTHS = {
 def _fy_quarter_date_filter(year: int, quarter: int) -> Q:
     months = _FY_QUARTER_MONTHS[quarter]
     if quarter == 4:
-        return Q(created_at__year=year + 1, created_at__month__in=months)
-    return Q(created_at__year=year, created_at__month__in=months)
+        return Q(date__year=year + 1, date__month__in=months)
+    return Q(date__year=year, date__month__in=months)
 
 
 def _period_label(year: int, month: int | None, quarter: int | None) -> str:
@@ -105,31 +107,33 @@ def _is_mmr_rg_user(profile: Profile | None) -> bool:
     return bool(_profile_function_names_upper(profile) & MMR_RG_FUNCTIONS)
 
 
-def _entry_month_key(entry: CustomerPanelEntry) -> tuple[int, int] | None:
-    created = entry.created_at
-    if created is None:
+def _log_month_key(log: CustomerPanelAmountLog) -> tuple[int, int] | None:
+    # log.date is a plain DateField chosen by the user; no timezone conversion.
+    if log.date is None:
         return None
-    if timezone.is_aware(created):
-        created = timezone.localtime(created)
-    return created.year, created.month
+    return log.date.year, log.date.month
 
 
-def _entries_for_creator(user, year: int, month: int | None, quarter: int | None):
-    qs = CustomerPanelEntry.objects.filter(created_by=user).order_by("created_at", "id")
+def _logs_for_creator(user, year: int, month: int | None, quarter: int | None):
+    qs = (
+        CustomerPanelAmountLog.objects.filter(created_by=user)
+        .select_related("entry")
+        .order_by("date", "id")
+    )
     if month is not None:
-        qs = qs.filter(created_at__year=year, created_at__month=month)
+        qs = qs.filter(date__year=year, date__month=month)
     elif quarter is not None:
         qs = qs.filter(_fy_quarter_date_filter(year, quarter))
     else:
-        qs = qs.filter(created_at__year=year)
+        qs = qs.filter(date__year=year)
     return qs
 
 
-def _month_amount(entries) -> Decimal:
+def _month_amount(logs) -> Decimal:
     total = Decimal("0")
-    for entry in entries:
-        if entry.total is not None:
-            total += entry.total
+    for log in logs:
+        if log.amount is not None:
+            total += log.amount
     return total
 
 
@@ -145,33 +149,32 @@ def _month_scores_for_amount(
     return main, bonus, main + bonus
 
 
-def _build_events_for_month(entries, target_amount: Decimal | None = None) -> list[dict]:
+def _build_events_for_month(logs, target_amount: Decimal | None = None) -> list[dict]:
     target = target_amount or MONTHLY_TARGET_AMOUNT
     amount_per_main_point = target / MONTHLY_MAX_MAIN_POINTS if MONTHLY_MAX_MAIN_POINTS else Decimal("0")
     events = []
     main_so_far = Decimal("0")
-    for entry in entries:
-        amount = entry.total or Decimal("0")
+    for log in logs:
+        amount = log.amount or Decimal("0")
         raw_pts = amount / amount_per_main_point if amount > 0 and amount_per_main_point > 0 else Decimal("0")
         main_room = max(Decimal("0"), MONTHLY_MAX_MAIN_POINTS - main_so_far)
-        entry_main = min(raw_pts, main_room)
-        entry_bonus = raw_pts - entry_main
-        main_so_far += entry_main
+        log_main = min(raw_pts, main_room)
+        log_bonus = raw_pts - log_main
+        main_so_far += log_main
 
-        created = entry.created_at
-        if created is not None and timezone.is_aware(created):
-            created = timezone.localtime(created)
-
+        entry = getattr(log, "entry", None)
         base = {
-            "entry_id": entry.pk,
-            "business_name": entry.business_name or "",
-            "total_amount": float(amount),
-            "created_at": created.date().isoformat() if created else None,
+            "log_id": log.pk,
+            "entry_id": log.entry_id,
+            "business_name": (getattr(entry, "business_name", None) or ""),
+            "amount": float(amount),
+            "date": log.date.isoformat() if log.date else None,
+            "notes": log.notes,
         }
-        if entry_main > 0:
-            events.append({**base, "points_type": "main", "points": float(round(entry_main, 2))})
-        if entry_bonus > 0:
-            events.append({**base, "points_type": "bonus", "points": float(round(entry_bonus, 2))})
+        if log_main > 0:
+            events.append({**base, "points_type": "main", "points": float(round(log_main, 2))})
+        if log_bonus > 0:
+            events.append({**base, "points_type": "bonus", "points": float(round(log_bonus, 2))})
     return events
 
 
@@ -242,7 +245,7 @@ def build_customer_panel_entries_points(
         "max_bonus_points": None,
         "max_points": float(MONTHLY_MAX_MAIN_POINTS * months_count),
         "months_in_period": months_count,
-        "counts": {"entries": 0, "total_amount": 0.0},
+        "counts": {"amount_logs": 0, "entries": 0, "total_amount": 0.0},
         "main_score": 0.0,
         "monthly_bonus": 0.0,
         "total_points": 0.0,
@@ -252,23 +255,25 @@ def build_customer_panel_entries_points(
     if not eligible:
         return base
 
-    monthly_entries: dict[tuple[int, int], list] = defaultdict(list)
-    for entry in _entries_for_creator(user, year, month, quarter):
-        month_key = _entry_month_key(entry)
+    monthly_logs: dict[tuple[int, int], list] = defaultdict(list)
+    entry_ids: set[int] = set()
+    for log in _logs_for_creator(user, year, month, quarter):
+        month_key = _log_month_key(log)
         if month_key is None:
             continue
-        monthly_entries[month_key].append(entry)
+        monthly_logs[month_key].append(log)
+        entry_ids.add(log.entry_id)
 
     main_total = Decimal("0")
     bonus_total = Decimal("0")
-    entry_count = 0
+    log_count = 0
     amount_total = Decimal("0")
     events: list[dict] = []
 
     for month_key in months_in_period:
-        entries = monthly_entries.get(month_key, [])
-        entry_count += len(entries)
-        month_amount = _month_amount(entries)
+        logs = monthly_logs.get(month_key, [])
+        log_count += len(logs)
+        month_amount = _month_amount(logs)
         amount_total += month_amount
         y, m = month_key
         month_custom = target_rows.get((y, m)) if eligible else None
@@ -287,14 +292,15 @@ def build_customer_panel_entries_points(
         month_main, month_bonus, _ = _month_scores_for_amount(month_amount, month_target_amount)
         main_total += month_main
         bonus_total += month_bonus
-        if month is not None or entries:
-            events.extend(_build_events_for_month(entries, month_target_amount))
+        if month is not None or logs:
+            events.extend(_build_events_for_month(logs, month_target_amount))
 
     total_points = main_total + bonus_total
     return {
         **base,
         "counts": {
-            "entries": entry_count,
+            "amount_logs": log_count,
+            "entries": len(entry_ids),
             "total_amount": float(round(amount_total, 2)),
         },
         "main_score": float(round(main_total, 2)),

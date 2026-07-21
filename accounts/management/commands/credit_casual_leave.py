@@ -1,19 +1,16 @@
 """
-Quarterly casual-leave reset for every active employee.
+Quarterly casual-leave credit for every active employee.
 
 Run on the 1st of January, April, July and October (Windows Task Scheduler /
 cron / Celery Beat). Each successful run does the following, and ONLY the
 following:
 
-* HARD RESET - `LeaveSummary.casual_leaves = Decimal("2")` for every employee
-  whose `Profile.Date_of_join` is on or before today, whose role is not Intern,
-  and whose `last_casual_credit_on` is NOT in the current calendar quarter.
+* Adds Decimal("2") to `LeaveSummary.casual_leaves` for every employee whose
+  `Profile.Date_of_join` is on or before today, whose role is not Intern, and
+  whose `last_casual_credit_on` is NOT in the current calendar quarter.
 
-  This is an ASSIGNMENT (=), not an addition (+=). Whatever balance the user
-  had before (0, 0.5, 1, 1.5, even 2) is DISCARDED and replaced with exactly
-  Decimal("2"). This intentionally implements the "use it or lose it" policy:
-  any unused casual leave from the previous quarter is wiped the moment the
-  new quarter begins.
+  Casual leave ACCUMULATES - unused balance from previous quarters carries
+  forward and the new quarterly credit is added on top.
 
 * Stamps `last_casual_credit_on = today` on the same rows so re-runs inside
   the same quarter are no-ops (idempotent).
@@ -24,7 +21,7 @@ invoked.
 
 Examples
 --------
-Dry run (no DB writes, just prints how many rows WOULD be reset):
+Dry run (no DB writes, just prints how many rows WOULD be credited):
     python manage.py credit_casual_leave --dry-run
 
 Real run:
@@ -41,6 +38,7 @@ from decimal import Decimal
 
 from django.core.management.base import BaseCommand
 from django.db import transaction
+from django.db.models import F
 from django.utils import timezone
 
 from accounts.models import LeaveSummary, Profile
@@ -54,7 +52,7 @@ def _quarter_start(today):
 
 class Command(BaseCommand):
     help = (
-        "HARD-RESETS every eligible employee's casual_leaves to 2. Idempotent "
+        "Credits +2 casual leaves to every eligible employee. Idempotent "
         "within the same calendar quarter. Run quarterly (Jan/Apr/Jul/Oct 1st). "
         "Use --dry-run to preview."
     )
@@ -63,7 +61,7 @@ class Command(BaseCommand):
         parser.add_argument(
             "--dry-run",
             action="store_true",
-            help="Show the number of rows that would be reset without writing to DB.",
+            help="Show the number of rows that would be credited without writing to DB.",
         )
 
     def handle(self, *args, **options):
@@ -84,7 +82,7 @@ class Command(BaseCommand):
             ))
             return
 
-        # Skip rows already reset in the current quarter (last_casual_credit_on >= q_start).
+        # Skip rows already credited in the current quarter (last_casual_credit_on >= q_start).
         affected_qs = (
             LeaveSummary.objects.filter(user__username__in=eligible_usernames)
             .exclude(last_casual_credit_on__gte=q_start)
@@ -93,25 +91,25 @@ class Command(BaseCommand):
 
         if affected_count == 0:
             self.stdout.write(self.style.NOTICE(
-                f"All eligible employees already reset for quarter starting {q_start:%Y-%m-%d}; nothing to do."
+                f"All eligible employees already credited for quarter starting {q_start:%Y-%m-%d}; nothing to do."
             ))
             return
 
         if dry_run:
             self.stdout.write(self.style.NOTICE(
-                f"[dry-run] Would HARD-RESET casual_leaves to 2 for {affected_count} employee(s) "
+                f"[dry-run] Would credit +2 casual leaves to {affected_count} employee(s) "
                 f"for quarter starting {q_start:%Y-%m-%d}."
             ))
             return
 
-        # HARD RESET: assignment, not addition. Previous quarter's unused
-        # casual leave is discarded by design.
+        # Atomic, single UPDATE. F() adds on top of the existing balance so
+        # unused casual leave carries forward.
         with transaction.atomic():
             updated = affected_qs.update(
-                casual_leaves=Decimal("2"),
+                casual_leaves=F("casual_leaves") + Decimal("2"),
                 last_casual_credit_on=today,
             )
 
         self.stdout.write(self.style.SUCCESS(
-            f"Reset casual_leaves to 2 for {updated} employee(s) for quarter starting {q_start:%Y-%m-%d}."
+            f"Credited +2 casual leaves to {updated} employee(s) for quarter starting {q_start:%Y-%m-%d}."
         ))

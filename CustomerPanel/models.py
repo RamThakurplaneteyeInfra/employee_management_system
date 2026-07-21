@@ -106,6 +106,16 @@ class CustomerPanelAmountLog(models.Model):
     amount = models.DecimalField(max_digits=14, decimal_places=2)
     date = models.DateField()
     notes = models.TextField(blank=True, null=True)
+    # Who added this amount log. Nullable for rows created before this field
+    # existed (backfilled to the entry's created_by by migration 0006).
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="customer_panel_amount_logs",
+        db_index=True,
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
