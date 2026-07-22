@@ -1,5 +1,5 @@
 """
-Free-text actionable goals (NPC function + Intern role): auto-create ActionableGoals rows.
+Free-text actionable goals (NPC / DM function + Intern role): auto-create ActionableGoals rows.
 
 Free-text goals are stored under a dedicated FunctionsGoals bucket and are excluded
 from GET /get_functions_and_actionable_goals/ so the catalog API is not polluted.
@@ -11,14 +11,18 @@ from accounts.models import Functions, Profile
 from .models import ActionableGoals, FunctionsGoals
 
 NPC_FUNCTION_LABEL = "NPC"
+DM_FUNCTION_LABEL = "DM"
 INTERN_ROLE_NAME = "Intern"
 NPC_USER_GOALS_MAIN_LABEL = "NPC user goals"
 NPC_GOAL_TEXT_MAX_LENGTH = 255
 
 
-def user_has_npc_function(user) -> bool:
-    """True when the user's profile includes the NPC function."""
+def _user_has_function(user, function_label: str) -> bool:
+    """True when the user's profile includes the given function (case-insensitive)."""
     if not user or not getattr(user, "is_authenticated", False):
+        return False
+    label = (function_label or "").strip().upper()
+    if not label:
         return False
     profile = (
         Profile.objects.filter(Employee_id=user)
@@ -28,9 +32,19 @@ def user_has_npc_function(user) -> bool:
     if not profile:
         return False
     for fn in profile.functions.all():
-        if (getattr(fn, "function", None) or "").strip().upper() == NPC_FUNCTION_LABEL:
+        if (getattr(fn, "function", None) or "").strip().upper() == label:
             return True
     return False
+
+
+def user_has_npc_function(user) -> bool:
+    """True when the user's profile includes the NPC function."""
+    return _user_has_function(user, NPC_FUNCTION_LABEL)
+
+
+def user_has_dm_function(user) -> bool:
+    """True when the user's profile includes the DM function."""
+    return _user_has_function(user, DM_FUNCTION_LABEL)
 
 
 def user_has_intern_role(user) -> bool:
@@ -48,8 +62,12 @@ def user_has_intern_role(user) -> bool:
 
 
 def user_can_use_free_text_goal(user) -> bool:
-    """NPC function or Intern role may create entries with goal_text instead of catalog goal."""
-    return user_has_npc_function(user) or user_has_intern_role(user)
+    """NPC/DM function or Intern role may create entries with goal_text instead of catalog goal."""
+    return (
+        user_has_npc_function(user)
+        or user_has_dm_function(user)
+        or user_has_intern_role(user)
+    )
 
 
 def get_or_create_npc_function() -> Functions:
