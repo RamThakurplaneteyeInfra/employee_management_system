@@ -4,7 +4,7 @@ from django.contrib.auth import get_user_model
 
 User = get_user_model()
 
-_GROUP_CREATE_ROLES = frozenset({"MD", "TeamLead", "Teamlead"})
+_GROUP_CREATE_ROLES = frozenset({"MD", "TeamLead", "Teamlead", "HR", "Hr"})
 
 
 def can_manage_group_members(user: User, group: GroupChats) -> bool:
