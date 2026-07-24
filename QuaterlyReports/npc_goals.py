@@ -1,5 +1,6 @@
 """
-Free-text actionable goals (NPC / DM function + Intern role): auto-create ActionableGoals rows.
+Free-text actionable goals (NPC / DM / no-function profiles + Intern role):
+auto-create ActionableGoals rows.
 
 Free-text goals are stored under a dedicated FunctionsGoals bucket and are excluded
 from GET /get_functions_and_actionable_goals/ so the catalog API is not polluted.
@@ -17,18 +18,23 @@ NPC_USER_GOALS_MAIN_LABEL = "NPC user goals"
 NPC_GOAL_TEXT_MAX_LENGTH = 255
 
 
+def _profile_for_user(user):
+    if not user or not getattr(user, "is_authenticated", False):
+        return None
+    return (
+        Profile.objects.filter(Employee_id=user)
+        .prefetch_related("functions")
+        .select_related("Role")
+        .first()
+    )
+
+
 def _user_has_function(user, function_label: str) -> bool:
     """True when the user's profile includes the given function (case-insensitive)."""
-    if not user or not getattr(user, "is_authenticated", False):
-        return False
     label = (function_label or "").strip().upper()
     if not label:
         return False
-    profile = (
-        Profile.objects.filter(Employee_id=user)
-        .prefetch_related("functions")
-        .first()
-    )
+    profile = _profile_for_user(user)
     if not profile:
         return False
     for fn in profile.functions.all():
@@ -47,26 +53,32 @@ def user_has_dm_function(user) -> bool:
     return _user_has_function(user, DM_FUNCTION_LABEL)
 
 
+def user_has_no_functions(user) -> bool:
+    """True when the user has a profile with zero assigned functions."""
+    profile = _profile_for_user(user)
+    if not profile:
+        return False
+    return not profile.functions.exists()
+
+
 def user_has_intern_role(user) -> bool:
     """True when the user's profile Role is Intern."""
-    if not user or not getattr(user, "is_authenticated", False):
-        return False
-    profile = (
-        Profile.objects.filter(Employee_id=user)
-        .select_related("Role")
-        .first()
-    )
+    profile = _profile_for_user(user)
     if not profile or not profile.Role:
         return False
     return (profile.Role.role_name or "").strip() == INTERN_ROLE_NAME
 
 
 def user_can_use_free_text_goal(user) -> bool:
-    """NPC/DM function or Intern role may create entries with goal_text instead of catalog goal."""
+    """
+    Allow goal_text when the user has NPC/DM, Intern role, or no functions at all
+    (no catalog goals to pick from).
+    """
     return (
         user_has_npc_function(user)
         or user_has_dm_function(user)
         or user_has_intern_role(user)
+        or user_has_no_functions(user)
     )
 
 

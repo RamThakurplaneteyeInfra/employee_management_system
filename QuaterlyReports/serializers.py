@@ -187,7 +187,8 @@ class FunctionsEntriesSerializer(serializers.ModelSerializer):
                         {
                             "goal_text": [
                                 "Free-text goals are only allowed for employees with the NPC or DM "
-                                "function, or Intern role. Use goal (catalog Goal_id) instead."
+                                "function, Intern role, or no assigned functions. "
+                                "Use goal (catalog Goal_id) instead."
                             ]
                         }
                     )
