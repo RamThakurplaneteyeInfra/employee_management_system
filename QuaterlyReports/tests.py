@@ -170,6 +170,7 @@ class NpcActionableEntryCreateTests(TestCase):
         self.npc_user = User.objects.create_user(username="npc_emp", password="pass")
         self.npd_user = User.objects.create_user(username="npd_emp", password="pass")
         self.dm_user = User.objects.create_user(username="dm_emp", password="pass")
+        self.ps_user = User.objects.create_user(username="ps_emp", password="pass")
         self.no_fn_user = User.objects.create_user(username="nofn_emp", password="pass")
         self.intern_user = User.objects.create_user(username="intern_emp", password="pass")
         self.co_author = User.objects.create_user(username="co_npc", password="pass")
@@ -191,6 +192,12 @@ class NpcActionableEntryCreateTests(TestCase):
             Role=self.role_employee,
             Name="DM Employee",
             Email_id="dm@test.com",
+        )
+        Profile.objects.create(
+            Employee_id=self.ps_user,
+            Role=self.role_employee,
+            Name="P&S Employee",
+            Email_id="ps@test.com",
         )
         Profile.objects.create(
             Employee_id=self.no_fn_user,
@@ -219,9 +226,11 @@ class NpcActionableEntryCreateTests(TestCase):
         npc_fn = Functions.objects.create(function="NPC")
         npd_fn = Functions.objects.create(function="NPD")
         dm_fn = Functions.objects.create(function="DM")
+        ps_fn = Functions.objects.create(function="P&S")
         Profile.objects.get(Employee_id=self.npc_user).functions.add(npc_fn)
         Profile.objects.get(Employee_id=self.npd_user).functions.add(npd_fn)
         Profile.objects.get(Employee_id=self.dm_user).functions.add(dm_fn)
+        Profile.objects.get(Employee_id=self.ps_user).functions.add(ps_fn)
         self.npd_main_goal = FunctionsGoals.objects.create(Function=npd_fn, Maingoal="Catalog main")
         self.catalog_goal = ActionableGoals.objects.create(
             FunctionGoal=self.npd_main_goal,
@@ -330,6 +339,21 @@ class NpcActionableEntryCreateTests(TestCase):
         response = self.client.post("/ActionableEntries/", payload, format="json")
         self.assertEqual(response.status_code, 201, response.data)
         self.assertEqual(response.data["goal_text"], "Support site survey")
+        self.assertIsNotNone(response.data["goal"])
+
+    def test_ps_create_with_goal_text_succeeds(self):
+        self.client = APIClient()
+        self.client.force_authenticate(self.ps_user)
+        payload = {
+            "date": "2026-06-26",
+            "original_entry": "P&S project notes",
+            "goal_text": "Complete proposal package",
+            "co_author": self.co_author.username,
+            "share_with": self.share_with.username,
+        }
+        response = self.client.post("/ActionableEntries/", payload, format="json")
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(response.data["goal_text"], "Complete proposal package")
         self.assertIsNotNone(response.data["goal"])
 
     def test_non_npc_cannot_use_goal_text_without_catalog_goal(self):

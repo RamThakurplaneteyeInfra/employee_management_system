@@ -1,6 +1,6 @@
 """
 Accounts API views. Base path: {{baseurl}}/accounts/
-- Session: login (POST), logout (GET), sessiondata (GET), home (GET).
+- Session: login (POST), logout (GET), sessiondata (GET), online-status (GET/POST), home (GET).
 - Filters: getBranch, getRoles, getDesignations, getDepartmentsandFunctions, getTeamleads (GET, query params).
 - Employee: employee/dashboard (GET), employees (GET), updateUsername (POST).
 - Admin: updateProfile, viewEmployee, deleteEmployee, changePassword, changePhoto, FetchPhoto.
@@ -229,6 +229,132 @@ async def get_session_data(request: HttpRequest):
         # print("session data not from cache")
     except DatabaseError as e:
         return JsonResponse({"message": f"{e}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# ==================== online_status ====================
+# Pre-call presence check: is this employee connected to /ws/notifications/?
+# URL: {{baseurl}}/accounts/online-status/
+# Method: GET ?employee_id=<username>  or  POST {"employee_id": "..."} / {"employee_ids": [...]}
+
+
+def _normalize_employee_ids(raw_single, raw_many) -> list[str]:
+    ids: list[str] = []
+    if raw_many is not None:
+        if isinstance(raw_many, str):
+            parts = [p.strip() for p in raw_many.split(",") if p.strip()]
+            ids.extend(parts)
+        elif isinstance(raw_many, (list, tuple)):
+            for item in raw_many:
+                s = str(item or "").strip()
+                if s:
+                    ids.append(s)
+        else:
+            raise ValueError("employee_ids must be a list or comma-separated string")
+    if raw_single is not None:
+        s = str(raw_single).strip()
+        if s:
+            ids.append(s)
+    # Preserve order, drop duplicates
+    seen = set()
+    unique: list[str] = []
+    for eid in ids:
+        if eid not in seen:
+            seen.add(eid)
+            unique.append(eid)
+    return unique
+
+
+def _online_status_sync(employee_ids: list[str]) -> list[dict]:
+    existing = set(
+        User.objects.filter(username__in=employee_ids).values_list("username", flat=True)
+    )
+    logged_in = {
+        row["Employee_id_id"]: bool(row["is_logged_in"])
+        for row in Profile.objects.filter(Employee_id_id__in=employee_ids).values(
+            "Employee_id_id", "is_logged_in"
+        )
+    }
+    online = ws_online_map(employee_ids)
+    results = []
+    for eid in employee_ids:
+        if eid not in existing:
+            results.append(
+                {
+                    "employee_id": eid,
+                    "found": False,
+                    "ws_online": False,
+                    "is_logged_in": False,
+                    "status": "not_found",
+                }
+            )
+            continue
+        is_online = bool(online.get(eid, False))
+        results.append(
+            {
+                "employee_id": eid,
+                "found": True,
+                "ws_online": is_online,
+                "is_logged_in": bool(logged_in.get(eid, False)),
+                "status": "online" if is_online else "offline",
+            }
+        )
+    return results
+
+
+@csrf_exempt
+@login_required
+async def online_status(request: HttpRequest):
+    """
+    Check whether employee(s) are currently online (notifications WebSocket presence).
+    GET  /accounts/online-status/?employee_id=300012
+    GET  /accounts/online-status/?employee_ids=300012,300003
+    POST /accounts/online-status/  {"employee_id": "300012"}
+    POST /accounts/online-status/  {"employee_ids": ["300012", "300003"]}
+    """
+    if request.method == "GET":
+        err = verifyGet(request)
+        if err:
+            return err
+        try:
+            ids = _normalize_employee_ids(
+                request.GET.get("employee_id"),
+                request.GET.get("employee_ids"),
+            )
+        except ValueError as e:
+            return JsonResponse({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+    elif request.method == "POST":
+        err = verifyPost(request)
+        if err:
+            return err
+        try:
+            data = load_data(request)
+        except Exception:
+            return JsonResponse({"error": "Invalid JSON"}, status=status.HTTP_400_BAD_REQUEST)
+        if not isinstance(data, dict):
+            return JsonResponse({"error": "Body must be a JSON object"}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            ids = _normalize_employee_ids(data.get("employee_id"), data.get("employee_ids"))
+        except ValueError as e:
+            return JsonResponse({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+    else:
+        return JsonResponse({"error": "Method not allowed"}, status=status.HTTP_405_METHOD_NOT_ALLOWED)
+
+    if not ids:
+        return JsonResponse(
+            {"error": "employee_id or employee_ids is required"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    if len(ids) > 100:
+        return JsonResponse(
+            {"error": "At most 100 employee ids per request"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    results = await sync_to_async(_online_status_sync)(ids)
+    if len(results) == 1:
+        return JsonResponse(results[0], status=status.HTTP_200_OK)
+    return JsonResponse({"results": results}, status=status.HTTP_200_OK)
+
 
 # ==================== user_login ====================
 # Login view. Authenticate and create session.

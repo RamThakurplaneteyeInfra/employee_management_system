@@ -28,7 +28,8 @@ sort_urls=[path("getBranch/",views.get_branches,name="sort"),
 
 session_urls=[path('login/',views.user_login),
             path('logout/', views.user_logout),
-            path('sessiondata/', views.get_session_data),]
+            path('sessiondata/', views.get_session_data),
+            path('online-status/', views.online_status),]
 employee_urls=[path('employee/dashboard/', views.employee_dashboard),
             path('employees/', views.get_all_employees),
             path('updateUsername/<slug:username>/', views.updateUsername),]

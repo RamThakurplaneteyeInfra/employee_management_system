@@ -1,5 +1,5 @@
 """
-Free-text actionable goals (NPC / DM / no-function profiles + Intern role):
+Free-text actionable goals (NPC / DM / P&S / no-function profiles + Intern role):
 auto-create ActionableGoals rows.
 
 Free-text goals are stored under a dedicated FunctionsGoals bucket and are excluded
@@ -13,6 +13,7 @@ from .models import ActionableGoals, FunctionsGoals
 
 NPC_FUNCTION_LABEL = "NPC"
 DM_FUNCTION_LABEL = "DM"
+PS_FUNCTION_LABEL = "P&S"
 INTERN_ROLE_NAME = "Intern"
 NPC_USER_GOALS_MAIN_LABEL = "NPC user goals"
 NPC_GOAL_TEXT_MAX_LENGTH = 255
@@ -53,6 +54,11 @@ def user_has_dm_function(user) -> bool:
     return _user_has_function(user, DM_FUNCTION_LABEL)
 
 
+def user_has_ps_function(user) -> bool:
+    """True when the user's profile includes the P&S function."""
+    return _user_has_function(user, PS_FUNCTION_LABEL)
+
+
 def user_has_no_functions(user) -> bool:
     """True when the user has a profile with zero assigned functions."""
     profile = _profile_for_user(user)
@@ -71,12 +77,13 @@ def user_has_intern_role(user) -> bool:
 
 def user_can_use_free_text_goal(user) -> bool:
     """
-    Allow goal_text when the user has NPC/DM, Intern role, or no functions at all
+    Allow goal_text when the user has NPC/DM/P&S, Intern role, or no functions at all
     (no catalog goals to pick from).
     """
     return (
         user_has_npc_function(user)
         or user_has_dm_function(user)
+        or user_has_ps_function(user)
         or user_has_intern_role(user)
         or user_has_no_functions(user)
     )

@@ -70,6 +70,63 @@
 
 ---
 
+### online-status (pre-call check)
+
+**url:** `{{baseurl}}/accounts/online-status/`  
+**method:** GET or POST  
+**auth:** Logged-in user required.
+
+**GET query params:**
+- `employee_id` — single employee username (e.g. `300012`)
+- `employee_ids` — comma-separated list (e.g. `300012,300003`)
+
+**POST body (single):**
+```json
+{ "employee_id": "300012" }
+```
+
+**POST body (batch):**
+```json
+{ "employee_ids": ["300012", "300003"] }
+```
+
+**sample_response (single):**
+```json
+{
+  "employee_id": "300012",
+  "found": true,
+  "ws_online": true,
+  "is_logged_in": true,
+  "status": "online"
+}
+```
+
+**sample_response (batch):**
+```json
+{
+  "results": [
+    {
+      "employee_id": "300012",
+      "found": true,
+      "ws_online": true,
+      "is_logged_in": true,
+      "status": "online"
+    },
+    {
+      "employee_id": "300003",
+      "found": true,
+      "ws_online": false,
+      "is_logged_in": true,
+      "status": "offline"
+    }
+  ]
+}
+```
+
+**notes:** `status` is `online` / `offline` / `not_found`. `ws_online` is live presence from `/ws/notifications/` (Redis). `is_logged_in` is the Profile login flag. Max 100 ids per request. 400 if no id provided.
+
+---
+
 ## 2. Filters (dropdowns)
 
 ### getBranch
