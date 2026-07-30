@@ -1,6 +1,8 @@
 """
 Project phase checklist performance points from DeadlineProjectPhase.checklist.
 
+Completed for scoring = checked + mdApproval Approved (points month = checkedDate).
+
 Employee / Intern:
 - 17.5 points per completed checklist; each calendar month main capped at 70 (4 items).
 - Points above the monthly main cap count as monthly_bonus (not lost).
@@ -34,6 +36,7 @@ from accounts.models import Profile
 
 from .models import DeadlineProjectPhase
 from .permissions import resolve_deadline_employee_id
+from .checklist_md_approval import checklist_item_counts_for_scoring
 
 User = get_user_model()
 
@@ -184,7 +187,7 @@ def _completed_for_ids(
         return 0
     completed = 0
     for _, _, _, item in _iter_phase_checklist_items():
-        if not item.get("checked"):
+        if not checklist_item_counts_for_scoring(item):
             continue
         ids = _normalize_employee_ids(item.get("employeeIds"))
         if not any(emp_id in id_set for emp_id in ids):
@@ -228,7 +231,7 @@ def _completed_breakdown_for_team_lead_credit(
     credited_items: set[tuple[int, int]] = set()
 
     for phase_id, item_idx, phase_team_lead_id, item in _iter_phase_checklist_items():
-        if not item.get("checked"):
+        if not checklist_item_counts_for_scoring(item):
             continue
         checked_date = _parse_checked_date(item.get("checkedDate"))
         if not _date_in_period(checked_date, year, month, quarter):

@@ -57,3 +57,12 @@ def can_edit_project(user, project=None):
         return True
 
     return False
+
+
+def can_md_approve_checklist(user) -> bool:
+    """Only MD (or superuser) may set checklist mdApproval to Approved / Incomplete."""
+    if not user or not user.is_authenticated:
+        return False
+    if getattr(user, "is_superuser", False):
+        return True
+    return _role_name(user) == "MD"

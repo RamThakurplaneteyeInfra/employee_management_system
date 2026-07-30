@@ -17,16 +17,24 @@ from rest_framework.views import APIView
 from .models import DeadlineProject, DeadlineProjectPhase
 from .permissions import (
     can_edit_project,
+    can_md_approve_checklist,
     is_global_privileged_deadline_user,
     resolve_deadline_employee_id,
 )
 from accounts.leave_views import _get_user_role_sync, _user_can_view_on_leave
+from .checklist_md_approval import (
+    apply_md_approval_to_item,
+    count_md_approval_checklists,
+    index_checklist_md_by_id,
+    merge_preserved_md_fields,
+)
 from .checklist_scoring import (
     build_checklist_points,
     parse_leave_points_period,
     resolve_leave_points_user,
 )
 from .serializers import (
+    ChecklistMdApprovalInputSerializer,
     ProjectInputSerializer,
     ProjectOutputSerializer,
 )
@@ -114,9 +122,18 @@ def _user_can_view_project(request, project):
     ).exists()
 
 
-def _create_phases(project, phases_data):
+def _create_phases(project, phases_data, *, previous_by_id=None):
     """Create phases — team_lead_id and member_ids are plain fields (no FK constraint)."""
+    previous_by_id = previous_by_id or {}
     for idx, phase_data in enumerate(phases_data):
+        checklist = []
+        for item in phase_data.get("checklist", []) or []:
+            if not isinstance(item, dict):
+                continue
+            incoming = dict(item)
+            prev = previous_by_id.get(str(incoming.get("id") or ""))
+            merge_preserved_md_fields(incoming, prev)
+            checklist.append(incoming)
         DeadlineProjectPhase.objects.create(
             project=project,
             title=phase_data["title"],
@@ -124,7 +141,7 @@ def _create_phases(project, phases_data):
             phase_status=phase_data.get("phase_status", "PENDING"),
             team_lead_id=phase_data.get("team_lead_id"),
             member_ids=phase_data.get("member_ids", []),
-            checklist=phase_data.get("checklist", []),
+            checklist=checklist,
             notes=phase_data.get("notes", ""),
             sort_order=idx,
         )
@@ -268,9 +285,11 @@ class ProjectDetailView(No403APIView):
 
             if "phases" in d:
                 # Soft-archive ALL old phases, then recreate from payload.
-                # Old rows stay in DB (archived=True) — nothing is deleted.
+                # Preserve MD approval fields by checklist item id across recreate.
+                active = list(project.phases.filter(archived=False))
+                previous_by_id = index_checklist_md_by_id(active)
                 project.phases.filter(archived=False).update(archived=True)
-                _create_phases(project, d["phases"])
+                _create_phases(project, d["phases"], previous_by_id=previous_by_id)
 
         project = _base_queryset().get(pk=project.pk)
         return Response({"success": True, "data": _serialize_project(project, request=request)})
@@ -294,6 +313,121 @@ class ProjectDetailView(No403APIView):
         project.archived = True
         project.save(update_fields=["archived", "updated_at"])
         return Response({"success": True, "data": {"id": project.pk}})
+
+
+# ---------------------------------------------------------------------------
+# Checklist MD approval —
+# POST /deadline/projects/<pk>/phases/<phase_id>/checklist/<index>/md-approval/
+# ---------------------------------------------------------------------------
+
+class ChecklistMdApprovalView(No403APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk, phase_id, index):
+        """
+        MD-only: set checklist item mdApproval to Approved or Incomplete.
+        Points are allocated only after Approved (by checkedDate month).
+        """
+        if not can_md_approve_checklist(request.user):
+            return Response(
+                {"success": False, "message": "Only MD can approve checklist items"},
+                status=status.HTTP_200_OK,
+            )
+
+        try:
+            project = _base_queryset().get(pk=pk)
+        except (DeadlineProject.DoesNotExist, ValueError):
+            return Response(
+                {"success": False, "message": "Not found"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        try:
+            phase = project.phases.get(pk=phase_id, archived=False)
+        except (DeadlineProjectPhase.DoesNotExist, ValueError):
+            return Response(
+                {"success": False, "message": "Phase not found"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        ser = ChecklistMdApprovalInputSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        md_approval = ser.validated_data["mdApproval"]
+        md_note = ser.validated_data.get("mdNote") or ""
+
+        checklist = list(phase.checklist or [])
+        if index < 0 or index >= len(checklist):
+            return Response(
+                {"success": False, "message": "Checklist item index out of range"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        item = checklist[index]
+        if not isinstance(item, dict):
+            return Response(
+                {"success": False, "message": "Invalid checklist item"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            apply_md_approval_to_item(
+                item,
+                md_approval=md_approval,
+                md_note=md_note,
+                approved_by=str(getattr(request.user, "username", "") or ""),
+            )
+        except ValueError as e:
+            return Response(
+                {"success": False, "message": str(e)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        checklist[index] = item
+        phase.checklist = checklist
+        phase.save(update_fields=["checklist", "updated_at"])
+
+        project = _base_queryset().get(pk=project.pk)
+        return Response(
+            {
+                "success": True,
+                "data": {
+                    "projectId": project.pk,
+                    "phaseId": phase.pk,
+                    "checklistIndex": index,
+                    "item": item,
+                    "project": _serialize_project(project, request=request),
+                },
+            }
+        )
+
+
+# ---------------------------------------------------------------------------
+# Pending MD approval count —
+# GET /deadline/projects/checklist-pending-md-approval/count/
+# ---------------------------------------------------------------------------
+
+class ChecklistPendingMdApprovalCountView(No403APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        """
+        MD-only: counts of checked checklist items Pending / Incomplete.
+        GET /deadline/projects/checklist-pending-md-approval/count/
+        """
+        if not can_md_approve_checklist(request.user):
+            return Response(
+                {"success": False, "message": "Only MD can view pending checklist approval count"},
+                status=status.HTTP_200_OK,
+            )
+        counts = count_md_approval_checklists()
+        return Response(
+            {
+                "success": True,
+                "count": counts["pending"],
+                "pending": counts["pending"],
+                "incomplete": counts["incomplete"],
+            }
+        )
 
 
 # ---------------------------------------------------------------------------

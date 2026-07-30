@@ -1,7 +1,22 @@
 from rest_framework import serializers
 
+from .checklist_md_approval import (
+    MD_APPROVAL_STATUSES,
+    normalize_md_approval_fields,
+)
 from .models import DeadlineProject, DeadlineProjectPhase
 from .permissions import can_see_all_phases_for_project, resolve_deadline_employee_id
+
+
+def _normalize_checklist_for_output(checklist):
+    items = []
+    for item in checklist or []:
+        if not isinstance(item, dict):
+            continue
+        normalized = dict(item)
+        normalize_md_approval_fields(normalized, for_output=True)
+        items.append(normalized)
+    return items
 
 
 class PhaseOutputSerializer(serializers.ModelSerializer):
@@ -10,6 +25,7 @@ class PhaseOutputSerializer(serializers.ModelSerializer):
     phaseStatus = serializers.CharField(source="phase_status", read_only=True)
     teamLeadId = serializers.IntegerField(source="team_lead_id", read_only=True, allow_null=True)
     memberIds = serializers.JSONField(source="member_ids", read_only=True)
+    checklist = serializers.SerializerMethodField()
 
     class Meta:
         model = DeadlineProjectPhase
@@ -17,6 +33,9 @@ class PhaseOutputSerializer(serializers.ModelSerializer):
             "id", "title", "date", "phaseStatus",
             "teamLeadId", "memberIds", "checklist", "notes",
         ]
+
+    def get_checklist(self, obj):
+        return _normalize_checklist_for_output(obj.checklist)
 
 
 class ProjectOutputSerializer(serializers.ModelSerializer):
@@ -135,7 +154,31 @@ class PhaseInputSerializer(serializers.Serializer):
             else:
                 item["note"] = note
 
+            md_status = item.get("mdApproval")
+            if md_status is not None and not isinstance(md_status, str):
+                raise serializers.ValidationError(
+                    f"Item {idx} 'mdApproval' must be a string."
+                )
+            if isinstance(md_status, str) and md_status.strip() and md_status.strip() not in MD_APPROVAL_STATUSES:
+                raise serializers.ValidationError(
+                    f"Item {idx} 'mdApproval' must be one of: Pending, Approved, Incomplete."
+                )
+
+            md_note = item.get("mdNote")
+            if md_note is not None and not isinstance(md_note, str):
+                raise serializers.ValidationError(
+                    f"Item {idx} 'mdNote' must be a string."
+                )
+
+            # Base normalize (ids, defaults). PATCH merge happens in the view.
+            normalize_md_approval_fields(item)
+
         return value
+
+
+class ChecklistMdApprovalInputSerializer(serializers.Serializer):
+    mdApproval = serializers.ChoiceField(choices=["Approved", "Incomplete"])
+    mdNote = serializers.CharField(required=False, allow_blank=True, default="")
 
 
 class ProjectInputSerializer(serializers.Serializer):

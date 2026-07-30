@@ -64,10 +64,18 @@ class DeadlineProjectAPITests(TestCase):
         self.assertEqual(len(data["data"]["phases"]), 2)
         phase = data["data"]["phases"][0]
         self.assertIn("checklist", phase)
-        self.assertEqual(phase["checklist"], [
-            {"text": "Design", "checked": True, "checkedDate": "2026-02-01", "employeeIds": [101, 102], "note": ""},
-            {"text": "Prototype", "checked": False, "checkedDate": None, "employeeIds": [], "note": ""},
-        ])
+        design, proto = phase["checklist"]
+        self.assertEqual(design["text"], "Design")
+        self.assertTrue(design["checked"])
+        self.assertEqual(design["checkedDate"], "2026-02-01")
+        self.assertEqual(design["employeeIds"], [101, 102])
+        self.assertEqual(design["note"], "")
+        self.assertEqual(design["mdApproval"], "Pending")
+        self.assertIsNotNone(design.get("id"))
+        self.assertEqual(proto["text"], "Prototype")
+        self.assertFalse(proto["checked"])
+        self.assertIsNone(proto["checkedDate"])
+        self.assertEqual(proto["mdApproval"], "Pending")
 
     def test_create_project_with_null_deadline(self):
         payload = self._sample_payload()
@@ -212,10 +220,13 @@ class DeadlineProjectAPITests(TestCase):
         resp = self.client.patch(f"/deadline/projects/{pk}/", {"phases": new_phases}, format="json")
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(len(resp.json()["data"]["phases"]), 1)
-        self.assertEqual(resp.json()["data"]["phases"][0]["checklist"], [
-            {"text": "a", "checked": False, "checkedDate": None, "employeeIds": [], "note": ""},
-            {"text": "b", "checked": True, "checkedDate": None, "employeeIds": [], "note": ""},
-        ])
+        ch = resp.json()["data"]["phases"][0]["checklist"]
+        self.assertEqual(ch[0]["text"], "a")
+        self.assertFalse(ch[0]["checked"])
+        self.assertEqual(ch[0]["mdApproval"], "Pending")
+        self.assertEqual(ch[1]["text"], "b")
+        self.assertTrue(ch[1]["checked"])
+        self.assertEqual(ch[1]["mdApproval"], "Pending")
         total = DeadlineProjectPhase.objects.filter(project_id=pk).count()
         archived = DeadlineProjectPhase.objects.filter(project_id=pk, archived=True).count()
         self.assertEqual(archived, 2)
@@ -653,3 +664,218 @@ class ChecklistScoringTests(TestCase):
         self.assertEqual(result["main_score"], 10.0)
         self.assertEqual(result["monthly_bonus"], 0.0)
         self.assertEqual(result["total_points"], 10.0)
+
+    def test_pending_md_approval_does_not_count_for_scoring(self):
+        from projects_deadline.checklist_scoring import build_checklist_points
+
+        project = DeadlineProject.objects.create(
+            title="Pending MD",
+            status="ACTIVE",
+            created_by=self.tl,
+        )
+        DeadlineProjectPhase.objects.create(
+            project=project,
+            title="Awaiting",
+            team_lead_id=200018,
+            checklist=[
+                {
+                    "text": "Needs MD",
+                    "checked": True,
+                    "checkedDate": "2026-08-01",
+                    "employeeIds": [300013],
+                    "note": "",
+                    "mdApproval": "Pending",
+                },
+                {
+                    "text": "Incomplete MD",
+                    "checked": True,
+                    "checkedDate": "2026-08-01",
+                    "employeeIds": [300013],
+                    "note": "",
+                    "mdApproval": "Incomplete",
+                },
+                {
+                    "text": "Approved MD",
+                    "checked": True,
+                    "checkedDate": "2026-08-01",
+                    "employeeIds": [300013],
+                    "note": "",
+                    "mdApproval": "Approved",
+                },
+            ],
+            sort_order=0,
+        )
+
+        result = build_checklist_points(self.emp, 2026, month=8)
+        self.assertEqual(result["counts"]["completed_checklists"], 1)
+        self.assertEqual(result["total_points"], 17.5)
+
+
+class ChecklistMdApprovalAPITests(TestCase):
+    def setUp(self):
+        from accounts.models import Profile, Roles
+
+        self.role_md = Roles.objects.create(role_name="MD")
+        self.role_tl = Roles.objects.create(role_name="TeamLead")
+        self.md = User.objects.create_user("md_user", password="pass")
+        self.tl = User.objects.create_user("200018", password="pass")
+        Profile.objects.create(
+            Employee_id=self.md,
+            Role=self.role_md,
+            Name="MD User",
+            Email_id="md@example.com",
+        )
+        Profile.objects.create(
+            Employee_id=self.tl,
+            Role=self.role_tl,
+            Name="TL User",
+            Email_id="tl@example.com",
+        )
+        self.client = APIClient()
+
+    def _create_project_with_checked_item(self):
+        self.client.force_authenticate(self.md)
+        payload = {
+            "title": "MD Approval Project",
+            "status": "ACTIVE",
+            "phases": [
+                {
+                    "title": "Phase 1",
+                    "phase_status": "IN_PROGRESS",
+                    "team_lead_id": 200018,
+                    "member_ids": [],
+                    "checklist": [
+                        {
+                            "text": "Deliverable",
+                            "checked": True,
+                            "checkedDate": "2026-07-10",
+                            "employeeIds": [200018],
+                        }
+                    ],
+                    "notes": "",
+                }
+            ],
+        }
+        resp = self.client.post("/deadline/projects/", payload, format="json")
+        self.assertEqual(resp.status_code, 201, resp.json())
+        data = resp.json()["data"]
+        return data["id"], data["phases"][0]["id"]
+
+    def test_new_checked_item_is_pending(self):
+        project_id, _ = self._create_project_with_checked_item()
+        detail = self.client.get(f"/deadline/projects/{project_id}/").json()["data"]
+        item = detail["phases"][0]["checklist"][0]
+        self.assertEqual(item["mdApproval"], "Pending")
+        self.assertTrue(item["checked"])
+
+    def test_md_can_approve_checklist_item(self):
+        project_id, phase_id = self._create_project_with_checked_item()
+        self.client.force_authenticate(self.md)
+        resp = self.client.post(
+            f"/deadline/projects/{project_id}/phases/{phase_id}/checklist/0/md-approval/",
+            {"mdApproval": "Approved", "mdNote": "Looks good"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 200, resp.json())
+        self.assertTrue(resp.json()["success"])
+        item = resp.json()["data"]["item"]
+        self.assertEqual(item["mdApproval"], "Approved")
+        self.assertEqual(item["mdNote"], "Looks good")
+        self.assertEqual(item["mdApprovedBy"], "md_user")
+        self.assertIsNotNone(item["mdApprovedAt"])
+
+    def test_md_can_mark_incomplete(self):
+        project_id, phase_id = self._create_project_with_checked_item()
+        resp = self.client.post(
+            f"/deadline/projects/{project_id}/phases/{phase_id}/checklist/0/md-approval/",
+            {"mdApproval": "Incomplete"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 200, resp.json())
+        self.assertEqual(resp.json()["data"]["item"]["mdApproval"], "Incomplete")
+
+    def test_non_md_cannot_approve(self):
+        project_id, phase_id = self._create_project_with_checked_item()
+        self.client.force_authenticate(self.tl)
+        resp = self.client.post(
+            f"/deadline/projects/{project_id}/phases/{phase_id}/checklist/0/md-approval/",
+            {"mdApproval": "Approved"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertFalse(resp.json()["success"])
+        self.assertIn("Only MD", resp.json()["message"])
+
+    def test_patch_cannot_self_approve(self):
+        project_id, phase_id = self._create_project_with_checked_item()
+        detail = self.client.get(f"/deadline/projects/{project_id}/").json()["data"]
+        phase = detail["phases"][0]
+        item = dict(phase["checklist"][0])
+        item_id = item.get("id")
+        item["mdApproval"] = "Approved"
+        resp = self.client.patch(
+            f"/deadline/projects/{project_id}/",
+            {
+                "phases": [
+                    {
+                        "title": phase["title"],
+                        "phase_status": phase["phaseStatus"],
+                        "team_lead_id": phase["teamLeadId"],
+                        "member_ids": phase["memberIds"],
+                        "checklist": [item],
+                        "notes": phase.get("notes") or "",
+                    }
+                ]
+            },
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 200, resp.json())
+        self.assertTrue(resp.json()["success"])
+        saved = resp.json()["data"]["phases"][0]["checklist"][0]
+        self.assertEqual(saved["mdApproval"], "Pending")
+        self.assertEqual(saved.get("id"), item_id)
+
+    def test_pending_count_md_only(self):
+        self._create_project_with_checked_item()
+        self.client.force_authenticate(self.md)
+        resp = self.client.get("/deadline/projects/checklist-pending-md-approval/count/")
+        self.assertEqual(resp.status_code, 200, resp.json())
+        body = resp.json()
+        self.assertTrue(body["success"])
+        self.assertEqual(body["count"], 1)
+        self.assertEqual(body["pending"], 1)
+        self.assertEqual(body["incomplete"], 0)
+
+        self.client.force_authenticate(self.tl)
+        denied = self.client.get("/deadline/projects/checklist-pending-md-approval/count/")
+        self.assertEqual(denied.status_code, 200)
+        self.assertFalse(denied.json()["success"])
+
+    def test_pending_count_decreases_after_approve(self):
+        project_id, phase_id = self._create_project_with_checked_item()
+        self.client.force_authenticate(self.md)
+        before = self.client.get("/deadline/projects/checklist-pending-md-approval/count/").json()
+        self.assertEqual(before["pending"], 1)
+        self.assertEqual(before["incomplete"], 0)
+        self.client.post(
+            f"/deadline/projects/{project_id}/phases/{phase_id}/checklist/0/md-approval/",
+            {"mdApproval": "Approved"},
+            format="json",
+        )
+        after = self.client.get("/deadline/projects/checklist-pending-md-approval/count/").json()
+        self.assertEqual(after["pending"], 0)
+        self.assertEqual(after["incomplete"], 0)
+
+    def test_incomplete_count_after_mark_incomplete(self):
+        project_id, phase_id = self._create_project_with_checked_item()
+        self.client.force_authenticate(self.md)
+        self.client.post(
+            f"/deadline/projects/{project_id}/phases/{phase_id}/checklist/0/md-approval/",
+            {"mdApproval": "Incomplete"},
+            format="json",
+        )
+        body = self.client.get("/deadline/projects/checklist-pending-md-approval/count/").json()
+        self.assertTrue(body["success"])
+        self.assertEqual(body["pending"], 0)
+        self.assertEqual(body["incomplete"], 1)
+        self.assertEqual(body["count"], 0)
