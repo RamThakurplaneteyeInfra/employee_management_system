@@ -732,13 +732,15 @@ class PerformanceScoresListTests(TestCase):
         self.assertEqual(classify_scoring_group({"NPD", "NPC"}), "npd_hc_ip")
         self.assertEqual(classify_scoring_group({"DM"}), "dm")
         self.assertEqual(classify_scoring_group(set()), "other")
-        self.assertEqual(classify_scoring_group({"P&S"}), "other")
+        self.assertEqual(classify_scoring_group({"P&S"}), "ps")
 
     def test_parse_scoring_group_aliases(self):
         self.assertEqual(parse_scoring_group("mmr-rg"), "mmr_rg")
         self.assertEqual(parse_scoring_group("npd_hc_ip"), "npd_hc_ip")
         self.assertEqual(parse_scoring_group("npc"), "npc")
         self.assertEqual(parse_scoring_group("dm"), "dm")
+        self.assertEqual(parse_scoring_group("ps"), "ps")
+        self.assertEqual(parse_scoring_group("p&s"), "ps")
         self.assertEqual(parse_scoring_group("interns"), "interns")
         self.assertEqual(parse_scoring_group("intern"), "interns")
         self.assertEqual(parse_scoring_group("default"), "other")

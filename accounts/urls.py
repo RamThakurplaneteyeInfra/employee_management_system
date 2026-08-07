@@ -11,6 +11,11 @@ from .dm_target_views import (
     list_dm_scoring_targets,
     dm_scoring_target_detail,
 )
+from .ps_target_views import (
+    list_ps_scoring_targets,
+    ps_scoring_target_detail,
+    ps_service_points,
+)
 from .dm_work_views import (
     dm_work_entries,
     dm_work_entry_approve,
@@ -62,6 +67,13 @@ urlpatterns = sort_urls + session_urls + employee_urls + admin_urls + [
         dm_scoring_target_detail,
         name="dm-scoring-target-detail",
     ),
+    path("ps-scoring-targets/", list_ps_scoring_targets, name="ps-scoring-targets"),
+    path(
+        "ps-scoring-targets/<str:employee_id>/",
+        ps_scoring_target_detail,
+        name="ps-scoring-target-detail",
+    ),
+    path("ps-service-points/", ps_service_points, name="ps-service-points"),
     path("dm-work-entries/", dm_work_entries, name="dm-work-entries"),
     path(
         "dm-work-entries/<int:entry_id>/approve/",

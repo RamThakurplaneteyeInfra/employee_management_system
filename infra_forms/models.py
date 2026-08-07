@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.db import models
 
 MODULE_CHOICES = [
@@ -322,7 +323,23 @@ class InfraProjectForm(models.Model):
 class InfraProjectFormEntry(models.Model):
     """Child rows for `InfraProjectForm` (Entry[])."""
 
+    APPROVAL_PENDING = "Pending"
+    APPROVAL_APPROVED = "Approved"
+    APPROVAL_REJECTED = "Rejected"
+    APPROVAL_CHOICES = [
+        (APPROVAL_PENDING, "Pending"),
+        (APPROVAL_APPROVED, "Approved"),
+        (APPROVAL_REJECTED, "Rejected"),
+    ]
+
     form = models.ForeignKey(InfraProjectForm, on_delete=models.CASCADE, related_name="entries")
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="created_infra_project_form_entries",
+    )
     date = models.DateField(null=True, blank=True)
     status = models.CharField(
         max_length=80,
@@ -338,6 +355,17 @@ class InfraProjectFormEntry(models.Model):
     BOX_Slab_Culvert = models.DecimalField(max_digits=14, decimal_places=3, null=True, blank=True)
     ROB = models.DecimalField(max_digits=14, decimal_places=3, null=True, blank=True)
     FO = models.DecimalField(max_digits=14, decimal_places=3, null=True, blank=True)
+
+    # MD-only approval (separate from `status`, which is work type e.g. LiDAR).
+    approval = models.CharField(
+        max_length=20,
+        choices=APPROVAL_CHOICES,
+        default=APPROVAL_PENDING,
+        db_index=True,
+    )
+    approved_by = models.CharField(max_length=150, null=True, blank=True)
+    approved_at = models.DateTimeField(null=True, blank=True)
+    approval_note = models.CharField(max_length=500, blank=True, default="")
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

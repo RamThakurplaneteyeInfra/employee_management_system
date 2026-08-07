@@ -540,11 +540,41 @@ _INFRA_NUMERIC_FIELDS = (
 )
 
 
+_ENTRY_APPROVAL_FIELDS = (
+    "approval",
+    "approved_by",
+    "approved_at",
+    "approval_note",
+)
+
+
 class InfraProjectFormEntrySerializer(serializers.ModelSerializer):
+    creator_id = serializers.SerializerMethodField()
+
+    def get_creator_id(self, obj):
+        if not obj.created_by_id:
+            return None
+        return str(obj.created_by.username)
+
     class Meta:
         model = InfraProjectFormEntry
-        fields = ["id", "date", "status", *_INFRA_NUMERIC_FIELDS, "created_at", "updated_at"]
-        read_only_fields = ["id", "created_at", "updated_at"]
+        fields = [
+            "id",
+            "creator_id",
+            "date",
+            "status",
+            *_INFRA_NUMERIC_FIELDS,
+            *_ENTRY_APPROVAL_FIELDS,
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = [
+            "id",
+            "creator_id",
+            *_ENTRY_APPROVAL_FIELDS,
+            "created_at",
+            "updated_at",
+        ]
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -555,6 +585,17 @@ class InfraProjectFormEntrySerializer(serializers.ModelSerializer):
             f.required = False
             if getattr(f, "allow_null", None) is not None:
                 f.allow_null = True
+
+
+class InfraProjectFormEntryApprovalSerializer(serializers.Serializer):
+    approval = serializers.ChoiceField(
+        choices=[
+            InfraProjectFormEntry.APPROVAL_PENDING,
+            InfraProjectFormEntry.APPROVAL_APPROVED,
+            InfraProjectFormEntry.APPROVAL_REJECTED,
+        ]
+    )
+    approval_note = serializers.CharField(required=False, allow_blank=True, default="")
 
 
 class InfraProjectFormSerializer(serializers.ModelSerializer):
@@ -590,9 +631,21 @@ class InfraProjectFormSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         entries_data = validated_data.pop("entries", None) or []
         form = InfraProjectForm.objects.create(**validated_data)
+        request = self.context.get("request")
+        creator = getattr(request, "user", None) if request is not None else None
+        if creator is not None and not creator.is_authenticated:
+            creator = None
         if entries_data:
             InfraProjectFormEntry.objects.bulk_create(
-                [InfraProjectFormEntry(form=form, **row) for row in entries_data]
+                [
+                    InfraProjectFormEntry(
+                        form=form,
+                        created_by=creator,
+                        approval=InfraProjectFormEntry.APPROVAL_PENDING,
+                        **row,
+                    )
+                    for row in entries_data
+                ]
             )
         return form
 
@@ -600,7 +653,8 @@ class InfraProjectFormSerializer(serializers.ModelSerializer):
         """
         Safe update rules (to avoid accidental data loss):
         - If request omits `entries`, existing entries are untouched.
-        - If request includes `entries`, entries are replaced atomically.
+        - If request includes `entries`, merge by entry id and preserve MD approval.
+          Approved rows omitted from the payload are kept (not deleted).
         """
         entries_present = "entries" in validated_data
         entries_data = validated_data.pop("entries", None)
@@ -610,9 +664,60 @@ class InfraProjectFormSerializer(serializers.ModelSerializer):
         instance.save()
 
         if entries_present:
-            instance.entries.all().delete()
-            if entries_data:
-                InfraProjectFormEntry.objects.bulk_create(
-                    [InfraProjectFormEntry(form=instance, **row) for row in entries_data]
-                )
+            self._merge_entries_preserving_approval(instance, entries_data or [])
         return instance
+
+    def _merge_entries_preserving_approval(self, instance, entries_data):
+        from .permissions import can_md_approve_infra_entry
+
+        raw_list = []
+        if isinstance(getattr(self, "initial_data", None), dict):
+            raw = self.initial_data.get("entries")
+            if isinstance(raw, list):
+                raw_list = raw
+
+        request = self.context.get("request")
+        user = getattr(request, "user", None) if request is not None else None
+        is_md = can_md_approve_infra_entry(user)
+
+        existing = {e.pk: e for e in instance.entries.all()}
+        keep_ids = set()
+
+        for idx, row in enumerate(entries_data):
+            if not isinstance(row, dict):
+                continue
+            raw = raw_list[idx] if idx < len(raw_list) and isinstance(raw_list[idx], dict) else {}
+            eid = raw.get("id")
+            try:
+                eid = int(eid) if eid is not None else None
+            except (TypeError, ValueError):
+                eid = None
+
+            if eid and eid in existing:
+                entry = existing[eid]
+                keep_ids.add(eid)
+                # Non-MD cannot change Approved entry values via form replace.
+                if (
+                    not is_md
+                    and entry.approval == InfraProjectFormEntry.APPROVAL_APPROVED
+                ):
+                    continue
+                for attr, value in row.items():
+                    setattr(entry, attr, value)
+                entry.save()
+            else:
+                entry = InfraProjectFormEntry.objects.create(
+                    form=instance,
+                    created_by=user if user is not None and user.is_authenticated else None,
+                    approval=InfraProjectFormEntry.APPROVAL_PENDING,
+                    **row,
+                )
+                keep_ids.add(entry.pk)
+
+        for eid, entry in existing.items():
+            if eid in keep_ids:
+                continue
+            # Never drop MD-approved rows just because they were omitted from payload.
+            if entry.approval == InfraProjectFormEntry.APPROVAL_APPROVED:
+                continue
+            entry.delete()

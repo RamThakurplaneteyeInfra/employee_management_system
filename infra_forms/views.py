@@ -1,12 +1,13 @@
-from django.db.models import Count, Exists, OuterRef, Q
+from django.db.models import Count, Exists, OuterRef, Prefetch, Q
 from django.db import transaction
+from django.utils import timezone
 from rest_framework import parsers, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 
 from .excel_bulk_import import parse_excel_workbook
-from .permissions import CanAccessInfraProjectForms
+from .permissions import CanAccessInfraProjectForms, can_md_approve_infra_entry
 from .models import (
     InfraProjectForm,
     InfraProjectFormEntry,
@@ -17,6 +18,7 @@ from .models import (
 )
 from .serializers import (
     BoqStructureEntrySerializer,
+    InfraProjectFormEntryApprovalSerializer,
     InfraProjectFormEntrySerializer,
     InfraProjectFormSerializer,
     InfraServiceTypeSerializer,
@@ -359,11 +361,18 @@ class InfraProjectFormViewSet(viewsets.ModelViewSet):
 
     Update one row: PATCH or PUT .../project-forms/{id}/entries/{entry_id}/
     Delete one row: DELETE .../project-forms/{id}/entries/{entry_id}/
+    MD approval: POST .../project-forms/{id}/entries/{entry_id}/approval/
+    MD inbox (by project): GET .../project-forms/entries-for-approval/
     """
 
     permission_classes = [IsAuthenticated, CanAccessInfraProjectForms]
     serializer_class = InfraProjectFormSerializer
-    queryset = InfraProjectForm.objects.prefetch_related("entries").select_related("project")
+    queryset = InfraProjectForm.objects.prefetch_related(
+        Prefetch(
+            "entries",
+            queryset=InfraProjectFormEntry.objects.select_related("created_by"),
+        )
+    ).select_related("project")
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -390,7 +399,20 @@ class InfraProjectFormViewSet(viewsets.ModelViewSet):
         with transaction.atomic():
             return super().partial_update(request, *args, **kwargs)
 
-    _ENTRY_READ_ONLY_KEYS = frozenset({"id", "created_at", "updated_at", "form"})
+    _ENTRY_READ_ONLY_KEYS = frozenset(
+        {
+            "id",
+            "created_at",
+            "updated_at",
+            "form",
+            "created_by",
+            "creator_id",
+            "approval",
+            "approved_by",
+            "approved_at",
+            "approval_note",
+        }
+    )
 
     def _get_form_entry(self, form, entry_id):
         try:
@@ -398,6 +420,12 @@ class InfraProjectFormViewSet(viewsets.ModelViewSet):
         except (TypeError, ValueError):
             return None
         return InfraProjectFormEntry.objects.filter(form=form, pk=eid).first()
+
+    def _entry_locked_for_non_md(self, request, entry) -> bool:
+        """Approved entries are read-only for non-MD users."""
+        if can_md_approve_infra_entry(request.user):
+            return False
+        return entry.approval == InfraProjectFormEntry.APPROVAL_APPROVED
 
     @action(detail=True, methods=["post"], url_path="entries")
     def append_entries(self, request, pk=None):
@@ -410,7 +438,7 @@ class InfraProjectFormViewSet(viewsets.ModelViewSet):
         - { "entries": [ { "date": "...", "status": "SAR", "MJB": "1", ... }, ... ] }
         - A single entry object: { "date": "...", "status": "SAR", ... }
 
-        Do not send id/created_at/updated_at for new rows; they are ignored if present.
+        Approval fields are ignored; new rows start as Pending.
         Returns 201 with { "created": [...], "form": <full form> }.
         """
         form = self.get_object()
@@ -443,11 +471,21 @@ class InfraProjectFormViewSet(viewsets.ModelViewSet):
                 clean = {k: v for k, v in row.items() if k not in self._ENTRY_READ_ONLY_KEYS}
                 ser = InfraProjectFormEntrySerializer(data=clean)
                 ser.is_valid(raise_exception=True)
-                entry = InfraProjectFormEntry.objects.create(form=form, **ser.validated_data)
+                entry = InfraProjectFormEntry.objects.create(
+                    form=form,
+                    created_by=request.user,
+                    approval=InfraProjectFormEntry.APPROVAL_PENDING,
+                    **ser.validated_data,
+                )
                 created_payload.append(InfraProjectFormEntrySerializer(entry).data)
 
         form = (
-            InfraProjectForm.objects.prefetch_related("entries")
+            InfraProjectForm.objects.prefetch_related(
+                Prefetch(
+                    "entries",
+                    queryset=InfraProjectFormEntry.objects.select_related("created_by"),
+                )
+            )
             .select_related("project")
             .get(pk=form.pk)
         )
@@ -469,13 +507,22 @@ class InfraProjectFormViewSet(viewsets.ModelViewSet):
         PATCH / PUT / DELETE /api/infra/project-forms/{id}/entries/{entry_id}/
 
         Update or delete a single InfraProjectFormEntry without replacing other rows.
-        Body: partial entry fields (date, status, MJB, MNB, VUP, PUP, BOX_Slab_Culvert, ROB, FO).
-        id / created_at / updated_at / form in body are ignored.
+        Approval fields in body are ignored.
+        Approved entries cannot be edited/deleted by non-MD users.
         """
         form = self.get_object()
         entry = self._get_form_entry(form, entry_id)
         if not entry:
             return Response({"detail": "Entry not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        if self._entry_locked_for_non_md(request, entry):
+            return Response(
+                {
+                    "success": False,
+                    "detail": "Approved entries cannot be edited or deleted. Only MD can change them.",
+                },
+                status=status.HTTP_200_OK,
+            )
 
         if request.method == "DELETE":
             entry.delete()
@@ -495,6 +542,165 @@ class InfraProjectFormViewSet(viewsets.ModelViewSet):
             entry = ser.save()
 
         return Response(InfraProjectFormEntrySerializer(entry).data, status=status.HTTP_200_OK)
+
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path=r"entries/(?P<entry_id>[^/.]+)/approval",
+    )
+    def approve_entry(self, request, pk=None, entry_id=None):
+        """
+        MD-only: set entry approval to Pending / Approved / Rejected.
+        POST /api/infra/project-forms/{id}/entries/{entry_id}/approval/
+        Body: { "approval": "Approved"|"Rejected"|"Pending", "approval_note": optional }
+        """
+        if not can_md_approve_infra_entry(request.user):
+            return Response(
+                {"success": False, "message": "Only MD can approve project form entries"},
+                status=status.HTTP_200_OK,
+            )
+
+        form = self.get_object()
+        entry = self._get_form_entry(form, entry_id)
+        if not entry:
+            return Response({"detail": "Entry not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        ser = InfraProjectFormEntryApprovalSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        approval = ser.validated_data["approval"]
+        note = ser.validated_data.get("approval_note") or ""
+
+        entry.approval = approval
+        entry.approval_note = note
+        if approval == InfraProjectFormEntry.APPROVAL_PENDING:
+            entry.approved_by = None
+            entry.approved_at = None
+        else:
+            full_name = ""
+            if hasattr(request.user, "get_full_name"):
+                full_name = (request.user.get_full_name() or "").strip()
+            entry.approved_by = full_name or str(getattr(request.user, "username", "") or "")
+            entry.approved_at = timezone.now()
+        entry.save(
+            update_fields=[
+                "approval",
+                "approval_note",
+                "approved_by",
+                "approved_at",
+                "updated_at",
+            ]
+        )
+
+        form = (
+            InfraProjectForm.objects.prefetch_related(
+                Prefetch(
+                    "entries",
+                    queryset=InfraProjectFormEntry.objects.select_related("created_by"),
+                )
+            )
+            .select_related("project")
+            .get(pk=form.pk)
+        )
+        return Response(
+            {
+                "success": True,
+                "data": {
+                    "entry": InfraProjectFormEntrySerializer(entry).data,
+                    "form": InfraProjectFormSerializer(form).data,
+                },
+            }
+        )
+
+    @action(detail=False, methods=["get"], url_path="entries-for-approval")
+    def entries_for_approval(self, request):
+        """
+        MD-only: list project-form entries for approval, grouped by project.
+
+        GET /api/infra/project-forms/entries-for-approval/
+        GET /api/infra/project-forms/entries-for-approval/?approval=Pending
+
+        Query:
+        - approval=Pending|Approved|Rejected|all  (default Pending)
+        - project=<id>  (optional filter to one project)
+        """
+        if not can_md_approve_infra_entry(request.user):
+            return Response(
+                {"success": False, "message": "Only MD can view entries for approval"},
+                status=status.HTTP_200_OK,
+            )
+
+        approval_raw = (request.query_params.get("approval") or "Pending").strip()
+        qs = InfraProjectFormEntry.objects.select_related(
+            "form",
+            "form__project",
+            "created_by",
+        ).order_by("form__project_id", "form__projectname", "-date", "-id")
+
+        if approval_raw.lower() != "all":
+            approval = approval_raw
+            valid = {
+                InfraProjectFormEntry.APPROVAL_PENDING,
+                InfraProjectFormEntry.APPROVAL_APPROVED,
+                InfraProjectFormEntry.APPROVAL_REJECTED,
+            }
+            # Accept case-insensitive match to canonical choices.
+            matched = next((v for v in valid if v.lower() == approval.lower()), None)
+            if matched is None:
+                return Response(
+                    {
+                        "detail": "approval must be Pending, Approved, Rejected, or all.",
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            qs = qs.filter(approval=matched)
+
+        project_id = request.query_params.get("project")
+        if project_id not in (None, ""):
+            try:
+                qs = qs.filter(form__project_id=int(project_id))
+            except (TypeError, ValueError):
+                return Response(
+                    {"detail": "project must be an integer id."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        projects_map: dict = {}
+        total = 0
+        for entry in qs.iterator(chunk_size=200):
+            form = entry.form
+            project_pk = form.project_id
+            project_name = form.projectname or (
+                form.project.name if form.project_id and form.project else ""
+            )
+            # Group key: prefer catalog project id; fall back to form projectname.
+            key = project_pk if project_pk is not None else f"name:{project_name or form.pk}"
+            if key not in projects_map:
+                projects_map[key] = {
+                    "project": project_pk,
+                    "projectname": project_name,
+                    "count": 0,
+                    "entries": [],
+                }
+            entry_data = InfraProjectFormEntrySerializer(entry).data
+            entry_data["entry_id"] = entry.pk
+            entry_data["form_id"] = form.pk
+            projects_map[key]["entries"].append(entry_data)
+            projects_map[key]["count"] += 1
+            total += 1
+
+        projects = sorted(
+            projects_map.values(),
+            key=lambda p: ((p["projectname"] or "").lower(), p["project"] or 0),
+        )
+        return Response(
+            {
+                "success": True,
+                "approval": approval_raw if approval_raw.lower() != "all" else "all",
+                "count": total,
+                "project_count": len(projects),
+                "projects": projects,
+            }
+        )
 
     @action(detail=False, methods=["get"], url_path="by-project")
     def by_project(self, request):

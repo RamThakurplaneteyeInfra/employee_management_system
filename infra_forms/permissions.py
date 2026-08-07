@@ -16,6 +16,13 @@ _INFRA_PROJECT_FORM_ROLES = frozenset(
 )
 
 
+def _role_name(user) -> str:
+    try:
+        return (_get_user_role_sync(user) or "").strip()
+    except Exception:
+        return ""
+
+
 def user_can_access_infra_project_forms(user) -> bool:
     if not user or not user.is_authenticated:
         return False
@@ -23,6 +30,15 @@ def user_can_access_infra_project_forms(user) -> bool:
         return True
     role = _get_user_role_sync(user)
     return role in _INFRA_PROJECT_FORM_ROLES
+
+
+def can_md_approve_infra_entry(user) -> bool:
+    """Only MD (or superuser) may set entry approval."""
+    if not user or not user.is_authenticated:
+        return False
+    if getattr(user, "is_superuser", False):
+        return True
+    return _role_name(user) == "MD"
 
 
 class CanAccessInfraProjectForms(BasePermission):

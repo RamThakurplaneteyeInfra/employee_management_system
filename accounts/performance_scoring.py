@@ -4,6 +4,7 @@ Combined employee performance score.
 Default (non-MMR/RG): leave + meeting + checklist + certification + actionable co-author + actionable entries (main_score only; no bonus).
 MMR/RG: leave + meeting + certification + actionable co-author + client profiles + customer panel entries (main_score only; no bonus).
 Intern: leave + meeting + tasks (21 completed/month = 70 main) + certification + actionable co-author + actionable entries (no checklist).
+P&S: leave + meeting + service entries (Approved infra quantity vs MD monthly target, max 70/mo) + certification + actionable co-author (no checklist).
 HR: leave (max 8/mo) + meeting (max 7/mo) + certification (max 5/mo) individually, plus an
 80-point work bucket: co-author (max 10/mo, individual) + org-average work (max 70/mo);
 scoring_profile=hr_org_average.
@@ -23,6 +24,8 @@ from accounts.models import Profile
 
 from .leave_scoring import build_leave_points
 from .dm_work_scoring import build_dm_work_points
+from .ps_service_scoring import build_ps_service_points
+from .ps_scoring_targets import PS_FUNCTIONS, is_ps_profile
 
 NPD_HC_IP_FUNCTIONS = frozenset({"NPD", "HC", "IP"})
 NPC_FUNCTIONS = frozenset({"NPC"})
@@ -45,6 +48,9 @@ SCORING_GROUP_ALIASES = {
     "ip": "npd_hc_ip",
     "npc": "npc",
     "dm": "dm",
+    "ps": "ps",
+    "p&s": "ps",
+    "p_and_s": "ps",
     "interns": "interns",
     "intern": "interns",
     "other": "other",
@@ -213,6 +219,11 @@ def _is_dm_user(user) -> bool:
     return bool(names & DM_FUNCTIONS)
 
 
+def _is_ps_user(user) -> bool:
+    profile = Profile.objects.filter(Employee_id=user).prefetch_related("functions").first()
+    return is_ps_profile(profile)
+
+
 def _function_names_upper_from_profile(profile: Profile | None) -> set[str]:
     if profile is None:
         return set()
@@ -251,6 +262,8 @@ def classify_scoring_group(function_names_upper: set[str]) -> str:
         return "npc"
     if function_names_upper & DM_FUNCTIONS:
         return "dm"
+    if function_names_upper & PS_FUNCTIONS:
+        return "ps"
     return "other"
 
 
@@ -440,6 +453,8 @@ def build_hr_performance_score(
         "tasks": empty_category,
         "actionable_coauthor": _slim_category_payload(actionable_coauthor),
         "actionable_entries": empty_category,
+        "dm_work": empty_category,
+        "ps_service": empty_category,
         "customer_panel_entries": empty_category,
         "client_profiles": empty_category,
     }
@@ -539,6 +554,7 @@ def _compute_individual_performance_score(
     actionable_coauthor = build_actionable_coauthor_points(user, year, month=month, quarter=quarter)
     actionable_entries = build_actionable_entries_points(user, year, month=month, quarter=quarter)
     dm_work = build_dm_work_points(user, year, month=month, quarter=quarter)
+    ps_service = build_ps_service_points(user, year, month=month, quarter=quarter)
     customer_panel_entries = build_customer_panel_entries_points(user, year, month=month, quarter=quarter)
     client_profiles = build_client_profile_points(user, year, month=month, quarter=quarter)
     intern_tasks = build_intern_task_points(user, year, month=month, quarter=quarter)
@@ -546,6 +562,7 @@ def _compute_individual_performance_score(
     is_mmr_rg = _is_mmr_rg_user(user)
     is_intern = _is_intern_user(user)
     is_dm = _is_dm_user(user)
+    is_ps = _is_ps_user(user)
     if is_mmr_rg:
         combined_categories = {
             "meeting": meeting,
@@ -575,6 +592,21 @@ def _compute_individual_performance_score(
         )
         combined_total_bonus = _sum_bonus(list(combined_categories.values()))
         scoring_profile = "dm"
+    elif is_ps:
+        # P&S: service quantity scoring replaces checklist.
+        combined_categories = {
+            "meeting": meeting,
+            "certification": certification,
+            "actionable_coauthor": actionable_coauthor,
+            "ps_service": ps_service,
+        }
+        combined_total = round(
+            _points_for_combined(leave)
+            + sum(_points_for_combined(c) for c in combined_categories.values()),
+            2,
+        )
+        combined_total_bonus = _sum_bonus(list(combined_categories.values()))
+        scoring_profile = "ps"
     elif is_intern:
         combined_categories = {
             "meeting": meeting,
@@ -631,6 +663,7 @@ def _compute_individual_performance_score(
         "actionable_coauthor": _slim_category_payload(actionable_coauthor),
         "actionable_entries": _slim_category_payload(actionable_entries),
         "dm_work": _slim_category_payload(dm_work),
+        "ps_service": _slim_category_payload(ps_service),
         "customer_panel_entries": _slim_category_payload(customer_panel_entries),
         "client_profiles": _slim_category_payload(client_profiles),
     }

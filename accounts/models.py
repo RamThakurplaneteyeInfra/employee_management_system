@@ -530,4 +530,50 @@ class DmWorkEntry(models.Model):
         return f"DM work #{self.pk} by {self.created_by_id} ({self.content_type})"
 
 
+class PsScoringTarget(models.Model):
+    """
+    Per-employee, per-month P&S service-quantity target set by MD.
+    Null monthly_quantity_target falls back to the system default at scoring time.
+    """
+
+    id = models.AutoField(primary_key=True)
+    profile = models.ForeignKey(
+        Profile,
+        on_delete=models.CASCADE,
+        related_name="ps_scoring_targets",
+        db_column="employee_id",
+        to_field="Employee_id",
+    )
+    year = models.PositiveSmallIntegerField()
+    month = models.PositiveSmallIntegerField()
+    monthly_quantity_target = models.DecimalField(
+        max_digits=14,
+        decimal_places=3,
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(Decimal("0.001"))],
+    )
+    set_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="ps_targets_set",
+        db_column="set_by",
+        to_field="username",
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'login_details"."ps_scoring_targets'
+        verbose_name = "P&S scoring target"
+        verbose_name_plural = "P&S scoring targets"
+        unique_together = ("profile", "year", "month")
+        indexes = [
+            models.Index(fields=["profile", "year", "month"]),
+        ]
+
+    def __str__(self):
+        return f"P&S targets for {self.profile_id} ({self.year}-{self.month:02d})"
+
 
