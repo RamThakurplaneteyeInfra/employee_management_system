@@ -86,6 +86,13 @@ class Asset(models.Model):
         default="",
         help_text="Name of the employee this asset is assigned to.",
     )
+    employee_id = models.CharField(
+        max_length=50,
+        blank=True,
+        default="",
+        db_index=True,
+        help_text="Employee username / ID this asset is assigned to.",
+    )
     asset_code = models.CharField(max_length=50, unique=True, blank=True,null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

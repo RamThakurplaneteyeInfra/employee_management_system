@@ -8,6 +8,7 @@ from django.conf import settings
 from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
 from rest_framework import serializers
+from accounts.models import Profile
 from task_management.models import TaskStatus
 
 from ems.s3_utils import get_presigned_url
@@ -253,6 +254,7 @@ class AssetSerializer(serializers.ModelSerializer):
             'author',
             'floor',
             'assigned_to',
+            'employee_id',
             'asset_code',
             'created_at',
             'updated_at',
@@ -270,7 +272,56 @@ class AssetSerializer(serializers.ModelSerializer):
             return Asset.PerformanceStatus.NONPERFORMING
         raise serializers.ValidationError(
             "status must be Performing or Nonperforming."
-        ) 
+        )
+
+    @staticmethod
+    def _clean_assignee_name(name: str) -> str:
+        value = (name or "").strip()
+        if not value:
+            return ""
+        if value.lower() == "spare":
+            return ""
+        # "Kunal Desale (Intern)" -> "Kunal Desale"
+        return re.sub(r"\s*\([^)]*\)\s*$", "", value).strip()
+
+    def _resolve_employee_id_from_name(self, assigned_to: str) -> str:
+        clean_name = self._clean_assignee_name(assigned_to)
+        if not clean_name:
+            return ""
+        profile = (
+            Profile.objects.filter(Name__iexact=clean_name)
+            .exclude(employee_id__isnull=True)
+            .exclude(employee_id="")
+            .only("employee_id")
+            .first()
+        )
+        return (profile.employee_id or "").strip() if profile else ""
+
+    def create(self, validated_data):
+        assigned_to = (validated_data.get("assigned_to") or "").strip()
+        employee_id = (validated_data.get("employee_id") or "").strip()
+        if assigned_to and not employee_id:
+            validated_data["employee_id"] = self._resolve_employee_id_from_name(assigned_to)
+        elif not assigned_to:
+            validated_data["employee_id"] = ""
+        return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        assigned_to = validated_data.get("assigned_to", instance.assigned_to)
+        assigned_to = (assigned_to or "").strip()
+        employee_id_provided = "employee_id" in validated_data
+        employee_id = (validated_data.get("employee_id") or "").strip() if employee_id_provided else ""
+
+        if not assigned_to:
+            validated_data["employee_id"] = ""
+        elif employee_id_provided and employee_id:
+            validated_data["employee_id"] = employee_id
+        else:
+            validated_data["employee_id"] = self._resolve_employee_id_from_name(assigned_to)
+
+        return super().update(instance, validated_data)
+
+
 # 3 Bill Category
 class BillCategorySerializer(serializers.ModelSerializer):
     class Meta:
