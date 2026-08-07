@@ -238,9 +238,11 @@ class AssetSerializer(serializers.ModelSerializer):
         queryset=AssetType.objects.all(),
         slug_field="name"
     )
-    status= serializers.SlugRelatedField(
-        queryset=TaskStatus.objects.all(),
-        slug_field="status_name")
+    status = serializers.ChoiceField(
+        choices=Asset.PerformanceStatus.choices,
+        required=False,
+        default=Asset.PerformanceStatus.PERFORMING,
+    )
 
     class Meta:
         model = Asset
@@ -249,13 +251,26 @@ class AssetSerializer(serializers.ModelSerializer):
             'asset_type',
             'asset_name',
             'author',
+            'floor',
+            'assigned_to',
             'asset_code',
             'created_at',
             'updated_at',
             'status'
         ]
         read_only_fields = ['created_at', 'updated_at']
-    
+
+    def validate_status(self, value):
+        if value is None or value == "":
+            return Asset.PerformanceStatus.PERFORMING
+        normalized = str(value).strip().lower().replace(" ", "").replace("-", "").replace("_", "")
+        if normalized == "performing":
+            return Asset.PerformanceStatus.PERFORMING
+        if normalized == "nonperforming":
+            return Asset.PerformanceStatus.NONPERFORMING
+        raise serializers.ValidationError(
+            "status must be Performing or Nonperforming."
+        ) 
 # 3 Bill Category
 class BillCategorySerializer(serializers.ModelSerializer):
     class Meta:

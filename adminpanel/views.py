@@ -194,7 +194,7 @@ class AssetTypeViewSet(viewsets.ModelViewSet):
 # ==================== AssetViewSet ====================
 # URL: {{baseurl}}/adminapi/assets/  | CRUD
 class AssetViewSet(viewsets.ModelViewSet):
-    queryset = Asset.objects.select_related("asset_type", "status")
+    queryset = Asset.objects.select_related("asset_type")
     serializer_class = AssetSerializer
     permission_classes = [AdminPermission]
 

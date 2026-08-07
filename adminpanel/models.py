@@ -64,11 +64,28 @@ class AssetType(models.Model):
 
 # 2️⃣ Asset table
 class Asset(models.Model):
-    """Asset record: type, name, author, code, and status (FK to TaskStatus)."""
-    status = models.ForeignKey(TaskStatus,db_column="current_status",null=True,on_delete=models.CASCADE,serialize=True)
+    """Asset record: type, name, author, floor, assignee, code, and performance status."""
+
+    class PerformanceStatus(models.TextChoices):
+        PERFORMING = "Performing", "Performing"
+        NONPERFORMING = "Nonperforming", "Nonperforming"
+
+    status = models.CharField(
+        max_length=20,
+        choices=PerformanceStatus.choices,
+        default=PerformanceStatus.PERFORMING,
+        db_column="current_status",
+    )
     asset_type = models.ForeignKey(AssetType, on_delete=models.CASCADE)
     asset_name = models.CharField(max_length=200)
-    author = models.CharField(max_length=100)  # simple for now
+    author = models.CharField(max_length=100, blank=True, default="")  # kept for compatibility
+    floor = models.CharField(max_length=100, blank=True, default="")
+    assigned_to = models.CharField(
+        max_length=150,
+        blank=True,
+        default="",
+        help_text="Name of the employee this asset is assigned to.",
+    )
     asset_code = models.CharField(max_length=50, unique=True, blank=True,null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
