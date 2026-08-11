@@ -290,12 +290,10 @@ class AssetSerializer(serializers.ModelSerializer):
             return ""
         profile = (
             Profile.objects.filter(Name__iexact=clean_name)
-            .exclude(employee_id__isnull=True)
-            .exclude(employee_id="")
-            .only("employee_id")
+            .only("Employee_id")
             .first()
         )
-        return (profile.employee_id or "").strip() if profile else ""
+        return (profile.Employee_id_id or "").strip() if profile else ""
 
     def create(self, validated_data):
         assigned_to = (validated_data.get("assigned_to") or "").strip()
