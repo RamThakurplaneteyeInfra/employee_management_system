@@ -5,6 +5,7 @@ Default (non-MMR/RG): leave + meeting + checklist + certification + actionable c
 MMR/RG: leave + meeting + certification + actionable co-author + client profiles + customer panel entries (main_score only; no bonus).
 Intern: leave + meeting + tasks (21 completed/month = 70 main) + certification + actionable co-author + actionable entries (no checklist).
 P&S: leave + meeting + service entries (Approved infra quantity vs MD monthly target, max 70/mo) + certification + actionable co-author (no checklist).
+Admin: leave + meeting + assigned tasks (3×10 Day + 20×1 Day = 50 main/mo) + org-wide asset health (max 20/mo) + certification + actionable co-author (no checklist).
 HR: leave (max 8/mo) + meeting (max 7/mo) + certification (max 5/mo) individually, plus an
 80-point work bucket: co-author (max 10/mo, individual) + org-average work (max 70/mo);
 scoring_profile=hr_org_average.
@@ -22,6 +23,8 @@ from task_management.intern_task_scoring import INTERN_ROLE_NAME, build_intern_t
 
 from accounts.models import Profile
 
+from .admin_asset_scoring import build_admin_asset_points
+from .admin_task_scoring import build_admin_task_points, is_admin_profile
 from .leave_scoring import build_leave_points
 from .dm_work_scoring import build_dm_work_points
 from .ps_service_scoring import build_ps_service_points
@@ -187,6 +190,11 @@ def _is_hr_user(user) -> bool:
         return False
     role_name = getattr(getattr(profile, "Role", None), "role_name", None)
     return (role_name or "").strip() in ("HR", "Hr")
+
+
+def _is_admin_user(user) -> bool:
+    profile = Profile.objects.filter(Employee_id=user).select_related("Role").first()
+    return is_admin_profile(profile)
 
 
 def _is_mmr_rg_user(user) -> bool:
@@ -460,6 +468,73 @@ def build_hr_performance_score(
     }
 
 
+def build_admin_performance_score(
+    admin_user,
+    year: int,
+    month: int | None = None,
+    quarter: int | None = None,
+) -> dict:
+    """
+    Admin score = leave + meeting + assigned tasks + asset health + certification + co-author.
+    Tasks replace checklist; asset health is org-wide performing ratio out of 20/month.
+    """
+    leave = build_leave_points(admin_user, year, month=month, quarter=quarter)
+    meeting = build_meeting_points(admin_user, year, month=month, quarter=quarter)
+    tasks = build_admin_task_points(admin_user, year, month=month, quarter=quarter)
+    admin_assets = build_admin_asset_points(admin_user, year, month=month, quarter=quarter)
+    certification = build_certification_points(admin_user, year, month=month, quarter=quarter)
+    actionable_coauthor = build_actionable_coauthor_points(
+        admin_user, year, month=month, quarter=quarter
+    )
+
+    combined_categories = {
+        "meeting": meeting,
+        "tasks": tasks,
+        "admin_assets": admin_assets,
+        "certification": certification,
+        "actionable_coauthor": actionable_coauthor,
+    }
+    combined_total = round(
+        _points_for_combined(leave)
+        + sum(_points_for_combined(c) for c in combined_categories.values()),
+        2,
+    )
+    combined_total_bonus = _sum_bonus(list(combined_categories.values()))
+
+    empty_category = {"main_score": 0.0, "monthly_bonus": 0.0, "total_points": 0.0}
+
+    return {
+        "employee_id": leave["employee_id"],
+        "name": leave["name"],
+        "role": leave["role"],
+        "employee_functions": _employee_functions(admin_user),
+        "scoring_profile": "admin",
+        "period_type": leave["period_type"],
+        "period": leave["period"],
+        "period_range": leave["period_range"],
+        "financial_year_start": leave["financial_year_start"],
+        "year": leave["year"],
+        "month": leave["month"],
+        "quarter": leave["quarter"],
+        "months_in_period": leave["months_in_period"],
+        "combined_total_points": combined_total,
+        "combined_total_bonus": combined_total_bonus,
+        "bonus_by_category": _bonus_breakdown(combined_categories),
+        "leave": _slim_category_payload(leave),
+        "meeting": _slim_category_payload(meeting),
+        "tasks": _slim_category_payload(tasks),
+        "admin_assets": _slim_category_payload(admin_assets),
+        "checklist": empty_category,
+        "certification": _slim_category_payload(certification),
+        "actionable_coauthor": _slim_category_payload(actionable_coauthor),
+        "actionable_entries": empty_category,
+        "dm_work": empty_category,
+        "ps_service": empty_category,
+        "customer_panel_entries": empty_category,
+        "client_profiles": empty_category,
+    }
+
+
 def profiles_queryset_for_scoring_list(viewer, get_user_role, *, branch: str | None = None):
     if not viewer or not viewer.is_authenticated:
         return None
@@ -538,6 +613,10 @@ def build_performance_score(
     if _is_hr_user(user):
         return build_hr_performance_score(
             user, year, month=month, quarter=quarter, branch=branch
+        )
+    if _is_admin_user(user):
+        return build_admin_performance_score(
+            user, year, month=month, quarter=quarter
         )
     return _compute_individual_performance_score(
         user, year, month=month, quarter=quarter

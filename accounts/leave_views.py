@@ -1614,6 +1614,9 @@ class LeaveApplicationViewSet(ModelViewSet):
         leave + meeting + certification + actionable co-author + client profiles + customer panel entries.
         Interns use scoring_profile=intern: leave + meeting + tasks (21 completed/month = 70 main)
         + certification + actionable co-author + actionable entries (no checklist).
+        Admin employees use scoring_profile=admin: leave + meeting + assigned tasks
+        (3×10 Day + 20×1 Day = 50 main/mo, overflow bonus) + org-wide asset health (max 20/mo)
+        + certification + actionable co-author (no checklist).
 
         GET /accounts/leave-applications/performance-score/?year=2026&month=6
         GET /accounts/leave-applications/performance-score/?year=2026&quarter=2

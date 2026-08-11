@@ -1100,6 +1100,155 @@ class InternTaskScoringTests(TestCase):
         self.assertEqual(result["combined_total_points"], expected_combined)
 
 
+class AdminPerformanceScoringTests(TestCase):
+    def setUp(self):
+        from decimal import Decimal
+
+        from adminpanel.models import Asset, AssetType
+        from task_management.models import (
+            Task,
+            TaskAssignies,
+            TaskStatus,
+            TaskStatusChangeLogs,
+            TaskTypes,
+        )
+
+        self.Decimal = Decimal
+        self.Asset = Asset
+        self.AssetType = AssetType
+        self.Task = Task
+        self.TaskAssignies = TaskAssignies
+        self.TaskStatus = TaskStatus
+        self.TaskStatusChangeLogs = TaskStatusChangeLogs
+        self.TaskTypes = TaskTypes
+
+        self.role_admin = Roles.objects.create(role_name="Admin")
+        self.role_employee = Roles.objects.create(role_name="Employee")
+
+        self.admin = User.objects.create_user(username="ADM900", password="pass123")
+        Profile.objects.create(
+            Employee_id=self.admin,
+            Role=self.role_admin,
+            Name="Admin Scoring",
+            Email_id="adm900@example.com",
+        )
+
+        self.employee = User.objects.create_user(username="EMP901", password="pass123")
+        Profile.objects.create(
+            Employee_id=self.employee,
+            Role=self.role_employee,
+            Name="Employee Scoring",
+            Email_id="emp901@example.com",
+        )
+
+        self.completed_status, _ = TaskStatus.objects.get_or_create(status_name="COMPLETED")
+        self.ten_day_type, _ = TaskTypes.objects.get_or_create(type_name="10 Day")
+        self.one_day_type, _ = TaskTypes.objects.get_or_create(type_name="1 Day")
+        self.asset_type, _ = AssetType.objects.get_or_create(name="Laptop")
+
+    def _create_assigned_completed_task(self, assignee, *, task_type, completed_at):
+        task = self.Task.objects.create(
+            title=f"Task {assignee.username}-{completed_at}-{task_type.type_name}",
+            created_by=self.employee,
+            due_date=date(2026, 6, 30),
+            type=task_type,
+            status=self.completed_status,
+        )
+        self.TaskAssignies.objects.create(task=task, assigned_to=assignee)
+        log = self.TaskStatusChangeLogs.objects.create(
+            task=task,
+            status_change_to=self.completed_status,
+        )
+        self.TaskStatusChangeLogs.objects.filter(pk=log.pk).update(last_edit=completed_at)
+        return task
+
+    def test_admin_task_caps_and_bonus(self):
+        from accounts.admin_task_scoring import build_admin_task_points
+
+        completed_at = timezone.make_aware(datetime(2026, 6, 15, 10, 0, 0))
+        for _ in range(4):
+            self._create_assigned_completed_task(
+                self.admin, task_type=self.ten_day_type, completed_at=completed_at
+            )
+        for _ in range(21):
+            self._create_assigned_completed_task(
+                self.admin, task_type=self.one_day_type, completed_at=completed_at
+            )
+
+        result = build_admin_task_points(self.admin, 2026, month=6)
+        self.assertTrue(result["eligible"])
+        self.assertEqual(result["counts"]["completed_ten_day_tasks"], 4)
+        self.assertEqual(result["counts"]["completed_one_day_tasks"], 21)
+        self.assertEqual(result["main_score"], 50.0)
+        self.assertEqual(result["monthly_bonus"], 11.0)
+
+    def test_admin_asset_ratio_score(self):
+        from accounts.admin_asset_scoring import build_admin_asset_points
+
+        for idx in range(8):
+            self.Asset.objects.create(
+                asset_type=self.asset_type,
+                asset_name=f"Performing {idx}",
+                status=self.Asset.PerformanceStatus.PERFORMING,
+            )
+        for idx in range(2):
+            self.Asset.objects.create(
+                asset_type=self.asset_type,
+                asset_name=f"Nonperforming {idx}",
+                status=self.Asset.PerformanceStatus.NONPERFORMING,
+            )
+
+        result = build_admin_asset_points(self.admin, 2026, month=6)
+        self.assertTrue(result["eligible"])
+        self.assertEqual(result["counts"]["total_assets"], 10)
+        self.assertEqual(result["main_score"], 16.0)
+
+    def test_admin_performance_score_uses_tasks_and_assets_not_checklist(self):
+        from accounts.admin_task_scoring import build_admin_task_points
+        from accounts.admin_asset_scoring import build_admin_asset_points
+
+        completed_at = timezone.make_aware(datetime(2026, 6, 10, 10, 0, 0))
+        for _ in range(2):
+            self._create_assigned_completed_task(
+                self.admin, task_type=self.ten_day_type, completed_at=completed_at
+            )
+        for _ in range(10):
+            self._create_assigned_completed_task(
+                self.admin, task_type=self.one_day_type, completed_at=completed_at
+            )
+        self.Asset.objects.create(
+            asset_type=self.asset_type,
+            asset_name="Asset A",
+            status=self.Asset.PerformanceStatus.PERFORMING,
+        )
+
+        tasks_only = build_admin_task_points(self.admin, 2026, month=6)
+        assets_only = build_admin_asset_points(self.admin, 2026, month=6)
+        result = build_performance_score(self.admin, 2026, month=6)
+
+        self.assertEqual(result["scoring_profile"], "admin")
+        self.assertEqual(result["checklist"]["main_score"], 0.0)
+        self.assertEqual(result["tasks"]["main_score"], tasks_only["main_score"])
+        self.assertEqual(result["admin_assets"]["main_score"], assets_only["main_score"])
+        expected_combined = round(
+            result["leave"]["total_points"]
+            + result["meeting"]["main_score"]
+            + result["tasks"]["main_score"]
+            + result["admin_assets"]["main_score"]
+            + result["certification"]["main_score"]
+            + result["actionable_coauthor"]["main_score"],
+            2,
+        )
+        self.assertEqual(result["combined_total_points"], expected_combined)
+
+    def test_non_admin_not_eligible_for_admin_task_scoring(self):
+        from accounts.admin_task_scoring import build_admin_task_points
+
+        result = build_admin_task_points(self.employee, 2026, month=6)
+        self.assertFalse(result["eligible"])
+        self.assertEqual(result["main_score"], 0.0)
+
+
 class MmrRgScoringTargetTests(TestCase):
     def setUp(self):
         from decimal import Decimal
