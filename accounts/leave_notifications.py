@@ -173,7 +173,7 @@ def notify_after_alternative_approved(instance: LeaveApplicationData, acting_use
 
 
 def notify_hr_after_team_lead_approved(instance: LeaveApplicationData, acting_user: User) -> None:
-    """Team lead approved; notify all HR users, fallback to MD if no HR exists."""
+    """Team lead approved (or TL skipped); notify HR and MD for parallel review."""
     if not _is_regular_leave(instance):
         return
     recipients = _users_by_role_names(["HR", "Hr"])
@@ -189,8 +189,25 @@ def notify_hr_after_team_lead_approved(instance: LeaveApplicationData, acting_us
                 title="Leave needs HR approval",
                 message=msg,
             )
+    notify_md_after_team_lead_approved(instance, acting_user)
+
+
+def notify_md_after_team_lead_approved(instance: LeaveApplicationData, acting_user: User) -> None:
+    """Team lead approved (or TL skipped); notify MD users for parallel final review."""
+    if not _is_regular_leave(instance):
         return
-    notify_md_after_hr_approved(instance, acting_user)
+    recipients = _users_by_role_names(["MD"])
+    applicant_name = _display_name(instance.applicant) or "Employee"
+    actor_name = _display_name(acting_user) or "Team lead"
+    msg = f"{actor_name} approved {applicant_name}'s leave. MD review is required."
+    for recipient in recipients:
+        send_leave_notification(
+            to_user=recipient,
+            from_user=acting_user,
+            type_name=TYPE_TL_APPROVED,
+            title="Leave needs MD approval",
+            message=msg,
+        )
 
 
 def notify_md_after_hr_approved(instance: LeaveApplicationData, acting_user: User) -> None:

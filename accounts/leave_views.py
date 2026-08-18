@@ -1,7 +1,7 @@
 """
 Leave application APIs: POST (regular + emergency), GET, PATCH, PUT, DELETE.
-Sequential regular-leave approval by applicant role (alternative → TL → HR → MD where applicable).
-Short leave remains TL → HR → MD. HR-only emergency leave; remaining-leaves validation.
+Regular-leave approval by applicant role (alternative → TL → HR & MD in parallel; MD final).
+Short leave: TL → HR & MD in parallel (MD final). HR-only emergency leave; remaining-leaves validation.
 """
 import math
 from datetime import datetime, timedelta
@@ -532,8 +532,8 @@ def _set_short_leave_approvals(application, applicant, status_map):
     Short leave rails:
       - HR applicant: MD only (Pending), same as full-day HR leave.
       - MD applicant: auto-approved on MD rail.
-      - Team-lead applicant: HR first, then MD after HR approves.
-      - Others: sequential TL → HR → MD. Employee without team lead starts at HR;
+      - Team-lead applicant: HR + MD pending together after TL gate is skipped.
+      - Others: TL first, then HR + MD pending together. No team lead → HR + MD pending.
         Intern must have a team lead (enforced in the view).
     """
     pending = status_map.get("Pending")
@@ -554,12 +554,16 @@ def _set_short_leave_approvals(application, applicant, status_map):
         application.MD_approval_id = pending.id if pending else None
         return
     if _short_leave_skip_team_lead_step(applicant):
-        application.HR_approval_id = pending.id if pending else None
+        if pending:
+            application.HR_approval_id = pending.id
+            application.MD_approval_id = pending.id
         return
     if teamlead:
         application.team_lead_approval_id = pending.id if pending else None
         return
-    application.HR_approval_id = pending.id if pending else None
+    if pending:
+        application.HR_approval_id = pending.id
+        application.MD_approval_id = pending.id
 
 
 def _short_leave_requires_tl_approved_before_hr(instance):
@@ -570,10 +574,13 @@ def _short_leave_requires_tl_approved_before_hr(instance):
     return bool(instance.team_lead_id)
 
 
-def _short_leave_requires_hr_approved_before_md(instance):
+def _short_leave_requires_tl_approved_before_md(instance):
+    """MD may act on short leave only after TL when the TL step applies."""
     if not _short_leave_use_sequential_chain(instance.applicant):
         return False
-    return True
+    if _short_leave_skip_team_lead_step(instance.applicant):
+        return False
+    return bool(instance.team_lead_id)
 
 
 def _short_leave_on_legacy_admin_rail(instance):
@@ -613,6 +620,18 @@ def _clear_regular_approval_rails(application):
     application.MD_approval_id = None
 
 
+def _unlock_parallel_hr_md_pending(instance, status_pending, updated_fields):
+    """Expose HR and MD rails together; MD approval remains the final debit step."""
+    if not status_pending:
+        return
+    if instance.HR_approval_id is None:
+        instance.HR_approval = status_pending
+        updated_fields.append("HR_approval")
+    if instance.MD_approval_id is None:
+        instance.MD_approval = status_pending
+        updated_fields.append("MD_approval")
+
+
 def _set_first_regular_approval_rail(application, applicant, status_map):
     """First non-alternative step when no cover person is designated."""
     pending = status_map.get("Pending")
@@ -621,29 +640,27 @@ def _set_first_regular_approval_rail(application, applicant, status_map):
     role_name, teamlead = _get_applicant_role_and_teamlead(applicant)
     if role_name in ("TeamLead", "Teamlead", "Admin"):
         application.HR_approval_id = pending.id
+        application.MD_approval_id = pending.id
         return
     if teamlead:
         application.team_lead_approval_id = pending.id
         return
     application.HR_approval_id = pending.id
+    application.MD_approval_id = pending.id
 
 
 def _advance_regular_leave_after_alternative(instance, status_pending, updated_fields):
-    """Unlock TL or HR after the cover person accepts."""
+    """Unlock TL or HR+MD after the cover person accepts."""
     role_name, teamlead = _get_applicant_role_and_teamlead(instance.applicant)
     if role_name in ("TeamLead", "Teamlead", "Admin"):
-        if instance.HR_approval_id is None:
-            instance.HR_approval = status_pending
-            updated_fields.append("HR_approval")
+        _unlock_parallel_hr_md_pending(instance, status_pending, updated_fields)
         return
     if teamlead and instance.team_lead_id:
         if instance.team_lead_approval_id is None:
             instance.team_lead_approval = status_pending
             updated_fields.append("team_lead_approval")
         return
-    if instance.HR_approval_id is None:
-        instance.HR_approval = status_pending
-        updated_fields.append("HR_approval")
+    _unlock_parallel_hr_md_pending(instance, status_pending, updated_fields)
 
 
 def _regular_leave_alt_rejected(instance):
@@ -675,9 +692,13 @@ def _regular_leave_md_blocked(instance):
         return False, None
     if _regular_leave_alt_rejected(instance):
         return True, "This leave request was rejected by the alternative cover person."
-    hr = instance.HR_approval
-    if not (hr and hr.name == "Approved"):
-        return True, "HR must approve before MD."
+    if instance.alternative_id and not _regular_leave_alt_approved(instance):
+        return True, "Alternative must approve before MD."
+    if not _regular_leave_applicant_skips_team_lead(instance.applicant):
+        if instance.team_lead_id:
+            tl = instance.team_lead_approval
+            if not (tl and tl.name == "Approved"):
+                return True, "Team lead must approve before MD."
     return False, None
 
 
@@ -757,7 +778,10 @@ def _approval_tab_filter_q(user, role, *, status="all"):
                 & _approval_not_alt_rejected_q()
                 & (
                     Q(applicant__accounts_profile__Role__role_name__in=("HR", "Hr"))
-                    | Q(HR_approval__name=approved)
+                    | (
+                        _approval_alt_gate_ok_q()
+                        & _approval_team_lead_prior_ok_q()
+                    )
                 )
             )
 
@@ -847,8 +871,8 @@ def _set_approvals_by_role(application, applicant, status_map, is_md_approval_by
     based on applicant's role (regular leave — sequential, one active rail at a time).
     - MD applicant: MD=Approved.
     - HR applicant: MD=Pending only.
-    - Admin / TeamLead: Alternative (if set) else HR first; MD unlocked after HR.
-    - Employee/Intern: Alternative (if set) else TL (if assigned) else HR; then HR; then MD.
+    - Admin / TeamLead: Alternative (if set) else HR + MD pending together.
+    - Employee/Intern: Alternative (if set) else TL (if assigned) else HR + MD pending together.
     Short leave uses _set_short_leave_approvals instead.
     """
     pending = status_map.get("Pending")
@@ -1184,8 +1208,8 @@ class LeaveApplicationViewSet(ModelViewSet):
     def short_leave(self, request):
         """
         Two-hour short leave inside configured office hours.
-        Sequential approval: Team lead → HR → MD (team-lead applicant: HR → MD;
-        HR applicant: MD only). Interns must have a profile team lead.
+        Parallel HR + MD after team lead (MD final). Team-lead applicant: HR + MD pending;
+        HR applicant: MD only. Interns must have a profile team lead.
         Short-leave rows cannot be deleted.
         POST body: ``date``, ``short_leave_start_time``, ``leave_subject``, ``reason``.
         """
@@ -1325,11 +1349,11 @@ class LeaveApplicationViewSet(ModelViewSet):
                     )
             approval_updates["admin_approval"] = validated_data.pop("admin_approval")
         if "MD_approval" in validated_data and is_md:
-            if _is_short_leave_instance(instance) and _short_leave_requires_hr_approved_before_md(instance):
-                cur_hr = instance.HR_approval
-                if not (cur_hr and cur_hr.name == "Approved"):
+            if _is_short_leave_instance(instance) and _short_leave_requires_tl_approved_before_md(instance):
+                cur_tl = instance.team_lead_approval
+                if not (cur_tl and cur_tl.name == "Approved"):
                     raise s.ValidationError(
-                        {"MD_approval": ["HR must approve this short leave before MD."]}
+                        {"MD_approval": ["Team lead must approve this short leave before MD."]}
                     )
             elif not _is_short_leave_instance(instance) and _regular_leave_use_sequential_chain(instance):
                 blocked, msg = _regular_leave_md_blocked(instance)
@@ -1376,24 +1400,14 @@ class LeaveApplicationViewSet(ModelViewSet):
 
         status_pending = (_get_leave_status_map().get("Pending"))
 
-        # Short leave sequential: advance HR / MD Pending after prior approver Accepted.
+        # Short leave: after TL approves, unlock HR + MD together (MD remains final).
         if _is_short_leave_instance(instance) and _short_leave_use_sequential_chain(instance.applicant):
             tl_upd = approval_updates.get("team_lead_approval")
             tl_was_approved = old_tl_ap and old_tl_ap.name == "Approved"
             if tl_upd and tl_upd.name == "Approved" and not tl_was_approved and status_pending:
-                if instance.HR_approval_id is None:
-                    instance.HR_approval = status_pending
-                    updated_fields.append("HR_approval")
-            hr_upd = approval_updates.get("HR_approval")
-            hr_was_approved = old_hr_ap and old_hr_ap.name == "Approved"
-            if hr_upd and hr_upd.name == "Approved" and not hr_was_approved and status_pending:
-                if _short_leave_on_legacy_admin_rail(instance):
-                    pass
-                elif instance.MD_approval_id is None:
-                    instance.MD_approval = status_pending
-                    updated_fields.append("MD_approval")
+                _unlock_parallel_hr_md_pending(instance, status_pending, updated_fields)
 
-        # Regular leave sequential: advance after alternative / team lead / HR approves.
+        # Regular leave: after alternative / TL approves, unlock HR + MD together.
         elif _regular_leave_use_sequential_chain(instance) and status_pending:
             alt_upd = approval_updates.get("alternative_approval")
             alt_was_approved = old_alt_ap and old_alt_ap.name == "Approved"
@@ -1402,15 +1416,7 @@ class LeaveApplicationViewSet(ModelViewSet):
             tl_upd = approval_updates.get("team_lead_approval")
             tl_was_approved = old_tl_ap and old_tl_ap.name == "Approved"
             if tl_upd and tl_upd.name == "Approved" and not tl_was_approved:
-                if instance.HR_approval_id is None:
-                    instance.HR_approval = status_pending
-                    updated_fields.append("HR_approval")
-            hr_upd = approval_updates.get("HR_approval")
-            hr_was_approved = old_hr_ap and old_hr_ap.name == "Approved"
-            if hr_upd and hr_upd.name == "Approved" and not hr_was_approved:
-                if instance.MD_approval_id is None:
-                    instance.MD_approval = status_pending
-                    updated_fields.append("MD_approval")
+                _unlock_parallel_hr_md_pending(instance, status_pending, updated_fields)
 
         # When MD just approved (was not already Approved), deduct from the right bucket
         # (non-emergency only; emergency already updated at create).

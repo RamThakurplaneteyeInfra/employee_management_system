@@ -166,13 +166,19 @@ class LeaveNotificationFlowTests(TestCase):
         qs = Notification.objects.filter(receipient=self.tl, type_of_notification__type_name="Leave_Alternative_Approved")
         self.assertEqual(qs.count(), 1)
 
-    def test_team_lead_approval_notifies_hr(self):
+    def test_team_lead_approval_notifies_hr_and_md(self):
         app = self._create_regular_leave_with_alternative()
         self._approve_alternative(app)
         response = self._approve_team_lead(app)
         self.assertEqual(response.status_code, 200, response.data)
-        qs = Notification.objects.filter(receipient=self.hr, type_of_notification__type_name="Leave_TeamLead_Approved")
-        self.assertEqual(qs.count(), 1)
+        hr_qs = Notification.objects.filter(
+            receipient=self.hr, type_of_notification__type_name="Leave_TeamLead_Approved"
+        )
+        md_qs = Notification.objects.filter(
+            receipient=self.md, type_of_notification__type_name="Leave_TeamLead_Approved"
+        )
+        self.assertEqual(hr_qs.count(), 1)
+        self.assertEqual(md_qs.count(), 1)
 
     def test_hr_approval_notifies_md(self):
         app = self._create_regular_leave_with_alternative()
@@ -207,7 +213,7 @@ class LeaveNotificationFlowTests(TestCase):
         )
         self.assertEqual(qs.count(), 1)
 
-    def test_missing_team_lead_falls_back_to_hr_after_alternative(self):
+    def test_missing_team_lead_falls_back_to_hr_and_md_after_alternative(self):
         app = self._create_regular_leave_with_alternative()
         app.team_lead = None
         app.save(update_fields=["team_lead"])
@@ -219,11 +225,16 @@ class LeaveNotificationFlowTests(TestCase):
             format="json",
         )
         self.assertEqual(response.status_code, 200, response.data)
-        qs = Notification.objects.filter(
+        hr_qs = Notification.objects.filter(
             receipient=self.hr,
             type_of_notification__type_name="Leave_TeamLead_Approved",
         )
-        self.assertEqual(qs.count(), 1)
+        md_qs = Notification.objects.filter(
+            receipient=self.md,
+            type_of_notification__type_name="Leave_TeamLead_Approved",
+        )
+        self.assertEqual(hr_qs.count(), 1)
+        self.assertEqual(md_qs.count(), 1)
 
     def _approval_list_for(self, user, *, status=None):
         self.client.force_authenticate(user=user)
@@ -263,7 +274,7 @@ class LeaveNotificationFlowTests(TestCase):
         self._approve_team_lead(app)
         self.assertNotIn(app_id, self._approval_ids_for(self.tl, status="pending"))
         self.assertIn(app_id, self._approval_ids_for(self.hr, status="pending"))
-        self.assertNotIn(app_id, self._approval_ids_for(self.md, status="pending"))
+        self.assertIn(app_id, self._approval_ids_for(self.md, status="pending"))
 
         self._approve_hr(app)
         self.assertNotIn(app_id, self._approval_ids_for(self.hr, status="pending"))
@@ -286,7 +297,7 @@ class LeaveNotificationFlowTests(TestCase):
         self._approve_team_lead(app)
         self.assertIn(app_id, self._approval_ids_for(self.tl))
         self.assertIn(app_id, self._approval_ids_for(self.hr))
-        self.assertNotIn(app_id, self._approval_ids_for(self.md))
+        self.assertIn(app_id, self._approval_ids_for(self.md))
 
         self._approve_hr(app)
         self.assertIn(app_id, self._approval_ids_for(self.hr))
