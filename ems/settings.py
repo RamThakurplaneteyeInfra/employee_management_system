@@ -247,10 +247,10 @@ if REDIS_URL:
 
 # Schema-based apps: set on every cursor via ems.backends.postgresql (pool-safe).
 # List the schema that contains auth_user (and django_session) first, then other app schemas. No public.
-DB_SEARCH_PATH = os.getenv(
-    "DB_SEARCH_PATH",
-    "login_details,emp_assessment,alerts,clients,events,task_management,notifications,project,quatery_reports,messaging,team_farm,team_infra,team_interns,team_management,customer_panel",
-)
+# Empty / whitespace DB_SEARCH_PATH env must not wipe the default (common Railway misconfig).
+from ems.db_search_path import resolve_db_search_path  # noqa: E402
+
+DB_SEARCH_PATH = resolve_db_search_path(os.getenv("DB_SEARCH_PATH"))
 
 # Local Postgres often has no SSL; RDS expects SSL. Override with POSTGRES_SSLMODE if needed.
 _postgres_host = (os.getenv("POSTGRES_HOST") or "localhost").strip().lower()
@@ -272,7 +272,8 @@ DATABASES = {
             "connect_timeout": 10,
             "sslmode": os.getenv("POSTGRES_SSLMODE", _default_pg_sslmode),
         },
-        # "CONN_MAX_AGE": 0,
+        # Return connections to the pool after each request (required with dj_db_conn_pool).
+        "CONN_MAX_AGE": 0,
         "DISABLE_SERVER_SIDE_CURSORS": True,
         # "POOL_OPTIONS": {
         #     "POOL_SIZE": DB_POOL_SIZE,
