@@ -50,6 +50,12 @@ class FarmServiceTask(models.Model):
         blank=True,
     )
     status = models.BooleanField(default=False)
+    completed_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        db_index=True,
+        help_text="Set when status becomes true; used for performance scoring month.",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

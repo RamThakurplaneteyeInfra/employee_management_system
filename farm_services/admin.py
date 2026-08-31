@@ -19,9 +19,17 @@ class FarmServiceRequestAdmin(admin.ModelAdmin):
 
 @admin.register(FarmServiceTask)
 class FarmServiceTaskAdmin(admin.ModelAdmin):
-    list_display = ("id", "request", "task_name", "status", "created_at", "updated_at")
+    list_display = (
+        "id",
+        "request",
+        "task_name",
+        "status",
+        "completed_at",
+        "created_at",
+        "updated_at",
+    )
     search_fields = ("task_name", "request__service_name")
-    list_filter = ("status", "created_at")
+    list_filter = ("status", "completed_at", "created_at")
     filter_horizontal = ("team_members",)
 
 

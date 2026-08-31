@@ -1,10 +1,37 @@
 from django.contrib.auth.models import User
 from django.db import transaction
+from django.utils import timezone
 from rest_framework import serializers
 
 from accounts.models import Profile
 
 from .models import FarmServiceRequest, FarmServiceSubtask, FarmServiceTask
+
+
+def _sync_task_completed_at(task: FarmServiceTask, *, status: bool) -> list[str]:
+    """
+    Keep completed_at aligned with status for scoring.
+    Returns field names that were changed (excluding status itself).
+    """
+    changed: list[str] = []
+    task.status = status
+    if status:
+        if task.completed_at is None:
+            task.completed_at = timezone.now()
+            changed.append("completed_at")
+    elif task.completed_at is not None:
+        task.completed_at = None
+        changed.append("completed_at")
+    return changed
+
+
+def _task_create_kwargs(row: dict) -> dict:
+    """Copy write row and set completed_at when creating an already-complete task."""
+    data = dict(row)
+    status = bool(data.get("status", False))
+    data["status"] = status
+    data["completed_at"] = timezone.now() if status else None
+    return data
 
 
 class EmployeeDropdownSerializer(serializers.ModelSerializer):
@@ -145,10 +172,12 @@ class FarmServiceTaskReadSerializer(serializers.ModelSerializer):
             "task_name",
             "team_members",
             "status",
+            "completed_at",
             "subtasks",
             "created_at",
             "updated_at",
         ]
+        read_only_fields = ["completed_at"]
 
     def get_team_members(self, obj):
         members = obj.team_members.all().order_by("username")
@@ -272,7 +301,9 @@ class FarmServiceRequestSerializer(serializers.ModelSerializer):
         for row in tasks_data:
             members = row.pop("team_members", [])
             subtasks = row.pop("subtasks", [])
-            task = FarmServiceTask.objects.create(request=request, **row)
+            task = FarmServiceTask.objects.create(
+                request=request, **_task_create_kwargs(row)
+            )
             if members:
                 task.team_members.set(members)
             for subtask_row in subtasks:
@@ -322,15 +353,20 @@ class FarmServiceRequestSerializer(serializers.ModelSerializer):
                         raise serializers.ValidationError(
                             {"tasks": "task_name is required for new task."}
                         )
-                    task = FarmServiceTask.objects.create(request=instance, **row)
+                    task = FarmServiceTask.objects.create(
+                        request=instance, **_task_create_kwargs(row)
+                    )
                 else:
                     updatable_fields = []
                     if "task_name" in row:
                         task.task_name = row["task_name"]
                         updatable_fields.append("task_name")
                     if "status" in row:
-                        task.status = row["status"]
+                        completion_fields = _sync_task_completed_at(
+                            task, status=bool(row["status"])
+                        )
                         updatable_fields.append("status")
+                        updatable_fields.extend(completion_fields)
                     if updatable_fields:
                         updatable_fields.append("updated_at")
                         task.save(update_fields=updatable_fields)

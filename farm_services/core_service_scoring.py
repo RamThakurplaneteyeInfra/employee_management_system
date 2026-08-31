@@ -10,7 +10,7 @@ Rules:
 - Points: 10 per completed task
 - Monthly main caps (tasks): NPD/HC/IP → 5 (50 pts); NPC → 7 (70 pts)
 - Overflow above monthly main cap → monthly_bonus
-- Period date: task.updated_at (when status is true)
+- Period date: task.completed_at (set when status becomes true)
 - Department filter: Farm Core → farm requests; Infra Core → infra requests
 """
 
@@ -134,11 +134,11 @@ def _period_range_label(year: int, month: int | None, quarter: int | None) -> st
     return f"{year + 1}-01 to {year + 1}-03"
 
 
-def _fy_quarter_updated_at_filter(year: int, quarter: int) -> Q:
+def _fy_quarter_completed_at_filter(year: int, quarter: int) -> Q:
     months = _FY_QUARTER_MONTHS[quarter]
     if quarter == 4:
-        return Q(updated_at__year=year + 1, updated_at__month__in=months)
-    return Q(updated_at__year=year, updated_at__month__in=months)
+        return Q(completed_at__year=year + 1, completed_at__month__in=months)
+    return Q(completed_at__year=year, completed_at__month__in=months)
 
 
 def _local_date(dt) -> date | None:
@@ -159,7 +159,7 @@ def _completed_tasks_for_user(
 ):
     """Completed parent tasks credited to creator or team member (once per task)."""
     qs = (
-        FarmServiceTask.objects.filter(status=True)
+        FarmServiceTask.objects.filter(status=True, completed_at__isnull=False)
         .filter(Q(request__created_by=user) | Q(team_members=user))
         .select_related("request")
         .prefetch_related("team_members")
@@ -168,12 +168,12 @@ def _completed_tasks_for_user(
     if department:
         qs = qs.filter(request__department=department)
     if month is not None:
-        qs = qs.filter(updated_at__year=year, updated_at__month=month)
+        qs = qs.filter(completed_at__year=year, completed_at__month=month)
     elif quarter is not None:
-        qs = qs.filter(_fy_quarter_updated_at_filter(year, quarter))
+        qs = qs.filter(_fy_quarter_completed_at_filter(year, quarter))
     else:
-        qs = qs.filter(updated_at__year=year)
-    return qs.order_by("updated_at", "id")
+        qs = qs.filter(completed_at__year=year)
+    return qs.order_by("completed_at", "id")
 
 
 def _credit_roles_for_task(task: FarmServiceTask, user) -> list[str]:
@@ -253,7 +253,7 @@ def build_core_service_points(
     events: list[dict] = []
 
     for task in tasks:
-        completed_on = _local_date(task.updated_at)
+        completed_on = _local_date(task.completed_at)
         if completed_on is None:
             continue
         key = (completed_on.year, completed_on.month)
@@ -264,6 +264,7 @@ def build_core_service_points(
                 "request_id": task.request_id,
                 "task_name": task.task_name,
                 "completed_on": completed_on.isoformat(),
+                "completed_at": task.completed_at.isoformat() if task.completed_at else None,
                 "department": getattr(task.request, "department", None),
                 "credit_as": _credit_roles_for_task(task, user),
                 "points": float(POINTS_PER_TASK),
