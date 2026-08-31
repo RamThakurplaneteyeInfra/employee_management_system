@@ -42,9 +42,11 @@ class FarmServiceRequestViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         qs = super().get_queryset()
         user = self.request.user
-        # Entries are visible to MD (and superuser) or the creator only.
+        # Visible to MD/superuser, creator, or assigned task team members.
         if not user_is_farm_service_md(user):
-            qs = qs.filter(created_by=user)
+            qs = qs.filter(
+                Q(created_by=user) | Q(tasks__team_members=user)
+            ).distinct()
 
         service_name = (self.request.query_params.get("service_name") or "").strip()
         if service_name:
