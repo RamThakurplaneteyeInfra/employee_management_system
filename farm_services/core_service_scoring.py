@@ -5,7 +5,7 @@ Replaces checklist for employees whose Profile.Branch is Farm Core or Infra Core
 and who have any of: NPD, NPC, HC, IP.
 
 Rules:
-- Credit: request created_by only
+- Credit: request created_by OR task team_members (deduped once per task)
 - Count: parent tasks with status=True (subtasks ignored)
 - Points: 10 per completed task
 - Monthly main caps (tasks): NPD/HC/IP → 5 (50 pts); NPC → 7 (70 pts)
@@ -149,7 +149,7 @@ def _local_date(dt) -> date | None:
     return dt.date()
 
 
-def _completed_tasks_for_creator(
+def _completed_tasks_for_user(
     user,
     year: int,
     month: int | None,
@@ -157,10 +157,14 @@ def _completed_tasks_for_creator(
     *,
     department: str | None,
 ):
-    qs = FarmServiceTask.objects.filter(
-        status=True,
-        request__created_by=user,
-    ).select_related("request")
+    """Completed parent tasks credited to creator or team member (once per task)."""
+    qs = (
+        FarmServiceTask.objects.filter(status=True)
+        .filter(Q(request__created_by=user) | Q(team_members=user))
+        .select_related("request")
+        .prefetch_related("team_members")
+        .distinct()
+    )
     if department:
         qs = qs.filter(request__department=department)
     if month is not None:
@@ -170,6 +174,15 @@ def _completed_tasks_for_creator(
     else:
         qs = qs.filter(updated_at__year=year)
     return qs.order_by("updated_at", "id")
+
+
+def _credit_roles_for_task(task: FarmServiceTask, user) -> list[str]:
+    roles: list[str] = []
+    if task.request.created_by_id == user.pk:
+        roles.append("creator")
+    if any(member.pk == user.pk for member in task.team_members.all()):
+        roles.append("team_member")
+    return roles
 
 
 def _split_main_and_bonus(gross: Decimal, cap: Decimal) -> tuple[Decimal, Decimal]:
@@ -232,7 +245,7 @@ def build_core_service_points(
         return base
 
     tasks = list(
-        _completed_tasks_for_creator(
+        _completed_tasks_for_user(
             user, year, month, quarter, department=department
         )
     )
@@ -252,6 +265,7 @@ def build_core_service_points(
                 "task_name": task.task_name,
                 "completed_on": completed_on.isoformat(),
                 "department": getattr(task.request, "department", None),
+                "credit_as": _credit_roles_for_task(task, user),
                 "points": float(POINTS_PER_TASK),
             }
         )

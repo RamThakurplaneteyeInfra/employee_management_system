@@ -2,8 +2,8 @@
 Combined employee performance score.
 
 Default (non-MMR/RG): leave + meeting + checklist + certification + actionable co-author + actionable entries (main_score only; no bonus).
-Farm/Infra Core (NPD/NPC/HC/IP): leave + meeting + core services (completed farm-service tasks @10 pts,
-cap 5/mo for NPD/HC/IP or 7/mo for NPC) + certification + actionable co-author + actionable entries (no checklist).
+Farm/Infra Core (NPD/NPC/HC/IP): leave + meeting + core services (completed farm-service tasks @10 pts
+for creator or team member, cap 5/mo for NPD/HC/IP or 7/mo for NPC) + certification + actionable co-author + actionable entries (no checklist).
 MMR/RG: leave + meeting + certification + actionable co-author + client profiles + customer panel entries (main_score only; no bonus).
 Intern: leave + meeting + tasks (21 completed/month = 70 main) + certification + actionable co-author + actionable entries (no checklist).
 P&S: leave + meeting + service entries (Approved infra quantity vs MD monthly target, max 70/mo) + certification + actionable co-author (no checklist).
