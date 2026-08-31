@@ -3,7 +3,20 @@ from django.db import models
 
 
 class FarmServiceRequest(models.Model):
+    DEPARTMENT_FARM = "farm"
+    DEPARTMENT_INFRA = "infra"
+    DEPARTMENT_CHOICES = [
+        (DEPARTMENT_FARM, "Farm"),
+        (DEPARTMENT_INFRA, "Infra"),
+    ]
+
     service_name = models.CharField(max_length=160)
+    department = models.CharField(
+        max_length=10,
+        choices=DEPARTMENT_CHOICES,
+        default=DEPARTMENT_FARM,
+        db_index=True,
+    )
     puc = models.BooleanField(default=False)
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,

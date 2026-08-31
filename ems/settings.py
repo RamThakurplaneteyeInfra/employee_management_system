@@ -54,7 +54,7 @@ ALLOWED_HOSTS = [
     "employeemanagementsystem-production-21b6.up.railway.app",
     "http://192.168.41.76:3000",
     "http://192.168.41.76:3000/",
-    "http://192.168.42.107:3000/",
+    "http://192.168.42.107:3002",
     "http://192.168.42.107:3000",
 ]
 
@@ -372,10 +372,16 @@ CORS_ALLOWED_ORIGINS = [
     "https://planeteye-employee-portal.onrender.com",
     "https://employee-management-system-1-jwyn.onrender.com",
     "http://localhost:3000",
+    "http://localhost:3001",
+    "http://localhost:3002",
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:3001",
+    "http://127.0.0.1:3002",
     "http://127.0.0.1:8000",
     "http://192.168.41.76:3000",
     # "http://192.168.41.55:3000",
     "http://192.168.42.107:3000",
+    "http://192.168.42.107:3002",
 ]
 CORS_ALLOW_METHODS = ["DELETE", "GET", "OPTIONS", "PATCH", "POST", "PUT"]
 CORS_ALLOW_HEADERS = [
@@ -395,13 +401,18 @@ CSRF_TRUSTED_ORIGINS = [
     "https://planeteye-employee-portal.onrender.com",
     # "http://192.168.41.55:3000",
     "http://192.168.41.76:3000",
-    # "http://localhost:3000/",
+    "http://localhost:3000",
+    "http://localhost:3001",
+    "http://localhost:3002",
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:3001",
+    "http://127.0.0.1:3002",
     # "http://localhost:8000/",
     # "http://127.0.0.1:8000/",
     # "http://192.168.41.55:3000/",
     "http://192.168.41.120:3000/",
     "http://192.168.42.107:3000",
-    "http://localhost:3001",
+    "http://192.168.42.107:3002",
 ]
 
 # =============================================================================

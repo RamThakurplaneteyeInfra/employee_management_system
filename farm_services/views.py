@@ -7,7 +7,10 @@ from rest_framework.response import Response
 from accounts.models import Profile
 
 from .models import FarmServiceRequest
-from .permissions import CanEditFarmServiceRequest
+from .permissions import (
+    CanEditFarmServiceRequest,
+    user_is_farm_service_md,
+)
 from .serializers import (
     EmployeeDropdownSerializer,
     FarmServiceRequestListSerializer,
@@ -38,12 +41,23 @@ class FarmServiceRequestViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         qs = super().get_queryset()
+        user = self.request.user
+        # Entries are visible to MD (and superuser) or the creator only.
+        if not user_is_farm_service_md(user):
+            qs = qs.filter(created_by=user)
+
         service_name = (self.request.query_params.get("service_name") or "").strip()
         if service_name:
             qs = qs.filter(service_name__icontains=service_name)
         created_by = (self.request.query_params.get("created_by") or "").strip()
         if created_by:
             qs = qs.filter(created_by__username=created_by)
+        department = (self.request.query_params.get("department") or "").strip().lower()
+        if department in {
+            FarmServiceRequest.DEPARTMENT_FARM,
+            FarmServiceRequest.DEPARTMENT_INFRA,
+        }:
+            qs = qs.filter(department=department)
         return qs
 
     def perform_create(self, serializer):

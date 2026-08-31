@@ -1618,6 +1618,8 @@ class LeaveApplicationViewSet(ModelViewSet):
         Combined leave + meeting + checklist + certification + actionable co-author + actionable entries
         performance score for one employee. MMR/RG employees use scoring_profile=mmr_rg:
         leave + meeting + certification + actionable co-author + client profiles + customer panel entries.
+        Farm/Infra Core (NPD/NPC/HC/IP) use scoring_profile=farm_infra_core: completed farm-service
+        tasks (10 pts each; monthly main cap 5 for NPD/HC/IP, 7 for NPC) replace checklist.
         Interns use scoring_profile=intern: leave + meeting + tasks (21 completed/month = 70 main)
         + certification + actionable co-author + actionable entries (no checklist).
         Admin employees use scoring_profile=admin: leave + meeting + assigned tasks

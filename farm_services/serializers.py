@@ -172,6 +172,7 @@ class FarmServiceRequestSerializer(serializers.ModelSerializer):
         fields = [
             "id",
             "service_name",
+            "department",
             "puc",
             "created_by",
             "tasks",
@@ -196,6 +197,16 @@ class FarmServiceRequestSerializer(serializers.ModelSerializer):
         if not service:
             raise serializers.ValidationError("service_name cannot be blank.")
         return service
+
+    def validate_department(self, value):
+        department = (value or "").strip().lower()
+        allowed = {
+            FarmServiceRequest.DEPARTMENT_FARM,
+            FarmServiceRequest.DEPARTMENT_INFRA,
+        }
+        if department not in allowed:
+            raise serializers.ValidationError("department must be 'farm' or 'infra'.")
+        return department
 
     def validate_tasks(self, value):
         if not value:
@@ -282,6 +293,9 @@ class FarmServiceRequestSerializer(serializers.ModelSerializer):
         if "service_name" in validated_data:
             instance.service_name = validated_data["service_name"]
             request_fields_to_update.append("service_name")
+        if "department" in validated_data:
+            instance.department = validated_data["department"]
+            request_fields_to_update.append("department")
         if "puc" in validated_data:
             instance.puc = validated_data["puc"]
             request_fields_to_update.append("puc")
@@ -383,6 +397,7 @@ class FarmServiceRequestListSerializer(serializers.ModelSerializer):
         fields = [
             "id",
             "service_name",
+            "department",
             "puc",
             "created_by",
             "no_of_tasks",

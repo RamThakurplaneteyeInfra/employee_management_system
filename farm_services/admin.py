@@ -11,9 +11,9 @@ class FarmServiceTaskInline(admin.TabularInline):
 
 @admin.register(FarmServiceRequest)
 class FarmServiceRequestAdmin(admin.ModelAdmin):
-    list_display = ("id", "service_name", "created_by", "created_at", "updated_at")
+    list_display = ("id", "service_name", "department", "created_by", "created_at", "updated_at")
     search_fields = ("service_name", "created_by__username")
-    list_filter = ("created_at",)
+    list_filter = ("department", "created_at")
     inlines = (FarmServiceTaskInline,)
 
 

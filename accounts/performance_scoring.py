@@ -2,6 +2,8 @@
 Combined employee performance score.
 
 Default (non-MMR/RG): leave + meeting + checklist + certification + actionable co-author + actionable entries (main_score only; no bonus).
+Farm/Infra Core (NPD/NPC/HC/IP): leave + meeting + core services (completed farm-service tasks @10 pts,
+cap 5/mo for NPD/HC/IP or 7/mo for NPC) + certification + actionable co-author + actionable entries (no checklist).
 MMR/RG: leave + meeting + certification + actionable co-author + client profiles + customer panel entries (main_score only; no bonus).
 Intern: leave + meeting + tasks (21 completed/month = 70 main) + certification + actionable co-author + actionable entries (no checklist).
 P&S: leave + meeting + service entries (Approved infra quantity vs MD monthly target, max 70/mo) + certification + actionable co-author (no checklist).
@@ -19,6 +21,10 @@ from QuaterlyReports.actionable_coauthor_scoring import build_actionable_coautho
 from QuaterlyReports.actionable_entries_scoring import build_actionable_entries_points
 from CustomerPanel.customer_panel_scoring import MMR_RG_FUNCTIONS, build_customer_panel_entries_points
 from Clients.client_profile_scoring import build_client_profile_points
+from farm_services.core_service_scoring import (
+    build_core_service_points,
+    is_core_service_profile,
+)
 from task_management.intern_task_scoring import INTERN_ROLE_NAME, build_intern_task_points
 
 from accounts.models import Profile
@@ -230,6 +236,16 @@ def _is_dm_user(user) -> bool:
 def _is_ps_user(user) -> bool:
     profile = Profile.objects.filter(Employee_id=user).prefetch_related("functions").first()
     return is_ps_profile(profile)
+
+
+def _is_core_service_user(user) -> bool:
+    profile = (
+        Profile.objects.filter(Employee_id=user)
+        .select_related("Branch")
+        .prefetch_related("functions")
+        .first()
+    )
+    return is_core_service_profile(profile)
 
 
 def _function_names_upper_from_profile(profile: Profile | None) -> set[str]:
@@ -463,6 +479,7 @@ def build_hr_performance_score(
         "actionable_entries": empty_category,
         "dm_work": empty_category,
         "ps_service": empty_category,
+        "core_services": empty_category,
         "customer_panel_entries": empty_category,
         "client_profiles": empty_category,
     }
@@ -530,6 +547,7 @@ def build_admin_performance_score(
         "actionable_entries": empty_category,
         "dm_work": empty_category,
         "ps_service": empty_category,
+        "core_services": empty_category,
         "customer_panel_entries": empty_category,
         "client_profiles": empty_category,
     }
@@ -634,6 +652,7 @@ def _compute_individual_performance_score(
     actionable_entries = build_actionable_entries_points(user, year, month=month, quarter=quarter)
     dm_work = build_dm_work_points(user, year, month=month, quarter=quarter)
     ps_service = build_ps_service_points(user, year, month=month, quarter=quarter)
+    core_services = build_core_service_points(user, year, month=month, quarter=quarter)
     customer_panel_entries = build_customer_panel_entries_points(user, year, month=month, quarter=quarter)
     client_profiles = build_client_profile_points(user, year, month=month, quarter=quarter)
     intern_tasks = build_intern_task_points(user, year, month=month, quarter=quarter)
@@ -642,6 +661,8 @@ def _compute_individual_performance_score(
     is_intern = _is_intern_user(user)
     is_dm = _is_dm_user(user)
     is_ps = _is_ps_user(user)
+    is_core_services = _is_core_service_user(user)
+    empty_category = {"main_score": 0.0, "monthly_bonus": 0.0, "total_points": 0.0}
     if is_mmr_rg:
         combined_categories = {
             "meeting": meeting,
@@ -701,6 +722,22 @@ def _compute_individual_performance_score(
         )
         combined_total_bonus = _sum_bonus(list(combined_categories.values()))
         scoring_profile = "intern"
+    elif is_core_services:
+        # Farm/Infra Core NPD/NPC/HC/IP: completed farm-service tasks replace checklist.
+        combined_categories = {
+            "meeting": meeting,
+            "core_services": core_services,
+            "certification": certification,
+            "actionable_coauthor": actionable_coauthor,
+            "actionable_entries": actionable_entries,
+        }
+        combined_total = round(
+            _points_for_combined(leave)
+            + sum(_points_for_combined(c) for c in combined_categories.values()),
+            2,
+        )
+        combined_total_bonus = _sum_bonus(list(combined_categories.values()))
+        scoring_profile = "farm_infra_core"
     else:
         combined_categories = {
             "meeting": meeting,
@@ -736,13 +773,14 @@ def _compute_individual_performance_score(
         "bonus_by_category": _bonus_breakdown(combined_categories),
         "leave": _slim_category_payload(leave),
         "meeting": _slim_category_payload(meeting),
-        "checklist": _slim_category_payload(checklist),
+        "checklist": empty_category if is_core_services else _slim_category_payload(checklist),
         "tasks": _slim_category_payload(intern_tasks),
         "certification": _slim_category_payload(certification),
         "actionable_coauthor": _slim_category_payload(actionable_coauthor),
         "actionable_entries": _slim_category_payload(actionable_entries),
         "dm_work": _slim_category_payload(dm_work),
         "ps_service": _slim_category_payload(ps_service),
+        "core_services": _slim_category_payload(core_services),
         "customer_panel_entries": _slim_category_payload(customer_panel_entries),
         "client_profiles": _slim_category_payload(client_profiles),
     }
