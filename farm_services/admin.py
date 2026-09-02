@@ -28,7 +28,7 @@ class FarmServiceTaskAdmin(admin.ModelAdmin):
         "created_at",
         "updated_at",
     )
-    search_fields = ("task_name", "request__service_name")
+    search_fields = ("task_name", "task_info", "request__service_name")
     list_filter = ("status", "completed_at", "created_at")
     filter_horizontal = ("team_members",)
 

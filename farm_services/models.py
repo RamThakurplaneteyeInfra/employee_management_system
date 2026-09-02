@@ -44,6 +44,7 @@ class FarmServiceTask(models.Model):
         related_name="tasks",
     )
     task_name = models.CharField(max_length=200)
+    task_info = models.TextField(blank=True, default="")
     team_members = models.ManyToManyField(
         settings.AUTH_USER_MODEL,
         related_name="farm_service_tasks_assigned",

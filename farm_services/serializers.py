@@ -46,6 +46,7 @@ class EmployeeDropdownSerializer(serializers.ModelSerializer):
 class FarmServiceTaskWriteSerializer(serializers.ModelSerializer):
     id = serializers.IntegerField(required=False)
     task_name = serializers.CharField(required=False)
+    task_info = serializers.CharField(required=False, allow_blank=True)
     status = serializers.BooleanField(required=False)
     team_members = serializers.ListField(
         child=serializers.CharField(),
@@ -56,7 +57,7 @@ class FarmServiceTaskWriteSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = FarmServiceTask
-        fields = ["id", "task_name", "team_members", "status", "subtasks"]
+        fields = ["id", "task_name", "task_info", "team_members", "status", "subtasks"]
 
     def validate_task_name(self, value):
         task = (value or "").strip()
@@ -170,6 +171,7 @@ class FarmServiceTaskReadSerializer(serializers.ModelSerializer):
         fields = [
             "id",
             "task_name",
+            "task_info",
             "team_members",
             "status",
             "completed_at",
@@ -361,6 +363,9 @@ class FarmServiceRequestSerializer(serializers.ModelSerializer):
                     if "task_name" in row:
                         task.task_name = row["task_name"]
                         updatable_fields.append("task_name")
+                    if "task_info" in row:
+                        task.task_info = row["task_info"] if row["task_info"] is not None else ""
+                        updatable_fields.append("task_info")
                     if "status" in row:
                         completion_fields = _sync_task_completed_at(
                             task, status=bool(row["status"])
