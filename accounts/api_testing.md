@@ -35,7 +35,7 @@
   "department": "Engineering"
 }
 ```
-**notes:** Creates session; single-device: any existing session for this user is expired first. 400 if username/password missing or invalid.
+**notes:** Creates session; single-device: any existing session for this user is expired first. 400 if username/password missing or invalid. Failed logins are rate-limited (default 5 failures / 5 minutes per IP and per username); over limit returns **429** with `Retry-After`, body `retry_after_seconds` / `retry_after_minutes` = time remaining (not the full window). Env: `LOGIN_RATE_LIMIT_ATTEMPTS`, `LOGIN_RATE_LIMIT_WINDOW_SECONDS`.
 
 ---
 

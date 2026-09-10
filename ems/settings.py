@@ -211,7 +211,13 @@ if REDIS_URL:
 # Cache – Redis (same instance as Channels). GET API responses cached; invalidated on create/update.
 # When REDIS_URL is missing, use DummyCache to avoid in-process memory growth (e.g. on 512MB Render).
 # =============================================================================
-CACHE_GET_TIMEOUT = int(os.getenv("CACHE_GET_TIMEOUT", "1800"))  
+CACHE_GET_TIMEOUT = int(os.getenv("CACHE_GET_TIMEOUT", "1800"))
+
+# Login brute-force protection (POST /accounts/login/). Failed attempts only;
+# keyed by client IP and username in the default cache (Redis when REDIS_URL is set).
+LOGIN_RATE_LIMIT_ATTEMPTS = int(os.getenv("LOGIN_RATE_LIMIT_ATTEMPTS", "5"))
+LOGIN_RATE_LIMIT_WINDOW_SECONDS = int(os.getenv("LOGIN_RATE_LIMIT_WINDOW_SECONDS", "300"))
+
 if REDIS_URL:
     CACHES = {
         "default": {

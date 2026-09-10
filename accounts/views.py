@@ -386,20 +386,36 @@ def _logout_existing_sessions(user):
 @csrf_exempt
 def user_login(req: HttpRequest):
     """Sync helper: authenticate, login, get_user_role. Returns HttpResponse."""
+    from accounts.login_rate_limit import (
+        clear_failed_login,
+        get_client_ip,
+        is_login_rate_limited,
+        rate_limit_response_payload,
+        record_failed_login,
+    )
+
     verify_method = verifyPost(req)
     if verify_method:
         return verify_method
     data = load_data(req)
     u, p = data.get("username"), data.get("password")
+    client_ip = get_client_ip(req)
     try:
         if not u or not p:
             return JsonResponse({"message": "username or password is missing"}, status=status.HTTP_400_BAD_REQUEST)
+        if is_login_rate_limited(client_ip, u):
+            payload = rate_limit_response_payload(client_ip, u)
+            resp = JsonResponse(payload, status=status.HTTP_429_TOO_MANY_REQUESTS)
+            resp["Retry-After"] = str(payload["retry_after_seconds"])
+            return resp
         user = authenticate(req, username=u, password=p)
         if not user:
+            record_failed_login(client_ip, u)
             return JsonResponse({"messege": "Incorrect userID/Password,Try again"}, status=status.HTTP_400_BAD_REQUEST)
         # One device only: expire any existing sessions for this user before creating a new one.
         _logout_existing_sessions(user)
         login(req, user)
+        clear_failed_login(client_ip, u)
         Profile.objects.filter(Employee_id=user).update(is_logged_in=True)
         from ems.cache_utils import invalidate_get_all_employees_cache
         invalidate_get_all_employees_cache()
