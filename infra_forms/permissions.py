@@ -12,6 +12,8 @@ _INFRA_PROJECT_FORM_ROLES = frozenset(
         "Hr",
         "TeamLead",
         "Teamlead",
+        "EMPLOYEE",
+        "Employee",
     }
 )
 
@@ -43,7 +45,7 @@ def can_md_approve_infra_entry(user) -> bool:
 
 class CanAccessInfraProjectForms(BasePermission):
     """
-    Team Lead (TeamLead / Teamlead), MD, HR (HR / Hr), Admin, or superuser.
+    Employee, Team Lead, MD, HR, Admin, or superuser.
     Used only on InfraProjectFormViewSet together with IsAuthenticated.
     """
 
