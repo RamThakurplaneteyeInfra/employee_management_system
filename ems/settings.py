@@ -241,17 +241,13 @@ if REDIS_URL:
     }
 
 # =============================================================================
-# Database – Connection pooling for AWS RDS (max 79 connections)
+# Database
 # =============================================================================
-# Requires: pip install django-db-connection-pool[postgresql] (engine: dj_db_conn_pool)
-# Total connections = GUNICORN_WORKERS × (POOL_SIZE + MAX_OVERFLOW). Keep under 65 for RDS 79.
-# CONN_MAX_AGE=0 is required: returns connection to pool after each request so pool is not exhausted.
-# DB_POOL_SIZE = int(os.getenv("DB_POOL_SIZE", "15"))
-# DB_MAX_OVERFLOW = int(os.getenv("DB_MAX_OVERFLOW", "5"))
-# DB_RECYCLE_SECONDS = int(os.getenv("DB_RECYCLE_SECONDS", "3600"))
-# DB_POOL_TIMEOUT = int(os.getenv("DB_POOL_TIMEOUT", "60"))
+# Neon’s pooler is the connection pool. Do not add an in-process SQLAlchemy pool.
+# CONN_MAX_AGE=0 closes Django’s connection after each request so it is not held
+# across requests on the Neon transaction pooler.
 
-# Schema-based apps: set on every cursor via ems.backends.postgresql (pool-safe).
+# Schema-based apps: set on every cursor via ems.backends.postgresql.
 # List the schema that contains auth_user (and django_session) first, then other app schemas. No public.
 # Empty / whitespace DB_SEARCH_PATH env must not wipe the default (common Railway misconfig).
 from ems.db_search_path import resolve_db_search_path  # noqa: E402
@@ -278,15 +274,9 @@ DATABASES = {
             "connect_timeout": 10,
             "sslmode": os.getenv("POSTGRES_SSLMODE", _default_pg_sslmode),
         },
-        # Return connections to the pool after each request (required with dj_db_conn_pool).
+        # Close the connection after each request. Neon’s pooler reuses the real DB connection.
         "CONN_MAX_AGE": 0,
         "DISABLE_SERVER_SIDE_CURSORS": True,
-        # "POOL_OPTIONS": {
-        #     "POOL_SIZE": DB_POOL_SIZE,
-        #     "MAX_OVERFLOW": DB_MAX_OVERFLOW,
-        #     "RECYCLE": DB_RECYCLE_SECONDS,
-        #     "timeout": DB_POOL_TIMEOUT,
-        # },
     }
 }
 
