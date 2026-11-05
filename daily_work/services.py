@@ -46,6 +46,15 @@ def can_manage_project(user, project: DailyProject) -> bool:
     return _role_key(user) in TEAM_LEAD_ROLES and project.team_lead_id == user.id
 
 
+def can_delete_project(user, project: DailyProject) -> bool:
+    """Only the project creator or MD may delete a project."""
+    if getattr(user, "is_superuser", False):
+        return True
+    if _role_key(user) == "md":
+        return True
+    return project.team_lead_id == user.id
+
+
 def display_name(user) -> str:
     profile = getattr(user, "accounts_profile", None)
     name = (getattr(profile, "Name", None) or "").strip()
@@ -197,7 +206,7 @@ def apply_assignments(project: DailyProject, employees, interns) -> None:
             row.save(update_fields=["member_type"])
 
 
-def assignment_payload(project: DailyProject) -> dict:
+def assignment_payload(project: DailyProject, viewer=None) -> dict:
     employee_ids = []
     intern_ids = []
     for row in project.assignments.all().order_by("user_id"):
@@ -205,7 +214,7 @@ def assignment_payload(project: DailyProject) -> dict:
             intern_ids.append(row.user_id)
         else:
             employee_ids.append(row.user_id)
-    return {
+    payload = {
         "project_id": project.id,
         "project_name": project.project_name,
         "project_description": project.project_description,
@@ -214,6 +223,9 @@ def assignment_payload(project: DailyProject) -> dict:
         "interns": intern_ids,
         "status": project.status,
     }
+    if viewer is not None:
+        payload["can_delete"] = can_delete_project(viewer, project)
+    return payload
 
 
 def user_is_assigned(project: DailyProject, user) -> bool:

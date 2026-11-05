@@ -17,6 +17,7 @@ from .models import DailyProject, DailyWorkReport, DailyWorkReportSeen
 from .services import (
     apply_assignments,
     assignment_payload,
+    can_delete_project,
     can_manage_any_project,
     can_manage_project,
     display_name,
@@ -128,6 +129,8 @@ def _reports_grouped_by_project(reports, viewer) -> list[dict]:
             groups[key] = {
                 "project_id": report.project_id,
                 "project_name": report.project.project_name,
+                "team_lead_id": report.project.team_lead_id,
+                "can_delete": can_delete_project(viewer, report.project),
                 "report_count": 0,
                 "unseen_count": 0,
                 "reports": [],
@@ -177,7 +180,8 @@ class ProjectListCreateView(APIView):
         if not is_team_lead_user(request.user):
             return Response([])
         projects = [
-            assignment_payload(project) for project in _projects_for_lead(request.user)
+            assignment_payload(project, viewer=request.user)
+            for project in _projects_for_lead(request.user)
         ]
         return Response(projects)
 
@@ -208,7 +212,10 @@ class ProjectListCreateView(APIView):
         except ValidationError as exc:
             return _error(_validation_message(exc))
         project = DailyProject.objects.prefetch_related("assignments").get(pk=project.pk)
-        return Response(assignment_payload(project), status=status.HTTP_201_CREATED)
+        return Response(
+            assignment_payload(project, viewer=request.user),
+            status=status.HTTP_201_CREATED,
+        )
 
 
 class ProjectDetailView(APIView):
@@ -222,7 +229,7 @@ class ProjectDetailView(APIView):
         )
         if not can_manage_project(request.user, project):
             return _error("You can only view projects you lead.", status.HTTP_403_FORBIDDEN)
-        return Response(assignment_payload(project))
+        return Response(assignment_payload(project, viewer=request.user))
 
     def patch(self, request, project_id):
         project = get_object_or_404(
@@ -258,7 +265,31 @@ class ProjectDetailView(APIView):
         except ValidationError as exc:
             return _error(_validation_message(exc))
         project = DailyProject.objects.prefetch_related("assignments").get(pk=project.pk)
-        return Response(assignment_payload(project))
+        return Response(assignment_payload(project, viewer=request.user))
+
+    def delete(self, request, project_id):
+        """Creator or MD only. Removes the project, its assignments, and its reports."""
+        project = get_object_or_404(DailyProject, pk=project_id)
+        if not can_delete_project(request.user, project):
+            return _error(
+                "Only the project creator or MD can delete this project.",
+                status.HTTP_403_FORBIDDEN,
+            )
+        project_name = project.project_name
+        with transaction.atomic():
+            # Reports PROTECT the project FK; clear them (seen rows CASCADE) first.
+            DailyWorkReport.objects.filter(project=project).delete()
+            project.delete()
+        return Response(
+            {
+                "success": True,
+                "deleted": True,
+                "project_id": project_id,
+                "project_name": project_name,
+                "message": "Project deleted.",
+            },
+            status=status.HTTP_200_OK,
+        )
 
 
 class MyProjectListView(APIView):
