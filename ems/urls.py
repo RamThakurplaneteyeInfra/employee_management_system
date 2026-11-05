@@ -64,6 +64,7 @@ urlpatterns = [
     # Tour advance requests (separate from eventsapi/tours/ team tours)
     path("api/tour-advance/", include("tour_advance.urls"), name="tour_advance_api"),
     path("api/certificates/", include("certificates.urls"), name="certificates_api"),
+    path("api/daily-work/", include("daily_work.urls"), name="daily_work_api"),
 ]
 
 if True:

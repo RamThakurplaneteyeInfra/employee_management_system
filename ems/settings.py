@@ -130,6 +130,7 @@ INSTALLED_APPS = [
     "asset_management.apps.AssetManagementConfig",
     "tour_advance",
     "certificates",
+    "daily_work",
 ]
 
 MIDDLEWARE = [
