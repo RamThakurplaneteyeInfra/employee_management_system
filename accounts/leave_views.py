@@ -1940,6 +1940,88 @@ class LeaveApplicationViewSet(ModelViewSet):
         serializer = self.get_serializer(page_qs, many=True)
         return _paginated_response(qs, serializer.data, limit, offset)
 
+    @action(
+        detail=False,
+        methods=["get"],
+        url_path="md-approvable-leaves",
+        permission_classes=[IsAuthenticated, IsMD],
+    )
+    def md_approvable_leaves(self, request):
+        """
+        MD only: pending leave requests MD can approve whose leave window is
+        today (present) or starts later (upcoming). Past-ended leaves are excluded.
+
+        GET /accounts/leave-applications/md-approvable-leaves/
+        Optional: ?date=YYYY-MM-DD (defaults to today in local timezone)
+        """
+        raw_date = (request.query_params.get("date") or "").strip()
+        if raw_date:
+            try:
+                as_of = datetime.strptime(raw_date, "%Y-%m-%d").date()
+            except ValueError:
+                return Response(
+                    {"detail": "date must be YYYY-MM-DD."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+        else:
+            as_of = timezone.localdate()
+
+        role = "MD"
+        base = self.get_queryset()
+        q = _approval_tab_filter_q(request.user, role, status="pending")
+        qs = (
+            base.filter(q)
+            .distinct()
+            .select_related(
+                "applicant__leave_summary",
+                "applicant__accounts_profile__Role",
+                "leave_type",
+                "team_lead",
+                "alternative",
+                "team_lead_approval",
+                "HR_approval",
+                "MD_approval",
+                "admin_approval",
+                "alternative_approval",
+            )
+            .order_by("start_date", "id")
+        )
+
+        present_rows = []
+        upcoming_rows = []
+        for row in qs:
+            end_date = _leave_end_date(row.start_date, row.duration_of_days)
+            if end_date < as_of:
+                continue
+            if row.start_date > as_of:
+                upcoming_rows.append(row)
+            else:
+                # Leave window includes today: start_date <= as_of <= end_date
+                present_rows.append(row)
+
+        present_data = self.get_serializer(present_rows, many=True).data
+        upcoming_data = self.get_serializer(upcoming_rows, many=True).data
+        for item in present_data:
+            item["bucket"] = "present"
+            item["can_approve"] = True
+        for item in upcoming_data:
+            item["bucket"] = "upcoming"
+            item["can_approve"] = True
+
+        present_count = len(present_data)
+        upcoming_count = len(upcoming_data)
+        return Response(
+            {
+                "success": True,
+                "as_of": as_of.isoformat(),
+                "count": present_count + upcoming_count,
+                "present_count": present_count,
+                "upcoming_count": upcoming_count,
+                "present": present_data,
+                "upcoming": upcoming_data,
+            }
+        )
+
     @action(detail=False, methods=["get"], url_path="on-leave")
     def on_leave(self, request):
         """
