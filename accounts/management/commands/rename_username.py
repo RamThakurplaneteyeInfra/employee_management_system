@@ -26,7 +26,8 @@ SELECT
     att.attname AS column_name,
     fnsp.nspname AS ref_schema,
     frel.relname AS ref_table,
-    fatt.attname AS ref_column
+    fatt.attname AS ref_column,
+    con.condeferrable AS is_deferrable
 FROM pg_constraint con
 JOIN pg_class rel ON rel.oid = con.conrelid
 JOIN pg_namespace nsp ON nsp.oid = rel.relnamespace
@@ -127,10 +128,16 @@ class Command(BaseCommand):
         if not planned:
             self.stdout.write("  (no matching rows besides the auth_user username itself)")
 
+        already_ok = [fk for fk in fks_to_touch if fk.get("is_deferrable")]
+        need_alter = [fk for fk in fks_to_touch if not fk.get("is_deferrable")]
         self.stdout.write(f"\nForeign keys to defer during rename: {len(fks_to_touch)}")
-        for fk in fks_to_touch:
+        self.stdout.write(
+            f"  already deferrable: {len(already_ok)}; "
+            f"need ALTER DEFERRABLE: {len(need_alter)}"
+        )
+        for fk in need_alter:
             self.stdout.write(
-                f"  {quote_table(fk['table_schema'], fk['table_name'])} "
+                f"  ALTER: {quote_table(fk['table_schema'], fk['table_name'])} "
                 f"{fk['constraint_name']}"
             )
 
@@ -140,8 +147,23 @@ class Command(BaseCommand):
             ))
             return
 
+        if need_alter:
+            self.stdout.write(self.style.WARNING(
+                "ALTER CONSTRAINT takes AccessExclusiveLock. "
+                "Using short lock_timeout so Neon cannot hang."
+            ))
+        else:
+            self.stdout.write(
+                "All FKs already deferrable — rename uses SET CONSTRAINTS only "
+                "(no exclusive ALTER locks)."
+            )
+
         with transaction.atomic():
             with connection.cursor() as cur:
+                # Fail fast instead of blocking the Neon pooler for minutes.
+                cur.execute("SET LOCAL lock_timeout = '2s'")
+                cur.execute("SET LOCAL statement_timeout = '30s'")
+
                 for old, _new in renames:
                     cur.execute(
                         "SELECT id FROM auth_user WHERE username = %s FOR UPDATE",
@@ -150,16 +172,24 @@ class Command(BaseCommand):
                     if not cur.fetchone():
                         raise CommandError(f"Lost lock on {old}; aborting.")
 
-                # Postgres cannot ADD CONSTRAINT after UPDATE on the same table
-                # in one transaction (pending trigger events). Defer FKs instead.
-                for fk in fks_to_touch:
+                # Only ALTER when a constraint is not yet deferrable. Re-running
+                # ALTER DEFERRABLE on every rename previously blocked Neon.
+                for fk in need_alter:
                     cur.execute(
                         f"ALTER TABLE {quote_table(fk['table_schema'], fk['table_name'])} "
                         f"ALTER CONSTRAINT {quote_ident(fk['constraint_name'])} "
                         f"DEFERRABLE"
                     )
+                    self.stdout.write(
+                        f"Made deferrable: "
+                        f"{quote_table(fk['table_schema'], fk['table_name'])}."
+                        f"{fk['constraint_name']}"
+                    )
                 cur.execute("SET CONSTRAINTS ALL DEFERRED")
-                self.stdout.write(f"Deferred {len(fks_to_touch)} foreign key(s)")
+                self.stdout.write(
+                    f"Deferred {len(fks_to_touch)} foreign key(s) "
+                    f"({len(need_alter)} altered)"
+                )
 
                 for old, new in renames:
                     cur.execute(

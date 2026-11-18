@@ -158,3 +158,76 @@ class CustomerPanelEntriesScoringTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.data["eligible"])
         self.assertEqual(response.data["total_points"], 10.0)
+
+
+class CustomerPanelAmountLogsPeriodTests(TestCase):
+    def setUp(self):
+        self.role = Roles.objects.create(role_name="Employee")
+        self.user = User.objects.create_user(username="cp_user", password="pass")
+        Profile.objects.create(
+            Employee_id=self.user,
+            Role=self.role,
+            Name="CP User",
+            Email_id="cp@test.com",
+        )
+        self.entry_a = CustomerPanelEntry.objects.create(
+            business_name="Acme",
+            client_name="Alice",
+            product="Solar",
+            division=CustomerPanelEntry.DIVISION_FARM,
+            total=Decimal("100000"),
+            created_by=self.user,
+        )
+        self.entry_b = CustomerPanelEntry.objects.create(
+            business_name="Beta",
+            client_name="Bob",
+            product="River",
+            division=CustomerPanelEntry.DIVISION_INFRA,
+            total=Decimal("50000"),
+            created_by=self.user,
+        )
+        CustomerPanelAmountLog.objects.create(
+            entry=self.entry_a,
+            amount=Decimal("40000"),
+            date=date(2026, 6, 10),
+            created_by=self.user,
+        )
+        CustomerPanelAmountLog.objects.create(
+            entry=self.entry_b,
+            amount=Decimal("15000"),
+            date=date(2026, 6, 20),
+            created_by=self.user,
+        )
+        # Outside range — must be excluded
+        CustomerPanelAmountLog.objects.create(
+            entry=self.entry_a,
+            amount=Decimal("99999"),
+            date=date(2026, 5, 1),
+            created_by=self.user,
+        )
+
+    def test_period_amount_logs_by_project(self):
+        from rest_framework.test import APIClient
+
+        client = APIClient()
+        client.force_authenticate(self.user)
+        response = client.get(
+            "/customerpanelapi/entries/amount-logs/"
+            "?start_date=2026-06-01&end_date=2026-06-30"
+        )
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["total_received"], 55000.0)
+        self.assertEqual(body["payment_count"], 2)
+        projects = {row["project"]: row["total_received"] for row in body["by_project"]}
+        self.assertEqual(projects["Solar"], 40000.0)
+        self.assertEqual(projects["River"], 15000.0)
+        self.assertEqual({log["project"] for log in body["logs"]}, {"Solar", "River"})
+
+    def test_period_requires_dates(self):
+        from rest_framework.test import APIClient
+
+        client = APIClient()
+        client.force_authenticate(self.user)
+        response = client.get("/customerpanelapi/entries/amount-logs/")
+        self.assertEqual(response.status_code, 400)

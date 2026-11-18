@@ -8,6 +8,7 @@ urlpatterns = [
     path("entries/points/", views.entries_points, name="customer_panel_entries_points"),
     path("entries/summary/", views.entries_summary, name="customer_panel_entries_summary"),
     path("entries/ledger/", views.entries_ledger, name="customer_panel_entries_ledger"),
+    path("entries/amount-logs/", views.amount_logs_period, name="customer_panel_amount_logs_period"),
     path("entries/<int:entry_id>/members/", views.entry_members, name="customer_panel_entry_members"),
     path("entries/<int:entry_id>/", views.detail_update_delete_entry, name="customer_panel_detail"),
     path("entries/<int:entry_id>/amount-logs/", views.amount_log_list_create, name="customer_panel_amount_log_list_create"),

@@ -1,4 +1,5 @@
 import json
+from datetime import datetime
 from decimal import Decimal, InvalidOperation
 
 from accounts.filters import _get_user_role_sync
@@ -151,6 +152,87 @@ def _amount_log_to_dict(obj: CustomerPanelAmountLog):
         "created_by_name": created_by_name,
         "created_at": gmt_to_ist_str(obj.created_at, "%d/%m/%Y %H:%M:%S") if obj.created_at else None,
         "updated_at": gmt_to_ist_str(obj.updated_at, "%d/%m/%Y %H:%M:%S") if obj.updated_at else None,
+    }
+
+
+def _parse_iso_date(raw, field_name):
+    if raw is None or (isinstance(raw, str) and not raw.strip()):
+        raise ValueError(f"{field_name} is required (YYYY-MM-DD)")
+    try:
+        return datetime.strptime(str(raw).strip(), "%Y-%m-%d").date()
+    except ValueError as exc:
+        raise ValueError(f"{field_name} must be YYYY-MM-DD") from exc
+
+
+def _amount_log_period_row(obj: CustomerPanelAmountLog):
+    """Payment row with customer/entry + project (entry.product) for period reports."""
+    base = _amount_log_to_dict(obj)
+    entry = obj.entry
+    project = entry.product
+    base.update(
+        {
+            "business_name": entry.business_name,
+            "client_name": entry.client_name,
+            "serial_no": entry.serial_no,
+            "division": entry.division,
+            "service": entry.service,
+            "product": project,
+            "project": project,
+            "entry_total": float(entry.total) if entry.total is not None else None,
+        }
+    )
+    return base
+
+
+def _amount_logs_period_sync(user, start_date, end_date):
+    """
+    All amount logs (payments) in [start_date, end_date] across accessible entries.
+    Admin/MD: every customer entry. Others: creator or member entries only.
+    """
+    entry_qs = _entries_queryset_for_user(user)
+    entry_ids = entry_qs.values("id")
+    logs = (
+        CustomerPanelAmountLog.objects.filter(
+            entry_id__in=entry_ids,
+            date__gte=start_date,
+            date__lte=end_date,
+        )
+        .select_related(
+            "entry",
+            "created_by",
+            "created_by__accounts_profile",
+        )
+        .order_by("-date", "-created_at")
+    )
+
+    zero = Value(Decimal("0"), output_field=DecimalField())
+    total_received = logs.aggregate(total=Coalesce(Sum("amount"), zero))["total"] or Decimal("0")
+
+    by_project_qs = (
+        logs.values("entry__product")
+        .annotate(
+            total_received=Coalesce(Sum("amount"), zero),
+            payment_count=Count("id"),
+        )
+        .order_by("-total_received")
+    )
+    by_project = [
+        {
+            "project": row["entry__product"],
+            "product": row["entry__product"],
+            "total_received": float(row["total_received"] or 0),
+            "payment_count": row["payment_count"] or 0,
+        }
+        for row in by_project_qs
+    ]
+
+    return {
+        "start_date": start_date.isoformat(),
+        "end_date": end_date.isoformat(),
+        "total_received": float(total_received),
+        "payment_count": logs.count(),
+        "by_project": by_project,
+        "logs": [_amount_log_period_row(obj) for obj in logs],
     }
 
 
@@ -427,6 +509,33 @@ async def entries_ledger(request: HttpRequest):
         division_filter=division or None,
     )
     return JsonResponse(data, safe=False, status=status.HTTP_200_OK)
+
+
+@csrf_exempt
+@login_required
+async def amount_logs_period(request: HttpRequest):
+    """
+    GET /customerpanelapi/entries/amount-logs/?start_date=YYYY-MM-DD&end_date=YYYY-MM-DD
+
+    Payments (amount logs) across customer entries in the date range, including
+    which project (entry.product) each payment belongs to.
+    """
+    if request.method != "GET":
+        return JsonResponse({"error": "Method not allowed"}, status=status.HTTP_405_METHOD_NOT_ALLOWED)
+    if verifyGet(request):
+        return verifyGet(request)
+    try:
+        start_date = _parse_iso_date(request.GET.get("start_date"), "start_date")
+        end_date = _parse_iso_date(request.GET.get("end_date"), "end_date")
+    except ValueError as e:
+        return JsonResponse({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+    if end_date < start_date:
+        return JsonResponse(
+            {"error": "end_date must be on or after start_date"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    data = await sync_to_async(_amount_logs_period_sync)(request.user, start_date, end_date)
+    return JsonResponse(data, status=status.HTTP_200_OK)
 
 
 @csrf_exempt
