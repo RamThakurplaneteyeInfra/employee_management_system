@@ -129,23 +129,20 @@ class LeaveNotificationFlowTests(TestCase):
             format="json",
         )
 
-    def test_sequential_create_with_alternative_only_alt_pending(self):
+    def test_parallel_create_opens_alternative_tl_hr_md(self):
         app = self._create_regular_leave_with_alternative()
         app.refresh_from_db()
         self.assertEqual(app.alternative_approval.name, "Pending")
-        self.assertIsNone(app.team_lead_approval_id)
-        self.assertIsNone(app.HR_approval_id)
-        self.assertIsNone(app.MD_approval_id)
+        self.assertEqual(app.team_lead_approval.name, "Pending")
+        self.assertEqual(app.HR_approval.name, "Pending")
+        self.assertEqual(app.MD_approval.name, "Pending")
 
-    def test_hr_blocked_until_alternative_and_team_lead_approve(self):
+    def test_hr_and_md_can_act_in_parallel_on_apply(self):
         app = self._create_regular_leave_with_alternative()
-        blocked = self._approve_hr(app)
-        self.assertEqual(blocked.status_code, 400, blocked.data)
-        self._approve_alternative(app)
-        still_blocked = self._approve_hr(app)
-        self.assertEqual(still_blocked.status_code, 400, still_blocked.data)
-        ok = self._approve_team_lead(app)
-        self.assertEqual(ok.status_code, 200, ok.data)
+        hr_ok = self._approve_hr(app)
+        self.assertEqual(hr_ok.status_code, 200, hr_ok.data)
+        md_ok = self._approve_md(app)
+        self.assertEqual(md_ok.status_code, 200, md_ok.data)
 
     def test_submission_notifies_alternative_once(self):
         self._create_regular_leave_with_alternative()
@@ -257,19 +254,14 @@ class LeaveNotificationFlowTests(TestCase):
                 return row
         return None
 
-    def test_approval_pending_tab_shows_only_when_users_turn(self):
+    def test_approval_pending_tab_shows_all_rails_on_apply(self):
         app = self._create_regular_leave_with_alternative()
         app_id = app.id
 
         self.assertIn(app_id, self._approval_ids_for(self.alt, status="pending"))
-        self.assertNotIn(app_id, self._approval_ids_for(self.tl, status="pending"))
-        self.assertNotIn(app_id, self._approval_ids_for(self.hr, status="pending"))
-        self.assertNotIn(app_id, self._approval_ids_for(self.md, status="pending"))
-
-        self._approve_alternative(app)
         self.assertIn(app_id, self._approval_ids_for(self.tl, status="pending"))
-        self.assertNotIn(app_id, self._approval_ids_for(self.hr, status="pending"))
-        self.assertNotIn(app_id, self._approval_ids_for(self.md, status="pending"))
+        self.assertIn(app_id, self._approval_ids_for(self.hr, status="pending"))
+        self.assertIn(app_id, self._approval_ids_for(self.md, status="pending"))
 
         self._approve_team_lead(app)
         self.assertNotIn(app_id, self._approval_ids_for(self.tl, status="pending"))
@@ -280,19 +272,14 @@ class LeaveNotificationFlowTests(TestCase):
         self.assertNotIn(app_id, self._approval_ids_for(self.hr, status="pending"))
         self.assertIn(app_id, self._approval_ids_for(self.md, status="pending"))
 
-    def test_approval_all_sequential_first_show(self):
+    def test_approval_all_shows_all_rails_on_apply(self):
         app = self._create_regular_leave_with_alternative()
         app_id = app.id
 
         self.assertIn(app_id, self._approval_ids_for(self.alt))
-        self.assertNotIn(app_id, self._approval_ids_for(self.tl))
-        self.assertNotIn(app_id, self._approval_ids_for(self.hr))
-        self.assertNotIn(app_id, self._approval_ids_for(self.md))
-
-        self._approve_alternative(app)
         self.assertIn(app_id, self._approval_ids_for(self.tl))
-        self.assertNotIn(app_id, self._approval_ids_for(self.hr))
-        self.assertNotIn(app_id, self._approval_ids_for(self.md))
+        self.assertIn(app_id, self._approval_ids_for(self.hr))
+        self.assertIn(app_id, self._approval_ids_for(self.md))
 
         self._approve_team_lead(app)
         self.assertIn(app_id, self._approval_ids_for(self.tl))

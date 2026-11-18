@@ -137,20 +137,65 @@ def _users_by_role_names(role_names: Iterable[str]) -> list[User]:
 
 
 def notify_alternative_on_submission(instance: LeaveApplicationData) -> None:
-    """Applicant submits leave; notify designated alternative if present."""
-    if not _is_regular_leave(instance):
+    """
+    Applicant submits leave; notify alternative, team lead, HR, and MD together.
+    (Name kept for call-site compatibility.)
+    """
+    if bool(getattr(instance, "is_emergency", False)):
         return
-    if not instance.alternative_id:
+    leave_type_name = getattr(getattr(instance, "leave_type", None), "name", "") or ""
+    if leave_type_name == "Menstrual":
         return
+
     applicant_name = _display_name(instance.applicant) or "An employee"
-    msg = f"{applicant_name} requested leave and selected you as alternative."
-    send_leave_notification(
-        to_user=instance.alternative,
-        from_user=instance.applicant,
-        type_name=TYPE_SUBMITTED_ALT,
-        title="Leave cover request",
-        message=msg,
-    )
+    from_user = instance.applicant
+
+    if instance.alternative_id:
+        send_leave_notification(
+            to_user=instance.alternative,
+            from_user=from_user,
+            type_name=TYPE_SUBMITTED_ALT,
+            title="Leave cover request",
+            message=f"{applicant_name} requested leave and selected you as alternative.",
+        )
+
+    if instance.team_lead_id and instance.team_lead_approval_id:
+        send_leave_notification(
+            to_user=instance.team_lead,
+            from_user=from_user,
+            type_name=TYPE_SUBMITTED_ALT,
+            title="Leave needs team lead approval",
+            message=f"{applicant_name} requested leave. Please review.",
+        )
+
+    if instance.HR_approval_id:
+        for recipient in _users_by_role_names(["HR", "Hr"]):
+            send_leave_notification(
+                to_user=recipient,
+                from_user=from_user,
+                type_name=TYPE_SUBMITTED_ALT,
+                title="Leave needs HR approval",
+                message=f"{applicant_name} requested leave. Please review.",
+            )
+
+    md_status = getattr(getattr(instance, "MD_approval", None), "name", None)
+    if instance.MD_approval_id and md_status in (None, "Pending"):
+        # MD_approval may still be cached as None after setting MD_approval_id.
+        if md_status is None:
+            try:
+                instance.refresh_from_db(fields=["MD_approval"])
+                md_status = getattr(getattr(instance, "MD_approval", None), "name", None)
+            except Exception:
+                md_status = "Pending"
+        if md_status == "Pending":
+            for recipient in _users_by_role_names(["MD"]):
+                send_leave_notification(
+                    to_user=recipient,
+                    from_user=from_user,
+                    type_name=TYPE_SUBMITTED_ALT,
+                    title="Leave needs MD approval",
+                    message=f"{applicant_name} requested leave. Please review.",
+                )
 
 
 def notify_after_alternative_approved(instance: LeaveApplicationData, acting_user: User) -> None:
