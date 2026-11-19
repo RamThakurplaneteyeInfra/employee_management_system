@@ -32,3 +32,4 @@ GET responses are cached in Redis (same instance as WebSocket channels) to reduc
 ## Adding new models
 
 To invalidate cache when a new model is created/updated, register it in `ems/cache_invalidation.py`: add the model to `models_to_watch` and, if the app is new, add an entry to `PREFIXES_BY_APP`.
+--
