@@ -218,11 +218,22 @@ class CustomerPanelAmountLogsPeriodTests(TestCase):
         self.assertEqual(response.status_code, 200)
         body = response.json()
         self.assertEqual(body["total_received"], 55000.0)
+        self.assertEqual(body["total_amount"], 150000.0)
+        # All-time paid on entries that appear in the period (includes May log on Acme).
+        self.assertEqual(body["paid"], 154999.0)
+        self.assertEqual(body["remaining"], -4999.0)
         self.assertEqual(body["payment_count"], 2)
         projects = {row["project"]: row["total_received"] for row in body["by_project"]}
         self.assertEqual(projects["Solar"], 40000.0)
         self.assertEqual(projects["River"], 15000.0)
         self.assertEqual({log["project"] for log in body["logs"]}, {"Solar", "River"})
+        by_project_log = {log["project"]: log for log in body["logs"]}
+        self.assertEqual(by_project_log["Solar"]["total"], 100000.0)
+        self.assertEqual(by_project_log["Solar"]["paid"], 139999.0)
+        self.assertEqual(by_project_log["Solar"]["remaining"], -39999.0)
+        self.assertEqual(by_project_log["River"]["total"], 50000.0)
+        self.assertEqual(by_project_log["River"]["paid"], 15000.0)
+        self.assertEqual(by_project_log["River"]["remaining"], 35000.0)
 
     def test_period_requires_dates(self):
         from rest_framework.test import APIClient

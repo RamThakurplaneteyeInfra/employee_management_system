@@ -164,11 +164,16 @@ def _parse_iso_date(raw, field_name):
         raise ValueError(f"{field_name} must be YYYY-MM-DD") from exc
 
 
-def _amount_log_period_row(obj: CustomerPanelAmountLog):
+def _amount_log_period_row(obj: CustomerPanelAmountLog, *, paid: Decimal):
     """Payment row with customer/entry + project (entry.product) for period reports."""
     base = _amount_log_to_dict(obj)
     entry = obj.entry
     project = entry.product
+    total = entry.total if entry.total is not None else Decimal("0")
+    paid = paid or Decimal("0")
+    remaining = total - paid
+    total_f = float(total)
+    paid_f = float(paid)
     base.update(
         {
             "business_name": entry.business_name,
@@ -178,7 +183,11 @@ def _amount_log_period_row(obj: CustomerPanelAmountLog):
             "service": entry.service,
             "product": project,
             "project": project,
-            "entry_total": float(entry.total) if entry.total is not None else None,
+            "entry_total": total_f,
+            "total": total_f,
+            "total_received": paid_f,
+            "paid": paid_f,
+            "remaining": float(remaining),
         }
     )
     return base
@@ -188,10 +197,13 @@ def _amount_logs_period_sync(user, start_date, end_date):
     """
     All amount logs (payments) in [start_date, end_date] across accessible entries.
     Admin/MD: every customer entry. Others: creator or member entries only.
+
+    Per log: entry total / all-time paid / remaining (ledger-style).
+    Top-level: period total_received, plus total_amount/remaining for unique entries in the period.
     """
     entry_qs = _entries_queryset_for_user(user)
     entry_ids = entry_qs.values("id")
-    logs = (
+    logs_qs = (
         CustomerPanelAmountLog.objects.filter(
             entry_id__in=entry_ids,
             date__gte=start_date,
@@ -206,10 +218,22 @@ def _amount_logs_period_sync(user, start_date, end_date):
     )
 
     zero = Value(Decimal("0"), output_field=DecimalField())
-    total_received = logs.aggregate(total=Coalesce(Sum("amount"), zero))["total"] or Decimal("0")
+    period_received = logs_qs.aggregate(total=Coalesce(Sum("amount"), zero))["total"] or Decimal("0")
+
+    log_list = list(logs_qs)
+    touched_entry_ids = {obj.entry_id for obj in log_list}
+
+    paid_by_entry = {
+        row["entry_id"]: row["paid"] or Decimal("0")
+        for row in (
+            CustomerPanelAmountLog.objects.filter(entry_id__in=touched_entry_ids)
+            .values("entry_id")
+            .annotate(paid=Coalesce(Sum("amount"), zero))
+        )
+    }
 
     by_project_qs = (
-        logs.values("entry__product")
+        logs_qs.values("entry__product")
         .annotate(
             total_received=Coalesce(Sum("amount"), zero),
             payment_count=Count("id"),
@@ -226,13 +250,29 @@ def _amount_logs_period_sync(user, start_date, end_date):
         for row in by_project_qs
     ]
 
+    rows = []
+    seen_entries = set()
+    total_amount = Decimal("0")
+    total_paid_all_time = Decimal("0")
+    for obj in log_list:
+        entry_paid = paid_by_entry.get(obj.entry_id, Decimal("0"))
+        rows.append(_amount_log_period_row(obj, paid=entry_paid))
+        if obj.entry_id not in seen_entries:
+            seen_entries.add(obj.entry_id)
+            entry_total = obj.entry.total if obj.entry.total is not None else Decimal("0")
+            total_amount += entry_total
+            total_paid_all_time += entry_paid
+
     return {
         "start_date": start_date.isoformat(),
         "end_date": end_date.isoformat(),
-        "total_received": float(total_received),
-        "payment_count": logs.count(),
+        "total_amount": float(total_amount),
+        "total_received": float(period_received),
+        "paid": float(total_paid_all_time),
+        "remaining": float(total_amount - total_paid_all_time),
+        "payment_count": len(log_list),
         "by_project": by_project,
-        "logs": [_amount_log_period_row(obj) for obj in logs],
+        "logs": rows,
     }
 
 
