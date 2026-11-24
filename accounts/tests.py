@@ -144,6 +144,24 @@ class LeaveNotificationFlowTests(TestCase):
         md_ok = self._approve_md(app)
         self.assertEqual(md_ok.status_code, 200, md_ok.data)
 
+    def test_md_approval_auto_approves_hr(self):
+        app = self._create_regular_leave_with_alternative()
+        self.assertEqual(app.HR_approval.name, "Pending")
+        response = self._approve_md(app)
+        self.assertEqual(response.status_code, 200, response.data)
+        app.refresh_from_db()
+        self.assertEqual(app.MD_approval.name, "Approved")
+        self.assertEqual(app.HR_approval.name, "Approved")
+        # Auto-HR from MD must not send the HR→MD review notification.
+        hr_to_md = Notification.objects.filter(
+            receipient=self.md, type_of_notification__type_name="Leave_HR_Approved"
+        )
+        self.assertEqual(hr_to_md.count(), 0)
+        final = Notification.objects.filter(
+            receipient=self.emp, type_of_notification__type_name="Leave_Final_Approved"
+        )
+        self.assertEqual(final.count(), 1)
+
     def test_submission_notifies_alternative_once(self):
         self._create_regular_leave_with_alternative()
         qs = Notification.objects.filter(receipient=self.alt)

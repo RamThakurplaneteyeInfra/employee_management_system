@@ -1318,6 +1318,18 @@ class LeaveApplicationViewSet(ModelViewSet):
             approval_updates["MD_approval"] = md_status
             if md_status and md_status.name == "Approved":
                 approval_updates["approved_by_MD_at"] = timezone.now()
+                # MD is final: if the HR rail is open, mark HR approved as well
+                # so the request does not stay Pending on HR after MD signs off.
+                if instance.HR_approval_id is not None or "HR_approval" in approval_updates:
+                    hr_name = getattr(
+                        approval_updates.get("HR_approval", instance.HR_approval),
+                        "name",
+                        None,
+                    )
+                    if hr_name != "Approved":
+                        approved_status = _get_leave_status_map().get("Approved")
+                        if approved_status is not None:
+                            approval_updates["HR_approval"] = approved_status
 
         is_alternative = bool(instance.alternative_id and user.id == instance.alternative_id)
         if "alternative_approval" in validated_data:
@@ -1444,11 +1456,13 @@ class LeaveApplicationViewSet(ModelViewSet):
 
         new_hr_name = getattr(getattr(instance, "HR_approval", None), "name", None)
         old_hr_name = getattr(old_hr_ap, "name", None) if old_hr_ap else None
-        if new_hr_name == "Approved" and old_hr_name != "Approved":
+        new_md_name = getattr(getattr(instance, "MD_approval", None), "name", None)
+        md_just_approved = new_md_name == "Approved" and not old_md_approved
+        if new_hr_name == "Approved" and old_hr_name != "Approved" and not md_just_approved:
+            # Skip when HR was auto-approved because MD just signed off.
             notify_md_after_hr_approved(instance, user)
 
-        new_md_name = getattr(getattr(instance, "MD_approval", None), "name", None)
-        if new_md_name == "Approved" and not old_md_approved:
+        if md_just_approved:
             notify_applicant_final_approval(instance, user)
 
     def destroy(self, request, *args, **kwargs):
