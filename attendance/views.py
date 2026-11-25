@@ -213,14 +213,8 @@ def daily_fixed_roster(request):
     Proxies the external all-employees roster for one date:
       {ATTENDANCE_API_URL}/api/v1/attendance/daily-fixed?date=YYYY-MM-DD
 
-    MD / Admin / HR / superuser only. Leaves monthly / me / daily handlers unchanged.
+    Any authenticated user. Leaves monthly / me / daily handlers unchanged.
     """
-    if not _has_full_access(request.user):
-        return Response(
-            {"detail": "Only MD, Admin, or HR can view the daily attendance roster."},
-            status=status.HTTP_403_FORBIDDEN,
-        )
-
     date_str = (request.query_params.get("date") or "").strip()
     if not date_str:
         date_str = _date.today().isoformat()
