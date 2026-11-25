@@ -187,6 +187,94 @@ def _extract_daily_record(payload, target_date: str) -> dict | None:
     return None
 
 
+def _proxy_error_response(exc):
+    if isinstance(exc, http_requests.ConnectionError):
+        return Response(
+            {"detail": "Attendance service is unreachable."},
+            status=status.HTTP_502_BAD_GATEWAY,
+        )
+    if isinstance(exc, http_requests.Timeout):
+        return Response(
+            {"detail": "Attendance service timed out."},
+            status=status.HTTP_504_GATEWAY_TIMEOUT,
+        )
+    return Response(
+        {"detail": f"Attendance service error: {exc}"},
+        status=status.HTTP_502_BAD_GATEWAY,
+    )
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def daily_fixed_roster(request):
+    """
+    GET /api/v1/attendance/daily-fixed/?date=YYYY-MM-DD
+
+    Proxies the external all-employees roster for one date:
+      {ATTENDANCE_API_URL}/api/v1/attendance/daily-fixed?date=YYYY-MM-DD
+
+    MD / Admin / HR / superuser only. Leaves monthly / me / daily handlers unchanged.
+    """
+    if not _has_full_access(request.user):
+        return Response(
+            {"detail": "Only MD, Admin, or HR can view the daily attendance roster."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    date_str = (request.query_params.get("date") or "").strip()
+    if not date_str:
+        date_str = _date.today().isoformat()
+
+    if len(date_str) < 10 or date_str[4] != "-" or date_str[7] != "-":
+        return Response(
+            {"detail": "date must be in YYYY-MM-DD format."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    date_str = date_str[:10]
+
+    if not _EXT_BASE:
+        return Response(
+            {"detail": "Attendance service URL is not configured."},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+
+    try:
+        resp = http_requests.get(
+            f"{_EXT_BASE}/api/v1/attendance/daily-fixed",
+            headers=_ext_headers(),
+            params={"date": date_str},
+            timeout=30,
+        )
+        try:
+            payload = resp.json()
+        except ValueError:
+            return Response(
+                {"detail": "Attendance service returned non-JSON response."},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+        if resp.status_code >= 400:
+            return Response(payload, status=resp.status_code)
+
+        # Keep external shape; add counts for dashboards without breaking employees[].
+        if isinstance(payload, dict) and isinstance(payload.get("employees"), list):
+            employees = payload["employees"]
+            present = sum(
+                1
+                for e in employees
+                if isinstance(e, dict) and e.get("punch_in") not in (None, "")
+            )
+            payload = {
+                **payload,
+                "date": payload.get("date") or date_str,
+                "present_count": present,
+                "absent_count": max(len(employees) - present, 0),
+                "employee_count": len(employees),
+            }
+        return Response(payload, status=status.HTTP_200_OK)
+    except Exception as exc:
+        return _proxy_error_response(exc)
+
+
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def daily_attendance(request):
