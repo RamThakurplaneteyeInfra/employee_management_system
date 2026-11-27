@@ -42,6 +42,11 @@ class NotificationSerializer(serializers.ModelSerializer):
         )
         
     def get_notification_type(self, obj):
-        """Return the full notification type name (from related notification_type), not the id."""
+        """Return type name; for Group_message include group as Group_message(name)."""
         nt = getattr(obj, "type_of_notification", None)
-        return getattr(nt, "type_name", None) if nt else None
+        type_name = getattr(nt, "type_name", None) if nt else None
+        if type_name == "Group_message":
+            group_name = (getattr(obj, "group_name", None) or "").strip()
+            if group_name:
+                return f"Group_message({group_name})"
+        return type_name

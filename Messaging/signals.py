@@ -52,6 +52,7 @@ def _create_notification_for_groupmessage_sync(sender, instance: GroupMessages, 
                     receipient=m.participant,
                     message=instance.content,
                     type_of_notification=nt,
+                    group_name=group_name,
                 )
                 extra_time = gmt_to_ist_str(notification_obj.created_at, "%d/%m/%Y, %H:%M:%S")
             else:

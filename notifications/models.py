@@ -18,6 +18,7 @@ class Notification(models.Model):
     from_user=models.ForeignKey(User,on_delete=models.CASCADE,to_field="username",related_name="notification_sender",null=True,blank=True)
     receipient= models.ForeignKey(User, on_delete=models.CASCADE,to_field="username",related_name="notification_receiver",null=True,blank=True)
     message = models.TextField(max_length=100)
+    group_name = models.CharField(max_length=255, null=True, blank=True)
     is_read = models.BooleanField(default=False)
     # is_read = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
